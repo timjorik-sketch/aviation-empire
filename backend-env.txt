@@ -1,0 +1,4 @@
+PORT=3001
+JWT_SECRET=aviation-empire-super-secret-key-change-in-production-abc123xyz789
+NODE_ENV=development
+DATABASE_PATH=./data/aviation-empire.db

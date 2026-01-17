@@ -43,4 +43,3 @@ CREATE TABLE IF NOT EXISTS airports (
 );
 
 CREATE INDEX IF NOT EXISTS idx_airlines_user ON airlines(user_id);
-b

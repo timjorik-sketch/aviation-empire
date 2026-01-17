@@ -1,23 +1,53 @@
-import { useState, useEffect } from 'react'
-import axios from 'axios'
-import './App.css'
+import { useState, useEffect } from 'react';
+import Login from './pages/Login';
+import Register from './pages/Register';
+import './App.css';
 
 function App() {
-  const [apiStatus, setApiStatus] = useState('Checking...')
-  const [apiMessage, setApiMessage] = useState('')
+  const [user, setUser] = useState(null);
+  const [showRegister, setShowRegister] = useState(false);
 
   useEffect(() => {
-    axios.get('https://glorious-lamp-jjvxpgvv9gj4c57vg-3001.app.github.dev/')
-      .then(response => {
-        setApiStatus('✅ Connected')
-        setApiMessage(response.data.message)
-      })
-      .catch(error => {
-        setApiStatus('❌ Offline')
-        setApiMessage('Backend nicht erreichbar')
-      })
-  }, [])
+    // Check if user is already logged in
+    const savedUser = localStorage.getItem('user');
+    if (savedUser) {
+      setUser(JSON.parse(savedUser));
+    }
+  }, []);
 
+  const handleLogin = (userData) => {
+    setUser(userData);
+  };
+
+  const handleRegister = (userData) => {
+    setUser(userData);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setUser(null);
+  };
+
+  // If not logged in, show auth screens
+  if (!user) {
+    if (showRegister) {
+      return (
+        <Register
+          onRegister={handleRegister}
+          onSwitchToLogin={() => setShowRegister(false)}
+        />
+      );
+    }
+    return (
+      <Login
+        onLogin={handleLogin}
+        onSwitchToRegister={() => setShowRegister(true)}
+      />
+    );
+  }
+
+  // If logged in, show dashboard
   return (
     <div className="app">
       <div className="container">
@@ -26,38 +56,27 @@ function App() {
           <p className="subtitle">Multiplayer Airline Simulation</p>
         </div>
 
-        <div className="status-card">
-          <h2>Backend Status</h2>
-          <div className="status">
-            <span className="label">API:</span>
-            <span className="value">{apiStatus}</span>
-          </div>
-          <div className="message">{apiMessage}</div>
+        <div className="welcome-card">
+          <h2>Welcome, {user.username}! 🎉</h2>
+          <p>You are successfully logged in!</p>
+          <button onClick={handleLogout} className="btn-logout">
+            Logout
+          </button>
         </div>
 
         <div className="info-card">
-          <h3>🎮 Game Features</h3>
+          <h3>🎮 Next Steps</h3>
           <ul>
-            <li>✈️ Gründe deine eigene Airline</li>
-            <li>🛫 Kaufe Flugzeuge</li>
-            <li>🗺️ Erstelle Routen weltweit</li>
-            <li>📊 Manage deine Finanzen</li>
-            <li>🏆 Level-System (1-30)</li>
-            <li>💰 Startkapital: 50 Millionen USD</li>
+            <li>✈️ Create your first airline</li>
+            <li>🛩️ Buy aircraft</li>
+            <li>🗺️ Plan routes worldwide</li>
+            <li>💰 Manage your finances</li>
+            <li>🏆 Climb the leaderboard</li>
           </ul>
-        </div>
-
-        <div className="buttons">
-          <button className="btn-primary">Login</button>
-          <button className="btn-secondary">Register</button>
-        </div>
-
-        <div className="footer">
-          <p>Version 1.0.0 - MVP</p>
         </div>
       </div>
     </div>
-  )
+  );
 }
 
-export default App
+export default App;

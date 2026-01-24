@@ -2,16 +2,9 @@ import express from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { body, validationResult } from 'express-validator';
-import { initDatabase, saveDatabase } from '../database/db.js';
+import { getDatabase, saveDatabase } from '../database/db.js';
 
 const router = express.Router();
-
-let db = null;
-
-// Initialize database connection
-(async () => {
-  db = await initDatabase();
-})();
 
 // Register
 router.post('/register',
@@ -26,10 +19,15 @@ router.post('/register',
       }
 
       const { email, username, password } = req.body;
+      const db = getDatabase();
 
       // Check if user exists
-      const existingUser = db.exec('SELECT * FROM users WHERE email = ? OR username = ?', [email, username]);
-      if (existingUser.length > 0 && existingUser[0].values.length > 0) {
+      const checkStmt = db.prepare('SELECT * FROM users WHERE email = ? OR username = ?');
+      checkStmt.bind([email, username]);
+      const userExists = checkStmt.step();
+      checkStmt.free();
+
+      if (userExists) {
         return res.status(400).json({ error: 'User already exists' });
       }
 
@@ -37,9 +35,12 @@ router.post('/register',
       const passwordHash = await bcrypt.hash(password, 10);
 
       // Insert user
-      db.run('INSERT INTO users (email, username, password_hash) VALUES (?, ?, ?)', [email, username, passwordHash]);
+      const insertStmt = db.prepare('INSERT INTO users (email, username, password_hash) VALUES (?, ?, ?)');
+      insertStmt.bind([email, username, passwordHash]);
+      insertStmt.step();
+      insertStmt.free();
       saveDatabase();
-      
+
       const result = db.exec('SELECT last_insert_rowid() as id');
       const userId = result[0].values[0][0];
 
@@ -74,14 +75,20 @@ router.post('/login',
       }
 
       const { username, password } = req.body;
+      const db = getDatabase();
 
       // Find user
-      const userResult = db.exec('SELECT * FROM users WHERE username = ? OR email = ?', [username, username]);
-      if (userResult.length === 0 || userResult[0].values.length === 0) {
+      const findStmt = db.prepare('SELECT * FROM users WHERE username = ? OR email = ?');
+      findStmt.bind([username, username]);
+
+      if (!findStmt.step()) {
+        findStmt.free();
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      const userRow = userResult[0].values[0];
+      const userRow = findStmt.get();
+      findStmt.free();
+
       const user = {
         id: userRow[0],
         email: userRow[1],
@@ -96,7 +103,10 @@ router.post('/login',
       }
 
       // Update last login
-      db.run('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?', [user.id]);
+      const updateStmt = db.prepare('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?');
+      updateStmt.bind([user.id]);
+      updateStmt.step();
+      updateStmt.free();
       saveDatabase();
 
       // Generate token

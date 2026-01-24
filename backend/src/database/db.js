@@ -44,8 +44,11 @@ function saveDatabase() {
   }
 }
 
+function getDatabase() {
+  return db;
+}
+
 // Auto-save every 5 seconds
 setInterval(saveDatabase, 5000);
 
-export { initDatabase, saveDatabase };
-export default db;
+export { initDatabase, saveDatabase, getDatabase };

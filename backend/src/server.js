@@ -10,7 +10,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors({
-  origin: 'https://glorious-lamp-jjvxpgvv9gj4c57vg-5173.app.github.dev',
+  origin: true,
   credentials: true
 }));
 app.use(express.json());

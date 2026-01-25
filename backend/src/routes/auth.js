@@ -39,10 +39,14 @@ router.post('/register',
       insertStmt.bind([email, username, passwordHash]);
       insertStmt.step();
       insertStmt.free();
-      saveDatabase();
 
-      const result = db.exec('SELECT last_insert_rowid() as id');
-      const userId = result[0].values[0][0];
+      // Get the created user's ID
+      const getUserStmt = db.prepare('SELECT id FROM users WHERE email = ?');
+      getUserStmt.bind([email]);
+      getUserStmt.step();
+      const userId = getUserStmt.get()[0];
+      getUserStmt.free();
+      saveDatabase();
 
       // Generate token
       const token = jwt.sign(
@@ -109,6 +113,8 @@ router.post('/login',
       updateStmt.free();
       saveDatabase();
 
+
+      
       // Generate token
       const token = jwt.sign(
         { userId: user.id, username: user.username },

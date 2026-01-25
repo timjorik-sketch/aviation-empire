@@ -13,7 +13,7 @@ let db = null;
 
 async function initDatabase() {
   const SQL = await initSqlJs();
-  
+
   // Check if database exists
   if (fs.existsSync(DB_PATH)) {
     const buffer = fs.readFileSync(DB_PATH);
@@ -22,18 +22,15 @@ async function initDatabase() {
   } else {
     // Create new database
     db = new SQL.Database();
-    
-    // Execute schema
-    const schema = fs.readFileSync(SCHEMA_PATH, 'utf-8');
-    db.exec(schema);
-    
-    // Save to file
-    const data = db.export();
-    fs.writeFileSync(DB_PATH, data);
-    
-    console.log('✅ Database created and schema initialized');
+    console.log('✅ Database created');
   }
-  
+
+  // Always run schema (uses IF NOT EXISTS and INSERT OR IGNORE)
+  const schema = fs.readFileSync(SCHEMA_PATH, 'utf-8');
+  db.exec(schema);
+  saveDatabase();
+  console.log('✅ Schema and seed data applied');
+
   return db;
 }
 

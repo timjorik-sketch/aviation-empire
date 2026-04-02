@@ -1,13 +1,25 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { initDatabase } from './database/db.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { initDatabase, saveDatabase } from './database/db.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import authRoutes from './routes/auth.js';
 import airlineRoutes from './routes/airline.js';
-import aircraftRoutes from './routes/aircraft.js';
+import aircraftRoutes, { startMarketRefreshScheduler } from './routes/aircraft.js';
 import routesRoutes from './routes/routes.js';
 import flightsRoutes, { startFlightProcessor } from './routes/flights.js';
 import financesRoutes from './routes/finances.js';
+import serviceProfilesRoutes from './routes/serviceProfiles.js';
+import maintenanceRoutes from './routes/maintenance.js';
+import airportsRoutes from './routes/airports.js';
+import cabinProfilesRoutes from './routes/cabinProfiles.js';
+import destinationsRoutes from './routes/destinations.js';
+import personnelRoutes, { startPayrollProcessor } from './routes/personnel.js';
+import expansionsRoutes from './routes/expansions.js';
+import marketAnalysesRouter, { startMarketAnalysesProcessor } from './routes/marketAnalyses.js';
 
 dotenv.config();
 
@@ -19,12 +31,25 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+app.use(express.static(path.join(__dirname, '../public')));
 app.use('/api/auth', authRoutes);
 app.use('/api/airline', airlineRoutes);
 app.use('/api/aircraft', aircraftRoutes);
 app.use('/api/routes', routesRoutes);
 app.use('/api/flights', flightsRoutes);
 app.use('/api/finances', financesRoutes);
+app.use('/api/service-profiles', serviceProfilesRoutes);
+app.use('/api/maintenance', maintenanceRoutes);
+app.use('/api/airports', airportsRoutes);
+app.use('/api/cabin-profiles', cabinProfilesRoutes);
+app.use('/api/destinations', destinationsRoutes);
+app.use('/api/personnel', personnelRoutes);
+app.use('/api/expansions', expansionsRoutes);
+app.use('/api/market-analyses', marketAnalysesRouter);
+
+// Alias routes for convenience
+app.use('/api/fleet', aircraftRoutes);
+app.use('/api/aircraft-market', aircraftRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ 
@@ -61,10 +86,32 @@ initDatabase().then(() => {
     // Start flight processor for auto-completing flights
     startFlightProcessor();
     console.log('✈️ Flight processor started');
+
+    // Start used aircraft market refresh scheduler
+    startMarketRefreshScheduler();
+    console.log('🛒 Used aircraft market scheduler started');
+
+    // Start weekly payroll processor
+    startPayrollProcessor();
+    console.log('💰 Payroll processor started');
+
+    // Start market analyses processor
+    startMarketAnalysesProcessor();
+    console.log('📊 Market analyses processor started');
   });
 }).catch(err => {
   console.error('Failed to initialize database:', err);
   process.exit(1);
 });
+
+// Save database before process exits (nodemon SIGTERM, Ctrl+C, etc.)
+function shutdown() {
+  console.log('[DB] Saving database before shutdown…');
+  saveDatabase();
+  console.log('[DB] Database saved.');
+  process.exit(0);
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT',  shutdown);
 
 export default app;

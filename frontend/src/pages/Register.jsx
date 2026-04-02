@@ -59,7 +59,7 @@ function Register({ onRegister, onSwitchToLogin }) {
   return (
     <div className="auth-container">
       <div className="auth-card">
-        <h2>✈️ Join Aviation Empire</h2>
+        <h2>Join Aviation Empire</h2>
         
         {error && <div className="error-message">{error}</div>}
         

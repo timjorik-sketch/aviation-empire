@@ -44,7 +44,7 @@ function Login({ onLogin, onSwitchToRegister }) {
   return (
     <div className="auth-container">
       <div className="auth-card">
-        <h2>✈️ Login to Aviation Empire</h2>
+        <h2>Login to Aviation Empire</h2>
         
         {error && <div className="error-message">{error}</div>}
         

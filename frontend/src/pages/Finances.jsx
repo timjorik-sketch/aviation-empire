@@ -1,558 +1,500 @@
 import { useState, useEffect } from 'react';
+import TopBar from '../components/TopBar.jsx';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_URL = '';
 
-// Simple bar chart component
-function BarChart({ data, valueKey, labelKey, title, color = '#1976d2', maxBars = 10 }) {
+// ── helpers ─────────────────────────────────────────────────────────────────
+const fmt = (n) => {
+  if (n == null) return '—';
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return `${n < 0 ? '-' : ''}$${(abs / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000)     return `${n < 0 ? '-' : ''}$${Math.round(abs).toLocaleString()}`;
+  return `${n < 0 ? '-' : ''}$${Math.round(abs).toLocaleString()}`;
+};
+
+function pctChange(curr, prev) {
+  if (!prev) return null;
+  return ((curr - prev) / Math.abs(prev) * 100);
+}
+
+function PctBadge({ curr, prev, inverse = false }) {
+  const pct = pctChange(curr, prev);
+  if (pct == null) return null;
+  const positive = inverse ? pct < 0 : pct > 0;
+  const color  = pct === 0 ? '#888' : positive ? '#16a34a' : '#dc2626';
+  const bg     = pct === 0 ? 'rgba(0,0,0,0.06)' : positive ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)';
+  const sign   = pct > 0 ? '+' : '';
+  return (
+    <span style={{ fontSize: '0.72rem', fontWeight: 700, color, background: bg, borderRadius: '4px', padding: '2px 6px', marginLeft: '6px' }}>
+      {sign}{pct.toFixed(1)}%
+    </span>
+  );
+}
+
+// ── P&L Bar Chart (daily net profit) ─────────────────────────────────────────
+function PLChart({ data }) {
   if (!data || data.length === 0) {
-    return <div style={{ color: '#666', padding: '1rem' }}>No data available</div>;
+    return <div style={{ color: '#999', padding: '2rem', textAlign: 'center', fontSize: '0.85rem' }}>No data yet — complete flights to see your P&L history.</div>;
   }
 
-  const displayData = data.slice(0, maxBars);
-  const maxValue = Math.max(...displayData.map(d => d[valueKey]));
+  const DAYS_DE = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+
+  const fmtDate = (s) => {
+    const d = new Date(s);
+    return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Berlin' });
+  };
+  const fmtVal = (v) => {
+    const abs = Math.abs(v), sign = v < 0 ? '-' : '+';
+    if (abs >= 1_000_000) return `${sign}$${(abs/1_000_000).toFixed(2)}M`;
+    if (abs >= 1_000)     return `${sign}$${Math.round(abs).toLocaleString()}`;
+    return `${sign}$${Math.round(abs)}`;
+  };
 
   return (
-    <div>
-      {title && <h4 style={{ marginBottom: '0.75rem', color: '#333' }}>{title}</h4>}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-        {displayData.map((item, index) => (
-          <div key={index} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <div style={{ width: '100px', fontSize: '0.8rem', color: '#666', textAlign: 'right', flexShrink: 0 }}>
-              {item[labelKey]}
+    <div style={{ padding: '8px 0' }}>
+      {data.map((d, i) => {
+        const profit = d.profit;
+        const isPos = profit >= 0;
+        const color = isPos ? '#16a34a' : '#dc2626';
+        const bg    = isPos ? 'rgba(22,163,74,0.07)' : 'rgba(220,38,38,0.07)';
+        const dayName = DAYS_DE[new Date(d.date).getDay()];
+        return (
+          <div key={i} style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '9px 16px',
+            borderBottom: i < data.length - 1 ? '1px solid #F2F2F2' : 'none',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+              <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#2C2C2C', minWidth: '22px' }}>{dayName}</span>
+              <span style={{ fontSize: '0.78rem', color: '#999' }}>{fmtDate(d.date)}</span>
             </div>
-            <div style={{ flex: 1, background: '#f0f0f0', borderRadius: '4px', height: '24px', overflow: 'hidden' }}>
-              <div
-                style={{
-                  width: maxValue > 0 ? `${(item[valueKey] / maxValue) * 100}%` : '0%',
-                  height: '100%',
-                  background: color,
-                  borderRadius: '4px',
-                  transition: 'width 0.3s ease',
-                  minWidth: item[valueKey] > 0 ? '2px' : '0'
-                }}
-              />
-            </div>
-            <div style={{ width: '80px', fontSize: '0.8rem', fontWeight: 'bold', flexShrink: 0 }}>
-              ${item[valueKey].toLocaleString()}
-            </div>
+            <span style={{
+              fontSize: '0.88rem', fontWeight: 700, color,
+              background: bg, borderRadius: '5px', padding: '3px 10px',
+            }}>
+              {fmtVal(profit)}
+            </span>
           </div>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 }
 
-// Simple line chart component using SVG
-function LineChart({ data, title, height = 200 }) {
-  if (!data || data.length === 0) {
-    return <div style={{ color: '#666', padding: '1rem' }}>No data available</div>;
-  }
+// ── Fuel Price Chart ──────────────────────────────────────────────────────────
+function FuelChart({ prices, currentPrice }) {
+  const hasPrices = prices && prices.length > 0;
 
-  const padding = { top: 20, right: 20, bottom: 40, left: 60 };
-  const width = 100; // Percentage based
-  const chartHeight = height - padding.top - padding.bottom;
+  const PAD = { top: 20, right: 20, bottom: 28, left: 58 };
+  const H = 220;
+  const W = 500;
+  const chartW = W - PAD.left - PAD.right;
+  const chartH = H - PAD.top - PAD.bottom;
+  const priceColor = '#2C2C2C';
 
-  const revenues = data.map(d => d.revenue);
-  const profits = data.map(d => d.profit);
-  const allValues = [...revenues, ...profits];
-  const minValue = Math.min(0, ...allValues);
-  const maxValue = Math.max(...allValues);
-  const valueRange = maxValue - minValue || 1;
+  // Parse SQLite UTC strings correctly
+  const toUtc = (s) => new Date(s.includes('Z') || s.includes('+') ? s : s.replace(' ', 'T') + 'Z');
 
-  const getY = (value) => {
-    return chartHeight - ((value - minValue) / valueRange) * chartHeight + padding.top;
-  };
+  // Fixed 72h window ending now
+  const tMax = Date.now();
+  const tMin = tMax - 72 * 60 * 60 * 1000;
 
-  const getX = (index) => {
-    return padding.left + (index / (data.length - 1 || 1)) * (100 - padding.left - padding.right);
-  };
+  // X position by timestamp
+  const xT = (ms) => PAD.left + ((ms - tMin) / (tMax - tMin)) * chartW;
+  const xP = (p) => xT(toUtc(p.created_at).getTime());
 
-  // Create path for revenue line
-  const revenuePath = data.map((d, i) => {
-    const x = getX(i);
-    const y = getY(d.revenue);
-    return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
-  }).join(' ');
+  // Y axis
+  const allVals = hasPrices ? prices.map(p => p.price_per_liter) : [currentPrice || 0.8];
+  const dataMin = Math.min(...allVals);
+  const dataMax = Math.max(...allVals);
+  const pad = Math.max(0.05, (dataMax - dataMin) * 0.3);
+  const minV = Math.max(0, Math.floor((dataMin - pad) * 10) / 10);
+  const maxV = Math.ceil((dataMax + pad) * 10) / 10;
+  const range = Math.max(0.01, maxV - minV);
+  const y = (v) => PAD.top + chartH - ((v - minV) / range) * chartH;
 
-  // Create path for profit line
-  const profitPath = data.map((d, i) => {
-    const x = getX(i);
-    const y = getY(d.profit);
-    return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
-  }).join(' ');
+  const yTickCount = 4;
+  const yTicks = Array.from({ length: yTickCount + 1 }, (_, i) => minV + (range / yTickCount) * i);
 
-  // Zero line position
-  const zeroY = getY(0);
+  // Midnight boundaries (Berlin) within the 72h window
+  const midnights = (() => {
+    const result = [];
+    // Walk back from now finding each Berlin midnight
+    for (let d = 0; d <= 3; d++) {
+      const t = tMax - d * 24 * 60 * 60 * 1000;
+      const berlinDate = new Date(t).toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' });
+      const [yr, mo, dy] = berlinDate.split('-').map(Number);
+      // Midnight Berlin = find UTC ms for that Berlin date 00:00
+      // Approximation: format as ISO and adjust by offset
+      const approx = Date.UTC(yr, mo - 1, dy, 0, 0, 0);
+      const fmt = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit',
+        day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+      });
+      // Use the offset from a nearby known time
+      const offsetMs = (() => {
+        const probe = new Date(approx);
+        const localStr = probe.toLocaleString('sv', { timeZone: 'Europe/Berlin' }); // "YYYY-MM-DD HH:MM:SS"
+        const localDate = new Date(localStr.replace(' ', 'T') + 'Z');
+        return probe.getTime() - localDate.getTime();
+      })();
+      const midnight = approx - offsetMs;
+      if (midnight > tMin && midnight < tMax) result.push(midnight);
+    }
+    return [...new Set(result)].sort((a, b) => a - b);
+  })();
 
-  return (
-    <div>
-      {title && <h4 style={{ marginBottom: '0.5rem', color: '#333' }}>{title}</h4>}
-      <svg viewBox={`0 0 100 ${height}`} style={{ width: '100%', height: `${height}px` }}>
-        {/* Grid lines */}
-        <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} stroke="#e0e0e0" strokeWidth="0.5" />
-        <line x1={padding.left} y1={height - padding.bottom} x2={100 - padding.right} y2={height - padding.bottom} stroke="#e0e0e0" strokeWidth="0.5" />
+  // Day bands between midnights
+  const bandEdges = [tMin, ...midnights, tMax];
+  const dayBands = bandEdges.slice(0, -1).map((start, i) => ({
+    x1: xT(start), x2: xT(bandEdges[i + 1]), odd: i % 2 === 0,
+  }));
 
-        {/* Zero line */}
-        {minValue < 0 && (
-          <line x1={padding.left} y1={zeroY} x2={100 - padding.right} y2={zeroY} stroke="#999" strokeWidth="0.5" strokeDasharray="2,2" />
-        )}
-
-        {/* Revenue line */}
-        <path d={revenuePath} fill="none" stroke="#4caf50" strokeWidth="1.5" />
-
-        {/* Profit line */}
-        <path d={profitPath} fill="none" stroke="#2196f3" strokeWidth="1.5" />
-
-        {/* Data points - Revenue */}
-        {data.map((d, i) => (
-          <circle key={`rev-${i}`} cx={getX(i)} cy={getY(d.revenue)} r="1.5" fill="#4caf50" />
-        ))}
-
-        {/* Data points - Profit */}
-        {data.map((d, i) => (
-          <circle key={`prof-${i}`} cx={getX(i)} cy={getY(d.profit)} r="1.5" fill="#2196f3" />
-        ))}
-
-        {/* Y-axis labels */}
-        <text x={padding.left - 5} y={padding.top} fontSize="3" fill="#666" textAnchor="end" dominantBaseline="middle">
-          ${(maxValue / 1000).toFixed(0)}k
-        </text>
-        <text x={padding.left - 5} y={height - padding.bottom} fontSize="3" fill="#666" textAnchor="end" dominantBaseline="middle">
-          ${(minValue / 1000).toFixed(0)}k
-        </text>
-
-        {/* X-axis labels (first and last date) */}
-        {data.length > 0 && (
-          <>
-            <text x={padding.left} y={height - padding.bottom + 10} fontSize="3" fill="#666" textAnchor="start">
-              {data[0].date}
-            </text>
-            <text x={100 - padding.right} y={height - padding.bottom + 10} fontSize="3" fill="#666" textAnchor="end">
-              {data[data.length - 1].date}
-            </text>
-          </>
-        )}
-      </svg>
-      <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', marginTop: '0.5rem', fontSize: '0.8rem' }}>
-        <span><span style={{ color: '#4caf50' }}>--</span> Revenue</span>
-        <span><span style={{ color: '#2196f3' }}>--</span> Profit</span>
-      </div>
-    </div>
-  );
-}
-
-// Donut chart component
-function DonutChart({ data, title, size = 150 }) {
-  if (!data || data.length === 0) {
-    return <div style={{ color: '#666', padding: '1rem' }}>No data available</div>;
-  }
-
-  const total = data.reduce((sum, d) => sum + d.value, 0);
-  if (total === 0) {
-    return <div style={{ color: '#666', padding: '1rem' }}>No data to display</div>;
-  }
-
-  const colors = ['#1976d2', '#4caf50', '#ff9800', '#9c27b0', '#f44336', '#00bcd4', '#8bc34a', '#ff5722'];
-  const radius = 40;
-  const innerRadius = 25;
-  const center = 50;
-
-  let currentAngle = -90; // Start from top
-
-  const segments = data.map((item, index) => {
-    const percentage = item.value / total;
-    const angle = percentage * 360;
-    const startAngle = currentAngle;
-    const endAngle = currentAngle + angle;
-    currentAngle = endAngle;
-
-    const startRad = (startAngle * Math.PI) / 180;
-    const endRad = (endAngle * Math.PI) / 180;
-
-    const x1 = center + radius * Math.cos(startRad);
-    const y1 = center + radius * Math.sin(startRad);
-    const x2 = center + radius * Math.cos(endRad);
-    const y2 = center + radius * Math.sin(endRad);
-
-    const ix1 = center + innerRadius * Math.cos(startRad);
-    const iy1 = center + innerRadius * Math.sin(startRad);
-    const ix2 = center + innerRadius * Math.cos(endRad);
-    const iy2 = center + innerRadius * Math.sin(endRad);
-
-    const largeArc = angle > 180 ? 1 : 0;
-
-    const path = `
-      M ${x1} ${y1}
-      A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2}
-      L ${ix2} ${iy2}
-      A ${innerRadius} ${innerRadius} 0 ${largeArc} 0 ${ix1} ${iy1}
-      Z
-    `;
-
-    return { ...item, path, color: colors[index % colors.length], percentage };
+  // X-axis labels: center of each band, day name
+  const dayLabels = dayBands.map((b) => {
+    const midMs = tMin + ((b.x1 - PAD.left + (b.x2 - b.x1) / 2) / chartW) * (tMax - tMin);
+    const label = new Date(midMs).toLocaleDateString('de-DE', {
+      timeZone: 'Europe/Berlin', weekday: 'short', day: 'numeric', month: 'numeric',
+    });
+    return { x: (b.x1 + b.x2) / 2, label };
   });
 
+  // Line path
+  const pathD = hasPrices
+    ? prices.map((p, i) => `${i === 0 ? 'M' : 'L'}${xP(p).toFixed(1)},${y(p.price_per_liter).toFixed(1)}`).join(' ')
+    : '';
+
+  const lastPt = hasPrices ? prices[prices.length - 1] : null;
+
   return (
     <div>
-      {title && <h4 style={{ marginBottom: '0.5rem', color: '#333' }}>{title}</h4>}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-        <svg viewBox="0 0 100 100" style={{ width: `${size}px`, height: `${size}px` }}>
-          {segments.map((seg, i) => (
-            <path key={i} d={seg.path} fill={seg.color} />
-          ))}
-          <text x={center} y={center} textAnchor="middle" dominantBaseline="middle" fontSize="8" fontWeight="bold">
-            ${(total / 1000000).toFixed(1)}M
-          </text>
-        </svg>
-        <div style={{ fontSize: '0.8rem' }}>
-          {segments.map((seg, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-              <div style={{ width: '12px', height: '12px', borderRadius: '2px', background: seg.color }} />
-              <span>{seg.label}: {(seg.percentage * 100).toFixed(1)}%</span>
-            </div>
-          ))}
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px 4px' }}>
+        <span style={{ fontSize: '2rem', fontWeight: 700, color: priceColor, lineHeight: 1 }}>
+          ${currentPrice > 0 ? currentPrice.toFixed(2) : '—'}
+        </span>
+        <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em' }}>per kg</div>
       </div>
+      {hasPrices ? (
+        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+          {/* Day bands */}
+          {dayBands.map((b, i) => b.odd ? (
+            <rect key={i} x={b.x1} y={PAD.top} width={Math.max(0, b.x2 - b.x1)} height={chartH} fill="#F7F7F7" />
+          ) : null)}
+          {/* Midnight dividers */}
+          {midnights.map((ms, i) => (
+            <line key={i} x1={xT(ms)} x2={xT(ms)} y1={PAD.top} y2={PAD.top + chartH} stroke="#E0E0E0" strokeWidth="1" strokeDasharray="3,3" />
+          ))}
+          {/* Y grid + labels */}
+          {yTicks.map((v, i) => (
+            <g key={i}>
+              <line x1={PAD.left} x2={W - PAD.right} y1={y(v)} y2={y(v)} stroke="#EFEFEF" strokeWidth="1" />
+              <text x={PAD.left - 6} y={y(v)} textAnchor="end" dominantBaseline="middle" fontSize="15" fill="#999">${v.toFixed(2)}</text>
+            </g>
+          ))}
+          {/* X-axis day labels */}
+          {dayLabels.map((dl, i) => (
+            <text key={i} x={Math.max(PAD.left + 2, Math.min(W - PAD.right - 2, dl.x))} y={PAD.top + chartH + 16} textAnchor="middle" fontSize="11" fill="#AAA">{dl.label}</text>
+          ))}
+          {/* Price line */}
+          <path d={pathD} fill="none" stroke={priceColor} strokeWidth="2" />
+          {/* Dot per data point */}
+          {prices.map((p, i) => (
+            <circle key={i} cx={xP(p)} cy={y(p.price_per_liter)} r="3" fill="white" stroke={priceColor} strokeWidth="1.5" />
+          ))}
+          {/* Current price dot */}
+          {lastPt && <circle cx={xP(lastPt)} cy={y(lastPt.price_per_liter)} r="5" fill={priceColor} />}
+        </svg>
+      ) : (
+        <div style={{ textAlign: 'center', padding: '1.5rem', color: '#BBB', fontSize: '0.8rem' }}>
+          No history yet — chart will populate over time.
+        </div>
+      )}
     </div>
   );
 }
 
-function Finances({ airline, onBack }) {
-  const [overview, setOverview] = useState(null);
-  const [routeRevenue, setRouteRevenue] = useState([]);
-  const [aircraftCosts, setAircraftCosts] = useState([]);
-  const [profitHistory, setProfitHistory] = useState([]);
-  const [transactions, setTransactions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+// ── Breakdown row ────────────────────────────────────────────────────────────
+function BRow({ label, value, sub, bold, divider }) {
+  if (divider) return <tr><td colSpan={2} style={{ borderTop: '1px solid #E0E0E0', padding: '4px 0' }} /></tr>;
+  return (
+    <tr>
+      <td style={{ padding: '0.35rem 0', fontSize: bold ? '0.82rem' : '0.8rem', color: bold ? '#2C2C2C' : '#555', fontWeight: bold ? 700 : 400, borderTop: bold ? '1px solid #E8E8E8' : 'none' }}>
+        {label}
+        {sub && <span style={{ fontSize: '0.72rem', color: '#AAA', marginLeft: '4px' }}>{sub}</span>}
+      </td>
+      <td style={{ padding: '0.35rem 0', textAlign: 'right', fontSize: bold ? '0.82rem' : '0.8rem', fontWeight: bold ? 700 : 500, color: bold ? '#2C2C2C' : '#444', borderTop: bold ? '1px solid #E8E8E8' : 'none' }}>
+        {value}
+      </td>
+    </tr>
+  );
+}
+
+// ── Main component ───────────────────────────────────────────────────────────
+export default function Finances({ airline, onBack, onNavigateToAirport }) {
+  const [data, setData]           = useState(null);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState('');
+  const [fuelHistory, setFuelHistory] = useState({ prices: [], currentPrice: 0 });
 
   useEffect(() => {
-    fetchData();
+    fetchDashboard();
+    fetchFuelHistory();
   }, []);
 
-  const fetchData = async () => {
+  const fetchDashboard = async () => {
     const token = localStorage.getItem('token');
     try {
-      const [overviewRes, routeRes, aircraftRes, historyRes, transRes] = await Promise.all([
-        fetch(`${API_URL}/api/finances/overview`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }),
-        fetch(`${API_URL}/api/finances/revenue-by-route`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }),
-        fetch(`${API_URL}/api/finances/aircraft-costs`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }),
-        fetch(`${API_URL}/api/finances/profit-history`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }),
-        fetch(`${API_URL}/api/finances/transactions`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-      ]);
-
-      const overviewData = await overviewRes.json();
-      const routeData = await routeRes.json();
-      const aircraftData = await aircraftRes.json();
-      const historyData = await historyRes.json();
-      const transData = await transRes.json();
-
-      setOverview(overviewData);
-      setRouteRevenue(routeData.routeRevenue || []);
-      setAircraftCosts(aircraftData.aircraftCosts || []);
-      setProfitHistory(historyData.profitHistory || []);
-      setTransactions(transData.transactions || []);
+      const res = await fetch(`${API_URL}/api/finances/dashboard`, { headers: { Authorization: `Bearer ${token}` } });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error);
+      setData(json);
     } catch (err) {
-      console.error('Failed to fetch financial data:', err);
-      setError('Failed to load financial data');
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  const formatCurrency = (amount) => {
-    if (Math.abs(amount) >= 1000000) {
-      return `$${(amount / 1000000).toFixed(2)}M`;
-    }
-    return `$${amount.toLocaleString()}`;
+  const fetchFuelHistory = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/finances/fuel-price-history`);
+      const json = await res.json();
+      if (res.ok) {
+        // Convert stored price to $/kg for display (stored as $/kg already after migration)
+        const prices = (json.prices || []).map(p => ({ ...p, price_per_kg: p.price_per_liter }));
+        setFuelHistory({ prices, currentPrice: json.currentPrice });
+      }
+    } catch { /* ignore */ }
   };
 
-  if (loading) {
-    return (
-      <div className="app">
-        <div className="container">
-          <div className="header">
-            <h1>Aviation Empire</h1>
-            <p className="subtitle">Loading finances...</p>
-          </div>
-        </div>
+  if (loading) return (
+    <div className="app"><div className="page-hero" style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.4),rgba(0,0,0,0.6)),url('/header-images/Headerimage_Finance.png')" }}><div className="page-hero-overlay"><h1>Finances</h1></div></div><div className="container" style={{ paddingTop: 24 }}><TopBar onBack={onBack} balance={airline.balance} airline={airline} /><p style={{ color: '#666', marginTop: '2rem' }}>Loading…</p></div></div>
+  );
+
+  const w = data?.weekly || {};
+  const cb = data?.cost_breakdown || {};
+  const rb = data?.revenue_breakdown || {};
+  const ops = data?.ops_stats || {};
+  const txs = data?.transactions || [];
+
+  // KPI card helper
+  const KpiCard = ({ label, value, prev, inverse, note }) => (
+    <div style={{ background: '#fff', borderRadius: '8px', padding: '20px 24px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', flex: '1 1 0' }}>
+      <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', marginBottom: '6px' }}>{label}</div>
+      <div style={{ fontSize: '1.55rem', fontWeight: 700, color: '#2C2C2C', lineHeight: 1.1 }}>{value}</div>
+      <div style={{ marginTop: '6px', fontSize: '0.75rem', color: '#888', display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+        <span>vs last week</span>
+        <PctBadge curr={typeof value === 'string' ? 0 : 0} prev={prev != null ? 1 : null} />
+        {prev != null && (() => {
+          const pct = pctChange(
+            typeof w.revenue !== 'undefined' ? (label.includes('Revenue') ? w.revenue : label.includes('Cost') ? w.costs : label.includes('Profit') ? w.profit : data?.balance) : 0,
+            prev
+          );
+          const positive = inverse ? (pct < 0) : (pct > 0);
+          const color = pct == null ? '#888' : pct === 0 ? '#888' : positive ? '#16a34a' : '#dc2626';
+          const bg = pct == null ? 'transparent' : pct === 0 ? 'rgba(0,0,0,0.06)' : positive ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)';
+          const sign = pct > 0 ? '+' : '';
+          return pct != null ? (
+            <span style={{ fontSize: '0.72rem', fontWeight: 700, color, background: bg, borderRadius: '4px', padding: '2px 6px' }}>
+              {sign}{pct.toFixed(1)}%
+            </span>
+          ) : null;
+        })()}
+        {note && <span style={{ marginLeft: 2 }}>{note}</span>}
       </div>
-    );
-  }
+    </div>
+  );
+
+  const fuelLabelL = fuelHistory.currentPrice > 0 ? `at $${fuelHistory.currentPrice.toFixed(2)}/kg` : (cb.fuel_price_per_liter ? `at $${cb.fuel_price_per_liter.toFixed(2)}/kg` : '');
 
   return (
     <div className="app">
-      <div className="container">
-        <div className="header">
-          <h1>Aviation Empire</h1>
-          <p className="subtitle">{airline.name} - Financial Dashboard</p>
+      {/* Hero */}
+      <div className="page-hero" style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.4),rgba(0,0,0,0.6)),url('/header-images/Headerimage_Finance.png')" }}>
+        <div className="page-hero-overlay">
+          <h1>Finances</h1>
+          <p>{airline.name}</p>
         </div>
+      </div>
 
-        <button onClick={onBack} className="btn-secondary" style={{ marginBottom: '1rem' }}>
-          Back to Dashboard
-        </button>
-
+      <div className="container" style={{ paddingTop: 24 }}>
+        <TopBar onBack={onBack} balance={airline.balance} airline={airline} />
         {error && <div className="error-message" style={{ marginBottom: '1rem' }}>{error}</div>}
 
-        {/* Key Metrics */}
-        {overview && (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-            gap: '1rem',
-            marginBottom: '1.5rem'
-          }}>
-            <div style={{
-              padding: '1rem',
-              background: 'linear-gradient(135deg, #1976d2, #1565c0)',
-              borderRadius: '8px',
-              color: 'white',
-              textAlign: 'center'
-            }}>
-              <div style={{ fontSize: '0.85rem', opacity: 0.9 }}>Current Balance</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{formatCurrency(overview.balance)}</div>
-            </div>
-
-            <div style={{
-              padding: '1rem',
-              background: 'linear-gradient(135deg, #4caf50, #388e3c)',
-              borderRadius: '8px',
-              color: 'white',
-              textAlign: 'center'
-            }}>
-              <div style={{ fontSize: '0.85rem', opacity: 0.9 }}>Total Revenue</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{formatCurrency(overview.totalRevenue)}</div>
-            </div>
-
-            <div style={{
-              padding: '1rem',
-              background: 'linear-gradient(135deg, #f44336, #d32f2f)',
-              borderRadius: '8px',
-              color: 'white',
-              textAlign: 'center'
-            }}>
-              <div style={{ fontSize: '0.85rem', opacity: 0.9 }}>Aircraft Costs</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{formatCurrency(overview.totalAircraftCost)}</div>
-            </div>
-
-            <div style={{
-              padding: '1rem',
-              background: overview.netProfit >= 0
-                ? 'linear-gradient(135deg, #8bc34a, #689f38)'
-                : 'linear-gradient(135deg, #ff5722, #e64a19)',
-              borderRadius: '8px',
-              color: 'white',
-              textAlign: 'center'
-            }}>
-              <div style={{ fontSize: '0.85rem', opacity: 0.9 }}>Net Profit/Loss</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>
-                {overview.netProfit >= 0 ? '+' : ''}{formatCurrency(overview.netProfit)}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Stats Row */}
-        {overview && (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))',
-            gap: '0.75rem',
-            marginBottom: '1.5rem',
-            padding: '1rem',
-            background: '#f5f5f5',
-            borderRadius: '8px'
-          }}>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333' }}>{overview.totalFlights}</div>
-              <div style={{ fontSize: '0.75rem', color: '#666' }}>Flights Completed</div>
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333' }}>{overview.totalPassengers.toLocaleString()}</div>
-              <div style={{ fontSize: '0.75rem', color: '#666' }}>Total Passengers</div>
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333' }}>{overview.fleetSize}</div>
-              <div style={{ fontSize: '0.75rem', color: '#666' }}>Aircraft Owned</div>
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333' }}>{routeRevenue.length}</div>
-              <div style={{ fontSize: '0.75rem', color: '#666' }}>Active Routes</div>
-            </div>
-          </div>
-        )}
-
-        {/* Profit/Loss Over Time Chart */}
-        <div className="info-card" style={{ marginBottom: '1.5rem' }}>
-          <h3>Profit/Loss Over Time</h3>
-          <div style={{ marginTop: '1rem' }}>
-            {profitHistory.length > 0 ? (
-              <LineChart data={profitHistory} height={200} />
-            ) : (
-              <p style={{ color: '#666' }}>Complete flights to see your profit history.</p>
-            )}
-          </div>
-        </div>
-
-        {/* Revenue by Route */}
-        <div className="info-card" style={{ marginBottom: '1.5rem' }}>
-          <h3>Revenue by Route</h3>
-          <div style={{ marginTop: '1rem' }}>
-            {routeRevenue.length > 0 ? (
-              <>
-                <BarChart
-                  data={routeRevenue.map(r => ({
-                    label: `${r.departure_airport}-${r.arrival_airport}`,
-                    value: r.total_revenue
-                  }))}
-                  valueKey="value"
-                  labelKey="label"
-                  color="#4caf50"
-                  maxBars={8}
-                />
-                <div style={{ marginTop: '1rem', overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                    <thead>
-                      <tr style={{ background: '#f5f5f5' }}>
-                        <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Route</th>
-                        <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #ddd' }}>Flights</th>
-                        <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #ddd' }}>Passengers</th>
-                        <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #ddd' }}>Avg Price</th>
-                        <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #ddd' }}>Load %</th>
-                        <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #ddd' }}>Revenue</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {routeRevenue.slice(0, 10).map(route => (
-                        <tr key={route.id}>
-                          <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
-                            <strong>{route.flight_number}</strong>: {route.departure_airport} → {route.arrival_airport}
-                          </td>
-                          <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{route.flight_count}</td>
-                          <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{route.total_passengers.toLocaleString()}</td>
-                          <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>${route.avg_ticket_price}</td>
-                          <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>
-                            <span style={{ color: route.avg_load_factor >= 70 ? '#4caf50' : route.avg_load_factor >= 50 ? '#ff9800' : '#f44336' }}>
-                              {route.avg_load_factor}%
-                            </span>
-                          </td>
-                          <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee', fontWeight: 'bold', color: '#4caf50' }}>
-                            ${route.total_revenue.toLocaleString()}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+        {/* ── 4 KPI Cards ── */}
+        <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
+          {/* Balance */}
+          <div style={{ background: '#fff', borderRadius: '8px', padding: '20px 24px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', flex: '1 1 0', minWidth: '160px' }}>
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', marginBottom: '6px' }}>Current Balance</div>
+            <div style={{ fontSize: '1.55rem', fontWeight: 700, color: '#2C2C2C', lineHeight: 1.1 }}>{fmt(data?.balance)}</div>
+            {data?.balance_prev_week != null && (() => {
+              const pct = pctChange(data.balance, data.balance_prev_week);
+              const pos = pct >= 0;
+              return (
+                <div style={{ marginTop: '6px', fontSize: '0.75rem', color: '#888', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span>vs last week</span>
+                  {pct != null && <span style={{ fontSize: '0.72rem', fontWeight: 700, color: pos ? '#16a34a' : '#dc2626', background: pos ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)', borderRadius: '4px', padding: '2px 6px' }}>{pct >= 0 ? '+' : ''}{pct.toFixed(1)}%</span>}
                 </div>
-              </>
-            ) : (
-              <p style={{ color: '#666' }}>Create routes and complete flights to see revenue data.</p>
-            )}
+              );
+            })()}
+          </div>
+
+          {/* Weekly Revenue */}
+          {[
+            { label: 'Weekly Revenue', curr: w.revenue, prev: w.revenue_prev, inverse: false },
+            { label: 'Weekly Costs',   curr: w.costs,   prev: w.costs_prev,   inverse: true },
+            { label: 'Weekly Profit',  curr: w.profit,  prev: w.profit_prev,  inverse: false, isProfit: true },
+          ].map(({ label, curr, prev, inverse, isProfit }) => {
+            const pct = pctChange(curr, prev);
+            const positive = inverse ? (pct < 0) : (pct > 0);
+            const valColor = isProfit ? (curr >= 0 ? '#16a34a' : '#dc2626') : '#2C2C2C';
+            return (
+              <div key={label} style={{ background: '#fff', borderRadius: '8px', padding: '20px 24px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', flex: '1 1 0', minWidth: '160px' }}>
+                <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', marginBottom: '6px' }}>{label}</div>
+                <div style={{ fontSize: '1.55rem', fontWeight: 700, color: valColor, lineHeight: 1.1 }}>
+                  {isProfit && curr > 0 ? '+' : ''}{fmt(curr)}
+                </div>
+                <div style={{ marginTop: '6px', fontSize: '0.75rem', color: '#888', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span>vs last week</span>
+                  {pct != null && (() => {
+                    const color = pct === 0 ? '#888' : positive ? '#16a34a' : '#dc2626';
+                    const bg    = pct === 0 ? 'rgba(0,0,0,0.06)' : positive ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)';
+                    return <span style={{ fontSize: '0.72rem', fontWeight: 700, color, background: bg, borderRadius: '4px', padding: '2px 6px' }}>{pct > 0 ? '+' : ''}{pct.toFixed(1)}%</span>;
+                  })()}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* ── P&L Chart + Fuel Price ── */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px', alignItems: 'start' }}>
+          <div className="info-card" style={{ marginBottom: 0 }}>
+            <div className="card-header-bar">
+              <span className="card-header-bar-title">Profit & Loss — Last 7 Days</span>
+            </div>
+            <PLChart data={data?.daily_history || []} />
+          </div>
+
+          <div className="info-card" style={{ marginBottom: 0 }}>
+            <div className="card-header-bar">
+              <span className="card-header-bar-title">Jet Fuel Price — Last 3 Days</span>
+            </div>
+            <FuelChart prices={fuelHistory.prices} currentPrice={fuelHistory.currentPrice} />
           </div>
         </div>
 
-        {/* Aircraft Performance */}
-        <div className="info-card" style={{ marginBottom: '1.5rem' }}>
-          <h3>Aircraft Performance & ROI</h3>
-          <div style={{ marginTop: '1rem' }}>
-            {aircraftCosts.length > 0 ? (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                  <thead>
-                    <tr style={{ background: '#f5f5f5' }}>
-                      <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd' }}>Aircraft</th>
-                      <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #ddd' }}>Purchase</th>
-                      <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #ddd' }}>Flights</th>
-                      <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #ddd' }}>Revenue</th>
-                      <th style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #ddd' }}>ROI</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {aircraftCosts.map(aircraft => (
-                      <tr key={aircraft.id}>
-                        <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
-                          <strong>{aircraft.registration}</strong>
-                          <br />
-                          <span style={{ fontSize: '0.8rem', color: '#666' }}>{aircraft.aircraft_type}</span>
+        {/* ── 3-column breakdown ── */}
+        <div className="fn-3col" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '16px', marginBottom: '20px' }}>
+
+          {/* Left — Revenue Breakdown */}
+          <div className="info-card" style={{ marginBottom: 0 }}>
+            <div className="card-header-bar">
+              <span className="card-header-bar-title">Revenue — This Week</span>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <tbody>
+                <BRow label="Flight Tickets"  value={fmt(rb.tickets)} />
+                <BRow label="Aircraft Sales"  value={fmt(rb.aircraft_sales)} />
+                {rb.other > 0 && <BRow label="Other" value={fmt(rb.other)} />}
+                <BRow label="Total Revenue" value={fmt(rb.total)} bold />
+              </tbody>
+            </table>
+          </div>
+
+          {/* Middle — Cost Breakdown */}
+          <div className="info-card" style={{ marginBottom: 0 }}>
+            <div className="card-header-bar">
+              <span className="card-header-bar-title">Costs — This Week</span>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <tbody>
+                <BRow label="Fuel" value={fmt(cb.fuel)} sub={fuelLabelL} />
+                <BRow label="ATC / Navigation" value={fmt(cb.atc)} />
+                <BRow label="Airport Fees & Catering" value={fmt(cb.airport_fees_catering)} />
+                <BRow label="Maintenance" value={fmt(cb.maintenance)} />
+                <BRow label="Cancellation Penalties" value={fmt(cb.cancellations)} />
+                <BRow label="Aircraft Purchases" value={fmt(cb.aircraft_purchases)} />
+                {cb.other > 0 && <BRow label="Other" value={fmt(cb.other)} />}
+                <BRow label="Total Costs" value={fmt(cb.total)} bold />
+              </tbody>
+            </table>
+          </div>
+
+          {/* Right — Operations Stats */}
+          <div className="info-card" style={{ marginBottom: 0 }}>
+            <div className="card-header-bar">
+              <span className="card-header-bar-title">Operations — This Week</span>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <tbody>
+                <BRow label="Flights Completed"   value={(ops.flights_completed ?? 0).toLocaleString()} />
+                <BRow label="Total Passengers"    value={(ops.total_passengers ?? 0).toLocaleString()} />
+                <BRow label="Avg Load Factor"     value={`${ops.avg_load_factor ?? 0}%`} />
+                <BRow divider />
+                <BRow label="Active Aircraft"  value={(ops.active_aircraft ?? 0).toLocaleString()} />
+                <BRow label="Active Routes"    value={(ops.active_routes ?? 0).toLocaleString()} />
+                <BRow label="Destinations"     value={(ops.destinations ?? 0).toLocaleString()} />
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* ── Transactions Table ── */}
+        <div className="info-card" style={{ marginBottom: '20px' }}>
+          <div className="card-header-bar">
+            <span className="card-header-bar-title">Recent Transactions</span>
+            <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.55)' }}>Last 50</span>
+          </div>
+          {txs.length === 0 ? (
+            <p style={{ color: '#999', fontSize: '0.85rem' }}>No transactions yet.</p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                <thead>
+                  <tr style={{ background: '#F5F5F5' }}>
+                    <th style={{ padding: '0.5rem 0.75rem', textAlign: 'left', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#999', borderBottom: '1px solid #E8E8E8' }}>Date / Time</th>
+                    <th style={{ padding: '0.5rem 0.75rem', textAlign: 'left', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#999', borderBottom: '1px solid #E8E8E8' }}>Description</th>
+                    <th style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#999', borderBottom: '1px solid #E8E8E8' }}>Amount</th>
+                    <th style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#999', borderBottom: '1px solid #E8E8E8' }}>Balance After</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {txs.map((tx, i) => {
+                    const isCredit = tx.amount > 0;
+                    const dt = new Date(tx.created_at);
+                    const dateStr = dt.toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' });
+                    const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' });
+                    return (
+                      <tr key={tx.id} style={{ background: i % 2 === 0 ? '#fff' : '#FAFAFA' }}>
+                        <td style={{ padding: '0.45rem 0.75rem', borderBottom: '1px solid #F2F2F2', color: '#666', whiteSpace: 'nowrap' }}>
+                          {dateStr} <span style={{ color: '#AAA' }}>{timeStr}</span>
                         </td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee', color: '#f44336' }}>
-                          {formatCurrency(aircraft.purchase_price)}
+                        <td style={{ padding: '0.45rem 0.75rem', borderBottom: '1px solid #F2F2F2', color: '#2C2C2C' }}>{tx.description}</td>
+                        <td style={{ padding: '0.45rem 0.75rem', borderBottom: '1px solid #F2F2F2', textAlign: 'right', fontWeight: 600, color: isCredit ? '#16a34a' : '#dc2626', whiteSpace: 'nowrap' }}>
+                          {isCredit ? '+' : ''}{fmt(tx.amount)}
                         </td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>{aircraft.flights_completed}</td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee', color: '#4caf50' }}>
-                          {formatCurrency(aircraft.total_revenue)}
-                        </td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right', borderBottom: '1px solid #eee' }}>
-                          <span style={{
-                            padding: '0.2rem 0.5rem',
-                            borderRadius: '4px',
-                            background: aircraft.roi >= 100 ? '#4caf50' : aircraft.roi >= 50 ? '#ff9800' : '#f5f5f5',
-                            color: aircraft.roi >= 50 ? 'white' : '#333',
-                            fontWeight: 'bold'
-                          }}>
-                            {aircraft.roi}%
-                          </span>
+                        <td style={{ padding: '0.45rem 0.75rem', borderBottom: '1px solid #F2F2F2', textAlign: 'right', color: '#555', whiteSpace: 'nowrap' }}>
+                          {fmt(tx.balance_after)}
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <p style={{ color: '#666' }}>Purchase aircraft to see performance data.</p>
-            )}
-          </div>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
-        {/* Recent Transactions */}
-        <div className="info-card">
-          <h3>Recent Transactions</h3>
-          <div style={{ marginTop: '1rem' }}>
-            {transactions.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {transactions.slice(0, 15).map(trans => (
-                  <div key={trans.id} style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    padding: '0.5rem 0.75rem',
-                    background: trans.amount >= 0 ? '#e8f5e9' : '#ffebee',
-                    borderRadius: '4px',
-                    borderLeft: `3px solid ${trans.amount >= 0 ? '#4caf50' : '#f44336'}`
-                  }}>
-                    <div>
-                      <div style={{ fontSize: '0.9rem' }}>
-                        {trans.type === 'flight_revenue' ? 'Flight Revenue' : 'Aircraft Purchase'}
-                      </div>
-                      <div style={{ fontSize: '0.8rem', color: '#666' }}>{trans.description}</div>
-                    </div>
-                    <div style={{
-                      fontWeight: 'bold',
-                      color: trans.amount >= 0 ? '#4caf50' : '#f44336'
-                    }}>
-                      {trans.amount >= 0 ? '+' : ''}{formatCurrency(trans.amount)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p style={{ color: '#666' }}>No transactions yet. Complete flights or purchase aircraft to see transaction history.</p>
-            )}
-          </div>
-        </div>
+        <style>{`
+          @media (max-width: 900px) {
+            .fn-3col { grid-template-columns: 1fr !important; }
+          }
+          @media (max-width: 700px) {
+            .fn-kpi-row { flex-direction: column !important; }
+          }
+        `}</style>
       </div>
     </div>
   );
 }
-
-export default Finances;

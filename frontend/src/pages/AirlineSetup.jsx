@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_URL = '';
 
 function AirlineSetup({ onAirlineCreated }) {
   const [name, setName] = useState('');
   const [airlineCode, setAirlineCode] = useState('');
+  const [selectedCountry, setSelectedCountry] = useState('');
   const [homeAirport, setHomeAirport] = useState('');
   const [airports, setAirports] = useState([]);
   const [error, setError] = useState('');
@@ -64,14 +65,8 @@ function AirlineSetup({ onAirlineCreated }) {
     setAirlineCode(value);
   };
 
-  // Group airports by country
-  const airportsByCountry = airports.reduce((acc, airport) => {
-    if (!acc[airport.country]) {
-      acc[airport.country] = [];
-    }
-    acc[airport.country].push(airport);
-    return acc;
-  }, {});
+  const countries = [...new Set(airports.map(a => a.country))].sort();
+  const airportsInCountry = airports.filter(a => a.country === selectedCountry);
 
   return (
     <div className="app">
@@ -120,22 +115,34 @@ function AirlineSetup({ onAirlineCreated }) {
             </div>
 
             <div className="form-group">
+              <label htmlFor="country">Country</label>
+              <select
+                id="country"
+                value={selectedCountry}
+                onChange={(e) => { setSelectedCountry(e.target.value); setHomeAirport(''); }}
+                required
+              >
+                <option value="">Select country…</option>
+                {countries.map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-group">
               <label htmlFor="airport">Home Airport</label>
               <select
                 id="airport"
                 value={homeAirport}
                 onChange={(e) => setHomeAirport(e.target.value)}
+                disabled={!selectedCountry}
                 required
               >
-                <option value="">Select your home airport...</option>
-                {Object.entries(airportsByCountry).map(([country, countryAirports]) => (
-                  <optgroup key={country} label={country}>
-                    {countryAirports.map(airport => (
-                      <option key={airport.iata_code} value={airport.iata_code}>
-                        {airport.name} ({airport.iata_code})
-                      </option>
-                    ))}
-                  </optgroup>
+                <option value="">{selectedCountry ? 'Select airport…' : 'Select a country first'}</option>
+                {airportsInCountry.map(airport => (
+                  <option key={airport.iata_code} value={airport.iata_code}>
+                    {airport.name} ({airport.iata_code})
+                  </option>
                 ))}
               </select>
             </div>

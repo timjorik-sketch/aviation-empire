@@ -88,6 +88,15 @@ async function runStatements(stmts, context = '') {
   }
 }
 
+async function safeQuery(sql, params, label) {
+  try {
+    return await pool.query(sql, params);
+  } catch (e) {
+    console.warn(`[db seed${label ? ' ' + label : ''}] ${e.message.substring(0, 150)}`);
+    return { rows: [] };
+  }
+}
+
 async function initDatabase() {
   // Test connection
   await pool.query('SELECT 1');
@@ -345,7 +354,7 @@ async function initDatabase() {
   await runStatements(alterCols, 'alter cols');
 
   // ── SEED service_item_types (upsert) ─────────────────────────────────────────
-  await pool.query(`
+  await safeQuery(`
     INSERT INTO service_item_types (id, item_name, category, price_per_pax, price_economy, price_business, price_first, sort_order, image_eco, image_bus, image_fir) VALUES
     (1,  'Water',              'Beverages',      1.50,  1.50,  2.00,  3.00,  1, 'Service_Eco_Water.png',         'Service_Bus_Water.png',         'Service_Fir_Water.png'),
     (2,  'Soda & Juice',       'Beverages',      2.50,  2.50,  3.50,  5.00,  2, 'Service_Drinks_1.png',          'Service_Drinks_1.png',          'Service_Drinks_1.png'),
@@ -370,11 +379,10 @@ async function initDatabase() {
       image_bus=EXCLUDED.image_bus, image_fir=EXCLUDED.image_fir
   `);
 
-  // Reset sequence for service_item_types
-  await pool.query(`SELECT setval('service_item_types_id_seq', (SELECT MAX(id) FROM service_item_types))`);
+  await safeQuery(`SELECT setval('service_item_types_id_seq', COALESCE((SELECT MAX(id) FROM service_item_types), 1))`, null, 'setval sit');
 
   // ── SEED additional aircraft types (IDs 15-61) ───────────────────────────────
-  await pool.query(`
+  await safeQuery(`
     INSERT INTO aircraft_types (id, manufacturer, model, full_name, max_passengers, range_km, cruise_speed_kmh, min_runway_takeoff_m, min_runway_landing_m, fuel_consumption_empty_per_km, fuel_consumption_full_per_km, wake_turbulence_category, new_price_usd, required_level, required_pilots, image_filename) VALUES
     (15,'Airbus','A319 Neo','Airbus A319 Neo',160,6850,828,1850,1400,0.020,0.025,'M',101500000,3,2,'Aircraft_Airbus_319_Neo.png'),
     (16,'Airbus','A330-200','Airbus A330-200',406,13450,871,2770,1830,0.031,0.040,'H',238500000,4,2,'Aircraft_Airbus_330-200.png'),
@@ -424,11 +432,11 @@ async function initDatabase() {
     (60,'Airbus','A350-900 ULR','Airbus A350-900 ULR',440,18000,903,3000,2200,0.033,0.043,'H',370000000,6,2,'Aircraft_Airbus_350-900.png'),
     (61,'Boeing','777-200LR','Boeing 777-200LR',440,17370,892,3050,2100,0.036,0.046,'H',360000000,6,2,'Aircraft_Boeing_777-200.png')
     ON CONFLICT (id) DO NOTHING
-  `);
-  await pool.query(`SELECT setval('aircraft_types_id_seq', (SELECT MAX(id) FROM aircraft_types))`);
+  `, null, 'aircraft_types seed');
+  await safeQuery(`SELECT setval('aircraft_types_id_seq', COALESCE((SELECT MAX(id) FROM aircraft_types), 1))`, null, 'setval at');
 
   // ── SEED cabin profiles (IDs 36-152) ─────────────────────────────────────────
-  await pool.query(`
+  await safeQuery(`
     INSERT INTO cabin_profiles (id, name, aircraft_type_id, economy_seats, business_seats, first_seats) VALUES
     (36,'All Economy',15,160,0,0),(37,'Mixed',15,136,24,0),(38,'Two Class',15,120,28,12),
     (39,'All Economy',16,406,0,0),(40,'Two Class',16,300,70,36),(41,'Three Class',16,250,90,66),
@@ -478,8 +486,8 @@ async function initDatabase() {
     (147,'All Economy',60,440,0,0),(148,'Two Class',60,320,80,40),(149,'Three Class',60,265,100,75),
     (150,'All Economy',61,440,0,0),(151,'Two Class',61,320,80,40),(152,'Three Class',61,265,100,75)
     ON CONFLICT (id) DO NOTHING
-  `);
-  await pool.query(`SELECT setval('cabin_profiles_id_seq', (SELECT MAX(id) FROM cabin_profiles))`);
+  `, null, 'cabin_profiles seed');
+  await safeQuery(`SELECT setval('cabin_profiles_id_seq', COALESCE((SELECT MAX(id) FROM cabin_profiles), 1))`, null, 'setval cp');
 
   // ── DATA CORRECTIONS ─────────────────────────────────────────────────────────
   // Aircraft runway & fuel corrections
@@ -595,32 +603,32 @@ async function initDatabase() {
     4:[300,700,2200,400,650,950],    3:[250,550,1800,350,500,750],
     2:[200,400,1400,300,400,600],    1:[150,300,1000,250,300,450],
   };
-  const { rows: allAirports } = await pool.query('SELECT iata_code, category FROM airports');
+  const { rows: allAirports } = await safeQuery('SELECT iata_code, category FROM airports', null, 'airport fees fetch');
   for (const { iata_code, category } of allAirports) {
     const [l,m,h,gl,gm,gh] = CAT_FEES[category] || CAT_FEES[3];
-    await pool.query(
+    await safeQuery(
       `UPDATE airports SET landing_fee_light=$1, landing_fee_medium=$2, landing_fee_heavy=$3,
        ground_handling_fee=$4, ground_handling_fee_light=$4, ground_handling_fee_medium=$5, ground_handling_fee_heavy=$6
        WHERE iata_code=$7`,
       [l, m, h, gl, gm, gh, iata_code]
-    ).catch(() => {});
+    );
   }
 
   // ── SEED INITIAL FUEL PRICE ───────────────────────────────────────────────────
-  const { rows: fuelRows } = await pool.query('SELECT COUNT(*) as c FROM fuel_prices');
-  if (parseInt(fuelRows[0].c) === 0) {
-    await pool.query('INSERT INTO fuel_prices (price_per_liter) VALUES ($1)', [0.72]);
+  const { rows: fuelRows } = await safeQuery('SELECT COUNT(*) as c FROM fuel_prices', null, 'fuel count');
+  if (parseInt(fuelRows[0]?.c ?? 0) === 0) {
+    await safeQuery('INSERT INTO fuel_prices (price_per_liter) VALUES ($1)', [0.72], 'fuel seed');
   }
 
   // ── AUTO-SET active_airline_id for existing users ────────────────────────────
-  await pool.query(`
+  await safeQuery(`
     UPDATE users
     SET active_airline_id = (
       SELECT id FROM airlines WHERE user_id = users.id ORDER BY id LIMIT 1
     )
     WHERE active_airline_id IS NULL
       AND EXISTS (SELECT 1 FROM airlines WHERE user_id = users.id)
-  `).catch(() => {});
+  `, null, 'active airline');
 
   console.log('✅ Schema and seed data applied');
 }

@@ -166,19 +166,21 @@ router.get('/', authMiddleware, async (req, res) => {
     `, [req.airlineId]);
     const undeployed_cabin = parseInt(ucResult.rows[0].total) || 0;
 
-    // Cockpit crew grouped by type rating
+    // Cockpit crew grouped by type rating — split deployed vs undeployed
     const kResult = await pool.query(`
-      SELECT p.aircraft_id, ac.registration, at.manufacturer, at.model, p.count, p.weekly_wage_per_person, p.type_rating
+      SELECT p.aircraft_id, at.manufacturer, at.model, p.count, p.weekly_wage_per_person, p.type_rating,
+        CASE WHEN p.aircraft_id IS NOT NULL AND ac.id IS NOT NULL THEN true ELSE false END as is_deployed
       FROM personnel p
-      LEFT JOIN aircraft ac ON ac.id = p.aircraft_id
+      LEFT JOIN aircraft ac ON ac.id = p.aircraft_id AND ac.airline_id = $1
       LEFT JOIN aircraft_types at ON at.id = ac.aircraft_type_id
       WHERE p.airline_id = $1 AND p.staff_type = 'cockpit'
     `, [req.airlineId]);
     const cockpitByRating = {};
     for (const r of kResult.rows) {
       const rating = r.manufacturer ? getTypeRating(r.manufacturer, r.model) : (r.type_rating || 'Unassigned');
-      if (!cockpitByRating[rating]) cockpitByRating[rating] = { type_rating: rating, count: 0, weekly_wage_per_person: r.weekly_wage_per_person };
-      cockpitByRating[rating].count += r.count;
+      if (!cockpitByRating[rating]) cockpitByRating[rating] = { type_rating: rating, deployed: 0, undeployed: 0, weekly_wage_per_person: r.weekly_wage_per_person };
+      if (r.is_deployed) cockpitByRating[rating].deployed += r.count;
+      else cockpitByRating[rating].undeployed += r.count;
     }
 
     // Undeployed cockpit crew (aircraft sold/scrapped = no longer in fleet)

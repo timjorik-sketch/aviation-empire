@@ -619,7 +619,7 @@ function App() {
     hubs: 'Network',
     'service-profiles': 'Service Profiles',
     'cabin-profiles': 'Cabin Profiles',
-    personnel: 'Personnel',
+    personnel: 'Staff & Crew',
     marketplace: 'Marketplace',
     'airport-overview': 'Airport Overview',
   };
@@ -1168,7 +1168,7 @@ function App() {
                       { label: 'Fleet Management', page: 'fleet'      },
                       { label: 'Flight Operations', page: 'flights'   },
                       { label: 'Finances',          page: 'finances'  },
-                      { label: 'Personnel',         page: 'personnel' },
+                      { label: 'Staff & Crew',      page: 'personnel' },
                     ].map(({ label, page }) => (
                       <button key={page} className="fo-nav-btn" onClick={() => setCurrentPage(page)}>
                         {label}

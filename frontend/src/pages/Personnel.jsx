@@ -44,15 +44,15 @@ export default function Personnel({ airline, onBack }) {
   const groundWage   = data.ground.reduce((s, r) => s + r.count * r.weekly_wage_per_person, 0);
   const totalCabin   = data.cabin.reduce((s, r) => s + r.count, 0);
   const cabinWage    = data.cabin.reduce((s, r) => s + r.count * r.weekly_wage_per_person, 0);
-  const totalCockpit = data.cockpit.reduce((s, r) => s + r.count, 0);
-  const cockpitWage  = data.cockpit.reduce((s, r) => s + r.count * r.weekly_wage_per_person, 0);
+  const totalCockpit = data.cockpit.reduce((s, r) => s + (r.deployed || 0) + (r.undeployed || 0), 0);
+  const cockpitWage  = data.cockpit.reduce((s, r) => s + ((r.deployed || 0) + (r.undeployed || 0)) * r.weekly_wage_per_person, 0);
   const totalWage    = groundWage + cabinWage + cockpitWage;
 
   return (
     <div className="app">
       <div className="page-hero" style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.4), rgba(0,0,0,0.6)), url('/header-images/Headerimage_crew.png')" }}>
         <div className="page-hero-overlay">
-          <h1>Personnel</h1>
+          <h1>Staff & Crew</h1>
           <p>{airline?.name}</p>
         </div>
       </div>
@@ -62,7 +62,7 @@ export default function Personnel({ airline, onBack }) {
 
         <div className="info-card" style={{ marginTop: '1.5rem' }}>
           <div className="card-header-bar">
-            <span className="card-header-bar-title">Employed People</span>
+            <span className="card-header-bar-title">Employed Staff & Crew</span>
           </div>
 
           {loading ? (
@@ -72,7 +72,7 @@ export default function Personnel({ airline, onBack }) {
               <thead>
                 <tr>
                   <th>Position</th>
-                  <th className="per-th-r">Headcount</th>
+                  <th className="per-th-r">Deployed</th>
                   <th className="per-th-r">Not Deployed</th>
                   <th className="per-th-r">Wage / Person</th>
                   <th className="per-th-r">Weekly Cost</th>
@@ -83,7 +83,7 @@ export default function Personnel({ airline, onBack }) {
                 <tr className="per-section-row"><td colSpan={5} className="per-section-label">Ground Staff</td></tr>
                 <tr>
                   <td className="per-label">Airport Ground Staff</td>
-                  <td className="per-val-r">{totalGround.toLocaleString()}</td>
+                  <td className="per-val-r">{(totalGround - data.undeployed_ground).toLocaleString()}</td>
                   <td className="per-val-r">
                     {data.undeployed_ground > 0 ? (
                       <span className="per-undeployed-cell">
@@ -102,7 +102,7 @@ export default function Personnel({ airline, onBack }) {
                 <tr className="per-section-row"><td colSpan={5} className="per-section-label">Cabin Crew</td></tr>
                 <tr>
                   <td className="per-label">Flight Attendants</td>
-                  <td className="per-val-r">{totalCabin.toLocaleString()}</td>
+                  <td className="per-val-r">{(totalCabin - data.undeployed_cabin).toLocaleString()}</td>
                   <td className="per-val-r">
                     {data.undeployed_cabin > 0 ? (
                       <span className="per-undeployed-cell">
@@ -122,32 +122,24 @@ export default function Personnel({ airline, onBack }) {
                 {data.cockpit.length === 0 ? (
                   <tr><td colSpan={5} className="per-empty">No cockpit crew hired yet</td></tr>
                 ) : (
-                  <>
-                    {data.cockpit.map(g => (
-                      <tr key={g.type_rating}>
-                        <td className="per-label">{g.type_rating}</td>
-                        <td className="per-val-r">{g.count.toLocaleString()}</td>
-                        <td className="per-val-r"><span className="per-muted">—</span></td>
-                        <td className="per-val-r per-muted">$3,500 / wk</td>
-                        <td className="per-val-r per-cost">${(g.count * g.weekly_wage_per_person).toLocaleString()}</td>
-                      </tr>
-                    ))}
-                    {data.undeployed_cockpit > 0 && (
-                      <tr>
-                        <td className="per-label per-muted" style={{ paddingLeft: '2rem' }}>↳ Not Deployed</td>
-                        <td className="per-val-r per-undeployed-count">{data.undeployed_cockpit.toLocaleString()}</td>
-                        <td className="per-val-r">
+                  data.cockpit.map(g => (
+                    <tr key={g.type_rating}>
+                      <td className="per-label">{g.type_rating}</td>
+                      <td className="per-val-r">{(g.deployed || 0).toLocaleString()}</td>
+                      <td className="per-val-r">
+                        {(g.undeployed || 0) > 0 ? (
                           <span className="per-undeployed-cell">
+                            <span className="per-undeployed-count">{g.undeployed}</span>
                             <button className="per-dismiss-btn" disabled={dismissing === 'cockpit'} onClick={() => dismissUndeployed('cockpit')}>
                               {dismissing === 'cockpit' ? '…' : 'Dismiss'}
                             </button>
                           </span>
-                        </td>
-                        <td className="per-val-r per-muted">—</td>
-                        <td className="per-val-r per-muted">—</td>
-                      </tr>
-                    )}
-                  </>
+                        ) : <span className="per-muted">—</span>}
+                      </td>
+                      <td className="per-val-r per-muted">$3,500 / wk</td>
+                      <td className="per-val-r per-cost">${(((g.deployed || 0) + (g.undeployed || 0)) * g.weekly_wage_per_person).toLocaleString()}</td>
+                    </tr>
+                  ))
                 )}
 
                 {/* Total */}

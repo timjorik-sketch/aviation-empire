@@ -1394,14 +1394,27 @@ async function backfillFuelPrices() {
 // Generate a new fuel price — smooth random walk with occasional spikes
 async function generateFuelPrice() {
   try {
-    const lastResult = await pool.query('SELECT price_per_liter FROM fuel_prices ORDER BY created_at DESC LIMIT 1');
+    const lastResult = await pool.query('SELECT price_per_liter, created_at FROM fuel_prices ORDER BY created_at DESC LIMIT 1');
     let previousPrice = 0.75;
-    if (lastResult.rows[0]) previousPrice = lastResult.rows[0].price_per_liter;
+    if (lastResult.rows[0]) previousPrice = parseFloat(lastResult.rows[0].price_per_liter);
+
+    // Skip if a price was already generated in the last 30 minutes (avoid duplicates on restart)
+    if (lastResult.rows[0]) {
+      const age = Date.now() - new Date(lastResult.rows[0].created_at).getTime();
+      if (age < 30 * 60 * 1000) {
+        console.log(`[FuelPrice] Skipped — last price generated ${Math.round(age / 60000)} min ago`);
+        return;
+      }
+    }
 
     const isSpike = Math.random() < 0.10;
-    let delta = isSpike ? (Math.random() * 0.60) - 0.30 : (Math.random() * 0.10) - 0.05;
-    if (previousPrice > 0.90) delta -= 0.01;
-    if (previousPrice < 0.50) delta += 0.01;
+    // Minimum absolute delta of 0.02 to guarantee visible change
+    const sign = Math.random() < 0.5 ? 1 : -1;
+    let delta = isSpike
+      ? sign * (0.10 + Math.random() * 0.20)
+      : sign * (0.02 + Math.random() * 0.08);
+    if (previousPrice > 0.90) delta -= 0.02;
+    if (previousPrice < 0.50) delta += 0.02;
     const newPrice = Math.max(FUEL_MIN_PER_KG, Math.min(FUEL_MAX_PER_KG, previousPrice + delta));
     const rounded = Math.round(newPrice * 100) / 100;
 
@@ -1411,7 +1424,7 @@ async function generateFuelPrice() {
     // Keep only last 3 days of history
     await pool.query("DELETE FROM fuel_prices WHERE created_at < NOW() - INTERVAL '3 days'");
 
-    console.log(`[FuelPrice] New price: $${rounded.toFixed(2)}/kg${isSpike ? ' (spike)' : ''}`);
+    console.log(`[FuelPrice] New price: $${rounded.toFixed(2)}/kg (prev $${previousPrice.toFixed(2)})${isSpike ? ' (spike)' : ''}`);
   } catch (err) {
     console.error('generateFuelPrice error:', err);
   }
@@ -1536,7 +1549,8 @@ function startFlightProcessor() {
   // Generate flights, bookings, fuel price — all synced to :13 each hour
   scheduleAtMinute13(generateFlights, 'FlightGen');
   scheduleAtMinute13(processBookings, 'Bookings');
-  // Fuel price: backfill history on start, then sync to :13
+  // Fuel price: generate immediately on start, backfill history, then sync to :13
+  generateFuelPrice();
   backfillFuelPrices();
   scheduleAtMinute13(generateFuelPrice, 'FuelPrice');
   // Process flight statuses every 10 seconds (status changes need to be fast)

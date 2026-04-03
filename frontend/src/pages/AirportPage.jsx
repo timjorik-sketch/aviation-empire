@@ -95,7 +95,7 @@ function AirlineChip({ code, logoFilename, dark = true }) {
   if (logoFilename) {
     return (
       <img
-        src={`${API_URL}/airline-logos/${logoFilename}`}
+        src={logoFilename.startsWith('http') ? logoFilename : `${API_URL}/airline-logos/${logoFilename}`}
         alt={code}
         title={code}
         style={{ width: 120, height: 30, objectFit: 'contain', display: 'block' }}

@@ -220,17 +220,18 @@ router.get('/:code/departures', async (req, res) => {
     const code = req.params.code.toUpperCase();
     const result = await pool.query(`
       SELECT f.id, f.flight_number, f.departure_time, f.arrival_time, f.status,
-             r.arrival_airport AS destination,
+             COALESCE(r.arrival_airport, ws.arrival_airport) AS destination,
              ap_dest.name AS destination_name,
              al.name AS airline_name, al.airline_code,
              at.model AS aircraft_model, al.logo_filename
       FROM flights f
-      JOIN routes r ON f.route_id = r.id
-      JOIN airports ap_dest ON ap_dest.iata_code = r.arrival_airport
-      JOIN airlines al ON f.airline_id = al.id
-      JOIN aircraft ac ON f.aircraft_id = ac.id
+      LEFT JOIN routes r        ON f.route_id = r.id
+      LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
+      LEFT JOIN airports ap_dest ON ap_dest.iata_code = COALESCE(r.arrival_airport, ws.arrival_airport)
+      JOIN airlines al    ON f.airline_id = al.id
+      JOIN aircraft ac    ON f.aircraft_id = ac.id
       JOIN aircraft_types at ON ac.aircraft_type_id = at.id
-      WHERE r.departure_airport = $1
+      WHERE COALESCE(r.departure_airport, ws.departure_airport) = $1
         AND f.departure_time >= NOW() - INTERVAL '1 minute'
         AND f.departure_time <= NOW() + INTERVAL '3 days'
         AND f.status != 'cancelled'
@@ -258,17 +259,18 @@ router.get('/:code/arrivals', async (req, res) => {
     const code = req.params.code.toUpperCase();
     const result = await pool.query(`
       SELECT f.id, f.flight_number, f.departure_time, f.arrival_time, f.status,
-             r.departure_airport AS origin,
+             COALESCE(r.departure_airport, ws.departure_airport) AS origin,
              ap_orig.name AS origin_name,
              al.name AS airline_name, al.airline_code,
              at.model AS aircraft_model, al.logo_filename
       FROM flights f
-      JOIN routes r ON f.route_id = r.id
-      JOIN airports ap_orig ON ap_orig.iata_code = r.departure_airport
-      JOIN airlines al ON f.airline_id = al.id
-      JOIN aircraft ac ON f.aircraft_id = ac.id
+      LEFT JOIN routes r        ON f.route_id = r.id
+      LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
+      LEFT JOIN airports ap_orig ON ap_orig.iata_code = COALESCE(r.departure_airport, ws.departure_airport)
+      JOIN airlines al    ON f.airline_id = al.id
+      JOIN aircraft ac    ON f.aircraft_id = ac.id
       JOIN aircraft_types at ON ac.aircraft_type_id = at.id
-      WHERE r.arrival_airport = $1
+      WHERE COALESCE(r.arrival_airport, ws.arrival_airport) = $1
         AND f.arrival_time >= NOW() - INTERVAL '1 minute'
         AND f.arrival_time <= NOW() + INTERVAL '3 days'
         AND f.status != 'cancelled'

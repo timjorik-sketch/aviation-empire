@@ -11,8 +11,7 @@ const TYPE_META = {
   destination:    { label: 'Destination',     dark: false },
 };
 
-const OPEN_COST = 50_000;
-const HUB_COST  = 10_000_000;
+const OPEN_COST = 10_000;
 
 
 function fmtCost(n) {

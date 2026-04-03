@@ -179,11 +179,10 @@ const DEST_TYPE_LABELS = {
   destination: 'Destination',
 };
 
-function DestinationStatusCard({ destStatus, airportCode, onUpgrade, upgrading }) {
+function DestinationStatusCard({ destStatus, airportCode }) {
   if (!destStatus.is_opened) return null;
 
   const label = DEST_TYPE_LABELS[destStatus.effective_type] || 'Destination';
-  const canUpgrade = destStatus.destination_type === 'destination';
 
   return (
     <div className="ap-al-info-body">
@@ -220,27 +219,6 @@ function DestinationStatusCard({ destStatus, airportCode, onUpgrade, upgrading }
         </tbody>
       </table>
 
-      {canUpgrade && (
-        <div style={{ padding: '0.75rem 1.1rem 1rem' }}>
-          <button
-            onClick={onUpgrade}
-            disabled={upgrading}
-            style={{
-              width: '100%', padding: '8px 0', fontSize: 13, fontWeight: 600,
-              background: '#2C2C2C', color: '#fff',
-              border: 'none', borderRadius: 6, cursor: 'pointer',
-              opacity: upgrading ? 0.6 : 1
-            }}
-          >
-            {upgrading ? 'Upgrading...' : 'Upgrade to Hub ($10M)'}
-          </button>
-        </div>
-      )}
-      {destStatus.effective_type === 'base' && destStatus.destination_type !== 'hub' && (
-        <p style={{ margin: 0, padding: '0 1.1rem 0.75rem', fontSize: 12, color: '#999' }}>
-          Base status automatic (600+ weekly flights).
-        </p>
-      )}
     </div>
   );
 }
@@ -261,7 +239,6 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
   const [capableLoading, setCapableLoading] = useState(false);
 
   const [destStatus, setDestStatus] = useState(null); // { is_opened, destination_type, effective_type, weekly_flights }
-  const [upgrading, setUpgrading] = useState(false);
 
   const fetchBoards = useCallback(() => {
     setBoardsLoading(true);
@@ -287,28 +264,6 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
       .catch(() => {})
       .finally(() => setCapableLoading(false));
   }, [code, capableAircraft.length]);
-
-  const handleUpgradeMegaHub = async () => {
-    if (!confirm(`Upgrade ${code} to Hub for $10,000,000?`)) return;
-    setUpgrading(true);
-    const token = localStorage.getItem('token');
-    try {
-      const res = await fetch(`${API_URL}/api/destinations/upgrade-hub`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ airport_code: code })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed');
-      if (data.new_balance != null) onBalanceUpdate?.(data.new_balance);
-      setDestStatus(prev => prev ? { ...prev, destination_type: 'hub', effective_type: 'hub' } : prev);
-      alert('Upgraded to Hub!');
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setUpgrading(false);
-    }
-  };
 
   useEffect(() => {
     setLoading(true);
@@ -535,8 +490,6 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
                   <DestinationStatusCard
                     destStatus={destStatus}
                     airportCode={code}
-                    onUpgrade={handleUpgradeMegaHub}
-                    upgrading={upgrading}
                   />
                 </div>
               )}

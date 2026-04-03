@@ -6,8 +6,6 @@ import { addGroundStaff, calcGroundStaff } from './personnel.js';
 const router = express.Router();
 
 const OPEN_COST  = 10_000;
-const HUB_COST   = 10_000_000;
-const HUB_THRESHOLD = 600; // weekly schedule entries
 
 // Ensure home base destination exists (lazy init)
 async function ensureHomeBase(airlineId) {
@@ -27,8 +25,7 @@ async function ensureHomeBase(airlineId) {
   }
 }
 
-function effectiveType(destType, weeklyFlights) {
-  if (destType === 'destination' && weeklyFlights >= HUB_THRESHOLD) return 'base';
+function effectiveType(destType) {
   return destType;
 }
 
@@ -73,7 +70,7 @@ router.get('/', authMiddleware, async (req, res) => {
       return {
         id: r.id, airport_code: r.airport_code, destination_type: dtype,
         display_type: displayType,
-        effective_type: effectiveType(displayType, wf),
+        effective_type: effectiveType(displayType),
         opened_at: r.opened_at, airport_name: r.name, country: r.country,
         continent: r.continent, category: r.category, weekly_flights: wf,
         ground_staff: groundStaff, has_expansion: hasExpansion, expansion_level: expansionLevel
@@ -201,71 +198,6 @@ router.post('/open', authMiddleware, async (req, res) => {
   }
 });
 
-// POST /api/destinations/upgrade-hub — upgrade destination to Hub for $10,000,000
-router.post('/upgrade-hub', authMiddleware, async (req, res) => {
-  if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
-  try {
-    const { airport_code } = req.body;
-    if (!airport_code) return res.status(400).json({ error: 'airport_code required' });
-    const code = airport_code.toUpperCase();
-
-    // Find current destination entry
-    const destResult = await pool.query(
-      'SELECT id, destination_type FROM airline_destinations WHERE airline_id = $1 AND airport_code = $2',
-      [req.airlineId, code]
-    );
-    if (!destResult.rows[0]) {
-      return res.status(404).json({ error: 'Destination not found. Open it first.' });
-    }
-    const destId = destResult.rows[0].id;
-    const currentType = destResult.rows[0].destination_type;
-
-    if (currentType === 'home_base') {
-      return res.status(400).json({ error: 'Home Base already has Hub privileges.' });
-    }
-    if (currentType === 'hub') {
-      return res.status(400).json({ error: 'Already a Hub.' });
-    }
-
-    // Check balance
-    const balResult = await pool.query('SELECT balance FROM airlines WHERE id = $1', [req.airlineId]);
-    const balance = balResult.rows[0].balance;
-
-    if (balance < HUB_COST) {
-      return res.status(400).json({ error: `Insufficient balance. Hub upgrade costs $${HUB_COST.toLocaleString()}.` });
-    }
-
-    // Deduct cost
-    await pool.query('UPDATE airlines SET balance = balance - $1 WHERE id = $2', [HUB_COST, req.airlineId]);
-
-    // Record transaction
-    await pool.query(
-      "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
-      [req.airlineId, -HUB_COST, `Upgraded to Hub: ${code}`]
-    );
-
-    // Upgrade
-    await pool.query('UPDATE airline_destinations SET destination_type = $1 WHERE id = $2', ['hub', destId]);
-
-    // Add hub bonus ground staff
-    try {
-      const apCatResult = await pool.query('SELECT category FROM airports WHERE iata_code = $1', [code]);
-      if (apCatResult.rows[0]) {
-        const category = apCatResult.rows[0].category;
-        await addGroundStaff(req.airlineId, code, category || 4, 'hub', 0, 0);
-      }
-    } catch (e) { console.error('Hub ground staff error:', e); }
-
-    // Get new balance
-    const newBalResult = await pool.query('SELECT balance FROM airlines WHERE id = $1', [req.airlineId]);
-    const newBalance = newBalResult.rows[0].balance;
-
-    res.json({ message: `${code} upgraded to Hub`, new_balance: newBalance });
-  } catch (error) {
-    console.error('Upgrade hub error:', error);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
 
 // DELETE /api/destinations/:code — close/remove a destination
 router.delete('/:code', authMiddleware, async (req, res) => {

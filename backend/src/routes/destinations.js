@@ -5,7 +5,7 @@ import { addGroundStaff, calcGroundStaff } from './personnel.js';
 
 const router = express.Router();
 
-const OPEN_COST  = 50_000;
+const OPEN_COST  = 10_000;
 const HUB_COST   = 10_000_000;
 const HUB_THRESHOLD = 600; // weekly schedule entries
 

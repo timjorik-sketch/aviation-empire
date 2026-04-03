@@ -134,15 +134,17 @@ export default function Personnel({ airline, onBack }) {
                     ))}
                     {data.undeployed_cockpit > 0 && (
                       <tr>
-                        <td className="per-label per-muted">Not Deployed</td>
+                        <td className="per-label per-muted" style={{ paddingLeft: '2rem' }}>↳ Not Deployed</td>
                         <td className="per-val-r per-undeployed-count">{data.undeployed_cockpit.toLocaleString()}</td>
                         <td className="per-val-r">
-                          <button className="per-dismiss-btn" disabled={dismissing === 'cockpit'} onClick={() => dismissUndeployed('cockpit')}>
-                            {dismissing === 'cockpit' ? '…' : 'Dismiss'}
-                          </button>
+                          <span className="per-undeployed-cell">
+                            <button className="per-dismiss-btn" disabled={dismissing === 'cockpit'} onClick={() => dismissUndeployed('cockpit')}>
+                              {dismissing === 'cockpit' ? '…' : 'Dismiss'}
+                            </button>
+                          </span>
                         </td>
-                        <td className="per-val-r per-muted">$3,500 / wk</td>
-                        <td className="per-val-r per-cost">${(data.undeployed_cockpit * 3500).toLocaleString()}</td>
+                        <td className="per-val-r per-muted">—</td>
+                        <td className="per-val-r per-muted">—</td>
                       </tr>
                     )}
                   </>

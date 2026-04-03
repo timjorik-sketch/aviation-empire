@@ -299,7 +299,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         total += Math.ceil(cls.actual_capacity / (CABIN_CREW_RATIOS[cls.class_type] || 50));
       }
     }
-    return Math.max(2, Math.min(25, total));
+    return Math.max(3, Math.min(30, total));
   }, [selectedProfile]);
 
   const token = localStorage.getItem('token');

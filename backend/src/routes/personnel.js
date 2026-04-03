@@ -78,12 +78,12 @@ async function consumeOrphanedStaff(airlineId, staffType, needed, typeRating = n
     let result;
     if (typeRating) {
       result = await pool.query(
-        `SELECT id, count FROM personnel WHERE airline_id = $1 AND staff_type = $2 AND type_rating = $3 AND (aircraft_id IS NULL OR aircraft_id NOT IN (SELECT id FROM aircraft WHERE airline_id = $1 AND is_active = 1)) ORDER BY count DESC`,
+        `SELECT id, count FROM personnel WHERE airline_id = $1 AND staff_type = $2 AND type_rating = $3 AND (aircraft_id IS NULL OR aircraft_id NOT IN (SELECT id FROM aircraft WHERE airline_id = $1)) ORDER BY count DESC`,
         [airlineId, staffType, typeRating]
       );
     } else {
       result = await pool.query(
-        `SELECT id, count FROM personnel WHERE airline_id = $1 AND staff_type = $2 AND (aircraft_id IS NULL OR aircraft_id NOT IN (SELECT id FROM aircraft WHERE airline_id = $1 AND is_active = 1)) ORDER BY count DESC`,
+        `SELECT id, count FROM personnel WHERE airline_id = $1 AND staff_type = $2 AND (aircraft_id IS NULL OR aircraft_id NOT IN (SELECT id FROM aircraft WHERE airline_id = $1)) ORDER BY count DESC`,
         [airlineId, staffType]
       );
     }
@@ -155,13 +155,13 @@ router.get('/', authMiddleware, async (req, res) => {
       count: r.count, weekly_wage_per_person: r.weekly_wage_per_person
     }));
 
-    // Undeployed cabin crew
+    // Undeployed cabin crew (aircraft sold/scrapped = no longer in fleet)
     const ucResult = await pool.query(`
       SELECT COALESCE(SUM(p.count), 0) as total
       FROM personnel p
       WHERE p.airline_id = $1 AND p.staff_type = 'cabin'
         AND (p.aircraft_id IS NULL OR p.aircraft_id NOT IN (
-          SELECT id FROM aircraft WHERE airline_id = $1 AND is_active = 1
+          SELECT id FROM aircraft WHERE airline_id = $1
         ))
     `, [req.airlineId]);
     const undeployed_cabin = parseInt(ucResult.rows[0].total) || 0;
@@ -181,13 +181,13 @@ router.get('/', authMiddleware, async (req, res) => {
       cockpitByRating[rating].count += r.count;
     }
 
-    // Undeployed cockpit crew
+    // Undeployed cockpit crew (aircraft sold/scrapped = no longer in fleet)
     const ukResult = await pool.query(`
       SELECT COALESCE(SUM(p.count), 0) as total
       FROM personnel p
       WHERE p.airline_id = $1 AND p.staff_type = 'cockpit'
         AND (p.aircraft_id IS NULL OR p.aircraft_id NOT IN (
-          SELECT id FROM aircraft WHERE airline_id = $1 AND is_active = 1
+          SELECT id FROM aircraft WHERE airline_id = $1
         ))
     `, [req.airlineId]);
     const undeployed_cockpit = parseInt(ukResult.rows[0].total) || 0;
@@ -308,7 +308,7 @@ router.delete('/dismiss-undeployed/:type', authMiddleware, async (req, res) => {
         DELETE FROM personnel
         WHERE airline_id = $1 AND staff_type = $2
           AND (aircraft_id IS NULL OR aircraft_id NOT IN (
-            SELECT id FROM aircraft WHERE airline_id = $1 AND is_active = 1
+            SELECT id FROM aircraft WHERE airline_id = $1
           ))
       `, [req.airlineId, type]);
     }

@@ -430,7 +430,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
                   </tr>
                   <tr>
                     <td className="ap-it-label">Country</td>
-                    <td className="ap-it-val">{airport.state || '—'}</td>
+                    <td className="ap-it-val">{airport.country || '—'}</td>
                   </tr>
                   <tr>
                     <td className="ap-it-label">Runway</td>

@@ -112,7 +112,7 @@ router.post('/', authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error('Schedule maintenance error:', error);
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: 'Server error', detail: error.message });
   }
 });
 

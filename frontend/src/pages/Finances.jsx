@@ -305,7 +305,7 @@ export default function Finances({ airline, onBack, onNavigateToAirport }) {
     </div>
   );
 
-  const fuelLabelL = fuelHistory.currentPrice > 0 ? `at $${fuelHistory.currentPrice.toFixed(2)}/kg` : (cb.fuel_price_per_liter ? `at $${cb.fuel_price_per_liter.toFixed(2)}/kg` : '');
+  const fuelLabelL = '';
 
   return (
     <div className="app">

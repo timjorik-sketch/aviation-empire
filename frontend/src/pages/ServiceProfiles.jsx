@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import TopBar from '../components/TopBar.jsx';
 import Toast from '../components/Toast.jsx';
 
-const API_URL = '';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 const CABIN_LABELS = { economy: 'Economy', business: 'Business', first: 'First Class' };
 

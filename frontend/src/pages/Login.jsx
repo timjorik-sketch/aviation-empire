@@ -24,7 +24,7 @@ function Login({ onLogin, onSwitchToRegister }) {
 
     try {
       const response = await axios.post(
-        'https://glorious-lamp-jjvxpgvv9gj4c57vg-3001.app.github.dev/api/auth/login',
+        `${import.meta.env.VITE_API_URL || ''}/api/auth/login`,
         formData
       );
 

@@ -37,7 +37,7 @@ function Register({ onRegister, onSwitchToLogin }) {
 
     try {
       const response = await axios.post(
-        'https://glorious-lamp-jjvxpgvv9gj4c57vg-3001.app.github.dev/api/auth/register',
+        `${import.meta.env.VITE_API_URL || ''}/api/auth/register`,
         {
           email: formData.email,
           username: formData.username,

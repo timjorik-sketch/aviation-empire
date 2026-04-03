@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import TopBar from '../components/TopBar.jsx';
 
-const API_URL = '';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 export default function Personnel({ airline, onBack }) {
   const [data, setData] = useState({ ground: [], cabin: [], cockpit: [], undeployed_ground: 0, undeployed_cabin: 0, undeployed_cockpit: 0 });

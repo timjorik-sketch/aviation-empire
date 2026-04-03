@@ -63,7 +63,7 @@ function getFeedbackMessages(violations, flightId) {
   return messages;
 }
 
-const API_URL = '';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const DAY_FULL  = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Toast from '../components/Toast.jsx';
 
-const API_URL = '';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 // ── Modal: Change Password ──────────────────────────────────────────────────
 function ChangePasswordModal({ onClose }) {

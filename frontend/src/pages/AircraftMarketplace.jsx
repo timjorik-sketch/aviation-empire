@@ -3,7 +3,7 @@ import TopBar from '../components/TopBar.jsx';
 import Toast from '../components/Toast.jsx';
 // aircraftValue utils used via local fmt() helper below
 
-const API_URL = '';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 const WAKE_LABELS = { L: 'Light', M: 'Medium', H: 'Heavy' };
 

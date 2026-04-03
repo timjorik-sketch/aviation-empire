@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import TopBar from '../components/TopBar.jsx';
 
-const API_URL = '';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 const DAY_LABELS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 

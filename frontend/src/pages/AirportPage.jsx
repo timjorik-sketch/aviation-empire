@@ -3,7 +3,7 @@ import AirportMap from '../components/AirportMap.jsx';
 import AirportLink from '../components/AirportLink.jsx';
 import TopBar from '../components/TopBar.jsx';
 
-const API_URL = '';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 const GROUND_STAFF_BY_CAT = { 1: 2, 2: 4, 3: 7, 4: 10, 5: 14, 6: 18, 7: 22, 8: 25 };
 

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import TopBar from '../components/TopBar.jsx';
 
-const API_URL = '';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 const CATEGORY_LABELS = {
   1: 'Airstrip',

@@ -3,7 +3,7 @@ import AirportLink from '../components/AirportLink.jsx';
 import Toast from '../components/Toast.jsx';
 import { calculateCurrentValue, formatAircraftValue } from '../utils/aircraftValue.js';
 
-const API_URL = '';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNavigateToAirport, onNavigate }) {
   const [fleetGrouped, setFleetGrouped] = useState([]);

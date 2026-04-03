@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
 
-const API_URL = '';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 function greatCirclePoints(lat1, lon1, lat2, lon2, n = 200) {
   const toRad = d => d * Math.PI / 180;

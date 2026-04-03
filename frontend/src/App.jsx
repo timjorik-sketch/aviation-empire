@@ -41,7 +41,7 @@ import RoutePreviewMap from './components/RoutePreviewMap.jsx';
 import SatisfactionRating, { getSatColor, scoreToRating } from './components/SatisfactionRating.jsx';
 import './App.css';
 
-const API_URL = '';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 function CreateAirlineForm({ onCreated, onCancel }) {
   const [name, setName] = useState('');

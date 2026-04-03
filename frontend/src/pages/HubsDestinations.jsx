@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import TopBar from '../components/TopBar.jsx';
 
-const API_URL = '';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 const TYPE_META = {
   home_base:      { label: 'Home Base',       dark: true },

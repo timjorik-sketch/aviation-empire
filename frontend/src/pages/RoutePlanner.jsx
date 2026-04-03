@@ -4,7 +4,7 @@ import TopBar from '../components/TopBar.jsx';
 import Toast from '../components/Toast.jsx';
 import RoutePreviewMap from '../components/RoutePreviewMap.jsx';
 
-const API_URL = '';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 function haversineKm(lat1, lon1, lat2, lon2) {
   const R = 6371, toRad = d => d * Math.PI / 180;

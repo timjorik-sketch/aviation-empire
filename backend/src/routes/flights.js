@@ -1398,15 +1398,6 @@ async function generateFuelPrice() {
     let previousPrice = 0.75;
     if (lastResult.rows[0]) previousPrice = parseFloat(lastResult.rows[0].price_per_liter);
 
-    // Skip if a price was already generated in the last 30 minutes (avoid duplicates on restart)
-    if (lastResult.rows[0]) {
-      const age = Date.now() - new Date(lastResult.rows[0].created_at).getTime();
-      if (age < 30 * 60 * 1000) {
-        console.log(`[FuelPrice] Skipped — last price generated ${Math.round(age / 60000)} min ago`);
-        return;
-      }
-    }
-
     const isSpike = Math.random() < 0.10;
     // Minimum absolute delta of 0.02 to guarantee visible change
     const sign = Math.random() < 0.5 ? 1 : -1;

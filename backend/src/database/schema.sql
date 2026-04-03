@@ -1474,23 +1474,23 @@ INSERT OR IGNORE INTO airports (iata_code, name, country, registration_prefix, c
 --  required_level, required_pilots, image_filename)
 INSERT OR IGNORE INTO aircraft_types (id, manufacturer, model, full_name, max_passengers, range_km, cruise_speed_kmh, min_runway_takeoff_m, min_runway_landing_m, fuel_consumption_empty_per_km, fuel_consumption_full_per_km, wake_turbulence_category, new_price_usd, required_level, required_pilots, image_filename) VALUES
 -- Regional Jets (Level 1)
-(1,  'Embraer', 'E175',     'Embraer E175',     88,  3704,  829, 1644, 1280, 0.018, 0.023, 'M', 46800000,  1, 2, 'Aircraft_Embrear_175.png'),
-(2,  'Embraer', 'E175-E2',  'Embraer E175-E2',  90,  3815,  833, 1600, 1250, 0.016, 0.020, 'M', 56700000,  1, 2, 'Aircraft_Embrear_175-E2.png'),
-(3,  'Embraer', 'E190-E2',  'Embraer E190-E2',  114, 5278,  833, 1693, 1350, 0.018, 0.023, 'M', 67300000,  1, 2, 'Aircraft_Embrear_190-E2.png'),
-(4,  'Embraer', 'E195-E2',  'Embraer E195-E2',  146, 4815,  833, 1788, 1400, 0.019, 0.024, 'M', 72900000,  1, 2, 'Aircraft_Embrear_195-E2.png'),
--- Narrow-body (Level 2-3)
-(5,  'Airbus',  'A220-100', 'Airbus A220-100',  135, 6390,  871, 1463, 1372, 0.019, 0.024, 'M', 81000000,  2, 2, 'Aircraft_Airbus_220-100.png'),
-(6,  'Airbus',  'A220-300', 'Airbus A220-300',  160, 6297,  871, 1707, 1463, 0.021, 0.026, 'M', 91500000,  2, 2, 'Aircraft_Airbus_220-300.png'),
-(7,  'Airbus',  'A318',     'Airbus A318',      132, 5750,  828, 1780, 1510, 0.022, 0.028, 'M', 77400000,  2, 2, 'Aircraft_Airbus_318.png'),
-(8,  'Airbus',  'A319',     'Airbus A319',      160, 6850,  829, 1850, 1400, 0.023, 0.029, 'M', 89500000,  2, 2, 'Aircraft_Airbus_319.png'),
-(9,  'Airbus',  'A320',     'Airbus A320',      180, 6150,  828, 2090, 1480, 0.024, 0.030, 'M', 101000000, 3, 2, 'Aircraft_Airbus_320.png'),
-(10, 'Airbus',  'A321',     'Airbus A321',      220, 5950,  828, 2180, 1530, 0.026, 0.033, 'M', 118300000, 3, 2, 'Aircraft_Airbus_321.png'),
-(11, 'Airbus',  'A321 Neo', 'Airbus A321 Neo',  244, 7400,  828, 2180, 1530, 0.023, 0.029, 'M', 129500000, 3, 2, 'Aircraft_Airbus_321_Neo.png'),
--- Wide-body (Level 4-5)
-(12, 'Boeing',  '787-8',    'Boeing 787-8',     330, 13530, 903, 2500, 1600, 0.027, 0.035, 'H', 248300000, 4, 2, 'Aircraft_Boeing_787-800.png'),
-(13, 'Boeing',  '777-300',  'Boeing 777-300',   550, 11135, 905, 3380, 1890, 0.032, 0.042, 'H', 375500000, 5, 2, 'Aircraft_Boeing_777-300.png'),
--- Flagship (Level 6)
-(14, 'Airbus',  'A380',     'Airbus A380',      853, 14800, 903, 2900, 2000, 0.036, 0.048, 'H', 445600000, 6, 2, 'Aircraft_Airbus_380.png');
+(1,  'Embraer', 'E175',     'Embraer E175',     88,  3704,  829, 1644, 1280, 0.018, 0.023, 'M', 46800000,  4, 2, 'Aircraft_Embrear_175.png'),
+(2,  'Embraer', 'E175-E2',  'Embraer E175-E2',  90,  3815,  833, 1600, 1250, 0.016, 0.020, 'M', 56700000,  4, 2, 'Aircraft_Embrear_175-E2.png'),
+(3,  'Embraer', 'E190-E2',  'Embraer E190-E2',  114, 5278,  833, 1693, 1350, 0.018, 0.023, 'M', 67300000,  5, 2, 'Aircraft_Embrear_190-E2.png'),
+(4,  'Embraer', 'E195-E2',  'Embraer E195-E2',  146, 4815,  833, 1788, 1400, 0.019, 0.024, 'M', 72900000,  6, 2, 'Aircraft_Embrear_195-E2.png'),
+-- Narrow-body (Level 7-10)
+(5,  'Airbus',  'A220-100', 'Airbus A220-100',  135, 6390,  871, 1463, 1372, 0.019, 0.024, 'M', 81000000,  7, 2, 'Aircraft_Airbus_220-100.png'),
+(6,  'Airbus',  'A220-300', 'Airbus A220-300',  160, 6297,  871, 1707, 1463, 0.021, 0.026, 'M', 91500000,  8, 2, 'Aircraft_Airbus_220-300.png'),
+(7,  'Airbus',  'A318',     'Airbus A318',      132, 5750,  828, 1780, 1510, 0.022, 0.028, 'M', 77400000,  7, 2, 'Aircraft_Airbus_318.png'),
+(8,  'Airbus',  'A319',     'Airbus A319',      160, 6850,  829, 1850, 1400, 0.023, 0.029, 'M', 89500000,  8, 2, 'Aircraft_Airbus_319.png'),
+(9,  'Airbus',  'A320',     'Airbus A320',      180, 6150,  828, 2090, 1480, 0.024, 0.030, 'M', 101000000, 9, 2, 'Aircraft_Airbus_320.png'),
+(10, 'Airbus',  'A321',     'Airbus A321',      220, 5950,  828, 2180, 1530, 0.026, 0.033, 'M', 118300000, 9, 2, 'Aircraft_Airbus_321.png'),
+(11, 'Airbus',  'A321 Neo', 'Airbus A321 Neo',  244, 7400,  828, 2180, 1530, 0.023, 0.029, 'M', 129500000, 10, 2, 'Aircraft_Airbus_321_Neo.png'),
+-- Wide-body (Level 12-14)
+(12, 'Boeing',  '787-8',    'Boeing 787-8',     330, 13530, 903, 2500, 1600, 0.027, 0.035, 'H', 248300000, 12, 2, 'Aircraft_Boeing_787-800.png'),
+(13, 'Boeing',  '777-300',  'Boeing 777-300',   550, 11135, 905, 3380, 1890, 0.032, 0.042, 'H', 375500000, 14, 2, 'Aircraft_Boeing_777-300.png'),
+-- Flagship (Level 15)
+(14, 'Airbus',  'A380',     'Airbus A380',      853, 14800, 903, 2900, 2000, 0.036, 0.048, 'H', 445600000, 15, 2, 'Aircraft_Airbus_380.png');
 
 -- Additional aircraft types
 INSERT OR IGNORE INTO aircraft_types (id, manufacturer, model, full_name, max_passengers, range_km, cruise_speed_kmh, min_runway_takeoff_m, min_runway_landing_m, fuel_consumption_empty_per_km, fuel_consumption_full_per_km, wake_turbulence_category, new_price_usd, required_level, required_pilots, image_filename) VALUES

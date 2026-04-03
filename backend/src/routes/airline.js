@@ -3,6 +3,7 @@ import { body, validationResult } from 'express-validator';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 import { getAirlineSatisfactionScore } from '../utils/satisfaction.js';
+import { addGroundStaff } from './personnel.js';
 import { XP_THRESHOLDS } from './flights.js';
 import multer from 'multer';
 import { createClient } from '@supabase/supabase-js';
@@ -211,11 +212,10 @@ router.post('/',
       // Set as active airline
       await pool.query('UPDATE users SET active_airline_id = $1 WHERE id = $2', [newId, req.userId]);
 
-      // Seed 30 ground staff for the home base
-      await pool.query(
-        "INSERT INTO personnel (airline_id, staff_type, airport_code, count, weekly_wage_per_person) VALUES ($1, 'ground', $2, 30, 950)",
-        [newId, home_airport_code]
-      );
+      // Seed ground staff for the home base based on airport category
+      const apCatResult = await pool.query('SELECT category FROM airports WHERE iata_code = $1', [home_airport_code]);
+      const homeCategory = apCatResult.rows[0]?.category || 4;
+      await addGroundStaff(newId, home_airport_code, homeCategory, false);
 
       const airline = await fetchAirlineById(newId);
 

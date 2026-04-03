@@ -832,8 +832,8 @@ async function processBookings() {
       LEFT JOIN airline_cabin_classes biz_cl ON biz_cl.profile_id = ac.airline_cabin_profile_id AND biz_cl.class_type = 'business'
       LEFT JOIN airline_cabin_classes fir_cl ON fir_cl.profile_id = ac.airline_cabin_profile_id AND fir_cl.class_type = 'first'
       WHERE f.status IN ('scheduled', 'boarding')
-        AND f.departure_time > $1
-        AND f.departure_time <= $2
+        AND f.departure_time > $1::timestamptz
+        AND f.departure_time <= $2::timestamptz
     `, [now.toISOString(), windowEnd.toISOString()]);
 
     const flightsList = result.rows.map(r => ({
@@ -1095,7 +1095,7 @@ async function processFlights() {
       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
       LEFT JOIN aircraft ac        ON f.aircraft_id        = ac.id
       WHERE f.status = 'scheduled'
-        AND f.departure_time <= $1 + INTERVAL '15 minutes'
+        AND f.departure_time <= $1::timestamptz + INTERVAL '15 minutes'
     `, [now.toISOString()]);
 
     const boardingCandidates = boardingCandidatesResult.rows.map(r => ({
@@ -1146,7 +1146,7 @@ async function processFlights() {
       LEFT JOIN aircraft ac ON f.aircraft_id = ac.id
       LEFT JOIN aircraft_types at ON ac.aircraft_type_id = at.id
       WHERE f.status = 'boarding'
-      AND f.departure_time <= $1
+      AND f.departure_time <= $1::timestamptz
     `, [now.toISOString()]);
 
     const departingFlights = boardingReadyResult.rows.map(r => ({
@@ -1202,7 +1202,7 @@ async function processFlights() {
       LEFT JOIN airports arr_apt ON COALESCE(r.arrival_airport, ws.arrival_airport) = arr_apt.iata_code
       LEFT JOIN airports dep_apt ON COALESCE(r.departure_airport, ws.departure_airport) = dep_apt.iata_code
       WHERE f.status = 'in-flight'
-      AND f.arrival_time <= $1
+      AND f.arrival_time <= $1::timestamptz
     `, [now.toISOString()]);
 
     const completedFlights = completedResult.rows.map(row => ({

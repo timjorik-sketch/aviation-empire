@@ -2041,6 +2041,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
         // For completed flights use stored actuals; for in-progress estimate
         const isCompleted = f.status === 'completed';
+        const isCancelled = f.status === 'cancelled';
         const wt = aircraft?.wake_turbulence_category ?? 'M';
         const landingFeeEst = wt === 'L' ? (f.landing_fee_light ?? 0)
                             : wt === 'H' ? (f.landing_fee_heavy ?? 0)
@@ -2065,7 +2066,15 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
           { label: 'First',    seats: f.booked_first    ?? 0, cap: f.fir_capacity ?? 0, price: f.first_price    ?? 0, rev: firstRev },
         ].filter(c => c.price > 0);
 
-        const finRows = [
+        const cancelPenalty = isCancelled ? Math.round(
+          (f.booked_economy  ?? 0) * (f.economy_price  ?? 0) * 1.2 +
+          (f.booked_business ?? 0) * (f.business_price ?? f.economy_price ?? 0) * 1.2 +
+          (f.booked_first    ?? 0) * (f.first_price    ?? f.economy_price ?? 0) * 1.2
+        ) : 0;
+
+        const finRows = isCancelled ? [
+          { label: 'Cancellation Penalty', value: cancelPenalty > 0 ? -cancelPenalty : null },
+        ] : [
           { label: 'Revenue',             value: totalRevDisplay,                  positive: true },
           { label: 'Fuel',                value: fuelCostDisplay > 0 ? -fuelCostDisplay : null },
           { label: 'Catering',            value: cateringDisplay != null && cateringDisplay > 0 ? -cateringDisplay : null },
@@ -2088,6 +2097,13 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                   <div className="sf-modal-aptnames">
                     {f.dep_airport_name ?? f.departure_airport} → {f.arr_airport_name ?? f.arrival_airport}
                   </div>
+                  {isCancelled && (
+                    <div style={{ marginTop: 4 }}>
+                      <span style={{ display: 'inline-block', background: '#FEF2F2', color: '#b91c1c', border: '1px solid #FECACA', borderRadius: 4, fontSize: '0.72rem', fontWeight: 700, padding: '2px 8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Cancelled
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <button className="sched-modal-close" onClick={() => setShowFlightModal(false)}>×</button>
               </div>
@@ -2207,7 +2223,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
                 {/* Financials section */}
                 <div className="sf-section-hd" style={{ marginTop: '0.75rem' }}>
-                  Financials{!isCompleted && <span style={{ fontSize: '0.7rem', fontWeight: 400, color: '#AAA', marginLeft: 6 }}>estimated</span>}
+                  Financials{!isCompleted && !isCancelled && <span style={{ fontSize: '0.7rem', fontWeight: 400, color: '#AAA', marginLeft: 6 }}>estimated</span>}
                 </div>
                 <table className="sf-table">
                   <tbody>
@@ -2222,9 +2238,14 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                   </tbody>
                   <tfoot>
                     <tr className="sf-total-row">
-                      <td style={{ fontWeight: 700 }}>{isCompleted ? 'Profit' : 'Est. Profit'}</td>
-                      <td className="sf-mono" style={{ textAlign: 'right', fontWeight: 700, color: netRevenue >= 0 ? '#16a34a' : '#dc2626' }}>
-                        {netRevenue >= 0 ? '+' : '−'}${Math.abs(netRevenue).toLocaleString()}
+                      <td style={{ fontWeight: 700 }}>
+                        {isCancelled ? 'Total Loss' : isCompleted ? 'Profit' : 'Est. Profit'}
+                      </td>
+                      <td className="sf-mono" style={{ textAlign: 'right', fontWeight: 700, color: isCancelled ? '#dc2626' : netRevenue >= 0 ? '#16a34a' : '#dc2626' }}>
+                        {isCancelled
+                          ? (cancelPenalty > 0 ? `−$${cancelPenalty.toLocaleString()}` : '$0')
+                          : `${netRevenue >= 0 ? '+' : '−'}$${Math.abs(netRevenue).toLocaleString()}`
+                        }
                       </td>
                     </tr>
                   </tfoot>

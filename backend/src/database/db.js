@@ -201,17 +201,6 @@ async function initDatabase() {
       seller_aircraft_id INTEGER,
       seller_airline_id INTEGER
     )`,
-    `CREATE TABLE IF NOT EXISTS mega_hubs (
-      id SERIAL PRIMARY KEY,
-      airline_id INTEGER NOT NULL,
-      airport_code TEXT NOT NULL,
-      hub_number INTEGER NOT NULL,
-      category INTEGER NOT NULL,
-      cost INTEGER NOT NULL,
-      purchased_at TIMESTAMPTZ DEFAULT NOW(),
-      FOREIGN KEY (airline_id) REFERENCES airlines(id) ON DELETE CASCADE,
-      UNIQUE(airline_id, airport_code)
-    )`,
     `CREATE TABLE IF NOT EXISTS airport_slots (
       id SERIAL PRIMARY KEY,
       airline_id INTEGER NOT NULL,

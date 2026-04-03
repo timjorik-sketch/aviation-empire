@@ -958,7 +958,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     } catch (err) { setError(err.message); }
   };
 
-  const handleDeleteFlight = async (flight) => {
+  const handleDeleteCancelledFlight = async (flight) => {
     if (!confirm(`Delete cancelled flight ${flight.flight_number} from the list?`)) return;
     setError('');
     try {
@@ -2003,7 +2003,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                             </button>
                           )}
                           {f.status === 'cancelled' && (
-                            <button className="ad-sf-delete-btn" onClick={() => handleDeleteFlight(f)}
+                            <button className="ad-sf-delete-btn" onClick={() => handleDeleteCancelledFlight(f)}
                               title="Remove this cancelled flight from the list">
                               Delete
                             </button>

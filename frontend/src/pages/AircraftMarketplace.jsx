@@ -270,7 +270,7 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
                 onClick={() => setSelectedMfr(null)}
               >
                 <span>All Manufacturers</span>
-                <span className="am-sb-mfr-count">{allTypes.length}</span>
+                <span className="am-sb-mfr-count">{purchasableTypes.length}</span>
               </button>
               {allManufacturers.map(([mfr, count]) => (
                 <button

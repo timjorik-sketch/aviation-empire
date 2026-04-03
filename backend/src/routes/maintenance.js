@@ -92,10 +92,10 @@ router.post('/', authMiddleware, async (req, res) => {
 
     const insertResult = await pool.query(`
       INSERT INTO maintenance_schedule
-        (aircraft_id, airline_id, start_time, end_time, day_of_week, start_minutes, duration_minutes, type, status)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'scheduled')
+        (aircraft_id, airline_id, day_of_week, start_minutes, duration_minutes, type, status)
+      VALUES ($1, $2, $3, $4, $5, $6, 'scheduled')
       RETURNING id
-    `, [aircraft_id, airlineId, start_time, endTimeStr, dow, startMinutes, durationMin, type || 'routine']);
+    `, [aircraft_id, airlineId, dow, startMinutes, durationMin, type || 'routine']);
 
     const maintId = insertResult.rows[0].id;
 

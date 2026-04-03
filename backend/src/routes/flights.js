@@ -1531,19 +1531,15 @@ function startFlightProcessor() {
   if (flightProcessorInterval) return;
 
   console.log('Starting flight processor...');
-  // Generate flights immediately on start, then every hour at :00
-  generateFlights();
+  // Generate flights, bookings, fuel price — all synced to top of hour (:00)
   scheduleAtTopOfHour(generateFlights, 'FlightGen');
+  scheduleAtTopOfHour(processBookings, 'Bookings');
+  // Fuel price: backfill history on start, then sync to top of hour
+  backfillFuelPrices();
+  scheduleAtTopOfHour(generateFuelPrice, 'FuelPrice');
   // Process flight statuses every 10 seconds (status changes need to be fast)
   flightProcessorInterval = setInterval(processFlights, 10000);
   setTimeout(processFlights, 1000);
-  // Booking processor — immediately on start, then every hour at :00
-  processBookings();
-  scheduleAtTopOfHour(processBookings, 'Bookings');
-  // Fuel price: backfill history, generate immediately, then every hour at :00
-  backfillFuelPrices();
-  generateFuelPrice();
-  scheduleAtTopOfHour(generateFuelPrice, 'FuelPrice');
 }
 
 function stopFlightProcessor() {

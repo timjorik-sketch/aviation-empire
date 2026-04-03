@@ -1513,25 +1513,37 @@ router.get('/dev/route-calc', authMiddleware, async (req, res) => {
 // Start flight processor (runs every 10 seconds)
 let flightProcessorInterval = null;
 
+// Schedule fn to run at the next top-of-hour (:00:00), then every 60 min
+function scheduleAtTopOfHour(fn, label) {
+  const now = new Date();
+  const msUntil = (60 - now.getMinutes()) * 60000
+                - now.getSeconds() * 1000
+                - now.getMilliseconds();
+  const minUntil = Math.round(msUntil / 60000);
+  console.log(`[${label}] Next run in ${minUntil} min (top of hour)`);
+  setTimeout(() => {
+    fn();
+    setInterval(fn, 60 * 60 * 1000);
+  }, msUntil);
+}
+
 function startFlightProcessor() {
   if (flightProcessorInterval) return;
 
   console.log('Starting flight processor...');
-  // Generate flights immediately and every 10 minutes
+  // Generate flights immediately on start, then every hour at :00
   generateFlights();
-  setInterval(generateFlights, 10 * 60 * 1000);
-  // Process flight statuses every 10 seconds
+  scheduleAtTopOfHour(generateFlights, 'FlightGen');
+  // Process flight statuses every 10 seconds (status changes need to be fast)
   flightProcessorInterval = setInterval(processFlights, 10000);
   setTimeout(processFlights, 1000);
-  // Hourly booking processor — runs immediately then every hour
+  // Booking processor — immediately on start, then every hour at :00
   processBookings();
-  setInterval(processBookings, 60 * 60 * 1000);
-  console.log('[Bookings] Hourly booking processor started');
-  // Fuel price: backfill history, generate one immediately, then update every hour
+  scheduleAtTopOfHour(processBookings, 'Bookings');
+  // Fuel price: backfill history, generate immediately, then every hour at :00
   backfillFuelPrices();
   generateFuelPrice();
-  setInterval(generateFuelPrice, 60 * 60 * 1000);
-  console.log('[FuelPrice] Fuel price updater started (interval: 1h)');
+  scheduleAtTopOfHour(generateFuelPrice, 'FuelPrice');
 }
 
 function stopFlightProcessor() {

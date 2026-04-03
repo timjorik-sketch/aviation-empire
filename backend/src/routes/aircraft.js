@@ -444,11 +444,13 @@ router.post('/purchase',
         return res.status(400).json({ error: 'Aircraft type ID is required' });
       }
 
+      if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
+
       const airlineResult = await pool.query(`
         SELECT a.id, a.balance, a.level, a.home_airport_code
         FROM airlines a
-        WHERE a.user_id = $1
-      `, [req.userId]);
+        WHERE a.id = $1 AND a.user_id = $2
+      `, [req.airlineId, req.userId]);
 
       if (!airlineResult.rows[0]) {
         return res.status(400).json({ error: 'No airline found' });

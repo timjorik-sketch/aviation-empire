@@ -90,12 +90,22 @@ router.post('/', authMiddleware, async (req, res) => {
     const endMM = endMinutes % 60;
     const endTimeStr = `${String(endH).padStart(2, '0')}:${String(endMM).padStart(2, '0')}`;
 
+    // If this week's window has already ended, pre-mark as completed so the processor
+    // doesn't charge immediately — it will run next week instead.
+    const now = new Date();
+    const jsDay = now.getDay();
+    const currentDow = jsDay === 0 ? 6 : jsDay - 1; // Mon=0 … Sun=6
+    const currentWeekMin = currentDow * 1440 + now.getHours() * 60 + now.getMinutes();
+    const maintEndWeekMin = dow * 1440 + endMinutes;
+    const alreadyPassed = currentWeekMin >= maintEndWeekMin;
+
     const insertResult = await pool.query(`
       INSERT INTO maintenance_schedule
-        (aircraft_id, airline_id, day_of_week, start_minutes, duration_minutes, type, status)
-      VALUES ($1, $2, $3, $4, $5, $6, 'scheduled')
+        (aircraft_id, airline_id, day_of_week, start_minutes, duration_minutes, type, status, last_completed_at)
+      VALUES ($1, $2, $3, $4, $5, $6, 'scheduled', $7)
       RETURNING id
-    `, [aircraft_id, airlineId, dow, startMinutes, durationMin, type || 'routine']);
+    `, [aircraft_id, airlineId, dow, startMinutes, durationMin, type || 'routine',
+        alreadyPassed ? now.toISOString() : null]);
 
     const maintId = insertResult.rows[0].id;
 
@@ -112,7 +122,7 @@ router.post('/', authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error('Schedule maintenance error:', error);
-    res.status(500).json({ error: 'Server error', detail: error.message });
+    res.status(500).json({ error: 'Server error' });
   }
 });
 

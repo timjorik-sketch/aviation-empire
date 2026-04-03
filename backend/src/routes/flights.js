@@ -532,7 +532,8 @@ router.delete('/:id', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Cannot delete a completed flight' });
     }
 
-    if (bookingRevenueCollected) {
+    // Only charge penalty if not already cancelled (cancel already applied penalty)
+    if (status !== 'cancelled' && bookingRevenueCollected) {
       const penalty = Math.round(
         (bookedEco   || 0) * (ecoPrice   || 0) * 1.2 +
         (bookedBiz   || 0) * (bizPrice   || ecoPrice || 0) * 1.2 +

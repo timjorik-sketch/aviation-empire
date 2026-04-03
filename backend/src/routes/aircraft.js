@@ -1551,8 +1551,13 @@ router.get('/:id/flights', authMiddleware, async (req, res) => {
     if (!acResult.rows[0]) return res.status(404).json({ error: 'Aircraft not found' });
 
     const now = new Date();
-    const past24h   = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
-    const future72h = new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString();
+    // Start of yesterday (00:00 local = UTC midnight-ish; use 48h back to always include full previous day)
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    yesterday.setHours(0, 0, 0, 0);
+    const pastWindow  = yesterday.toISOString();
+    const past24h     = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const future72h   = new Date(now.getTime() + 72 * 60 * 60 * 1000).toISOString();
 
     const result = await pool.query(`
       SELECT f.id, f.flight_number, f.departure_time, f.arrival_time,
@@ -1594,14 +1599,14 @@ router.get('/:id/flights', authMiddleware, async (req, res) => {
       LEFT JOIN airline_cabin_classes biz_cl ON biz_cl.profile_id = ac_ref.airline_cabin_profile_id AND biz_cl.class_type = 'business'
       LEFT JOIN airline_cabin_classes fir_cl ON fir_cl.profile_id = ac_ref.airline_cabin_profile_id AND fir_cl.class_type = 'first'
       WHERE f.aircraft_id = $1
-        AND f.status != 'cancelled'
         AND (
           (f.status IN ('scheduled','boarding','in-flight') AND f.departure_time <= $2)
           OR (f.status = 'completed' AND f.departure_time >= $3)
+          OR (f.status = 'cancelled' AND f.departure_time >= $4)
         )
       ORDER BY f.departure_time ASC
       LIMIT 60
-    `, [aircraftId, future72h, past24h]);
+    `, [aircraftId, future72h, past24h, pastWindow]);
 
     const flights = result.rows.map(r => ({
       id: r.id, flight_number: r.flight_number,

@@ -958,6 +958,19 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     } catch (err) { setError(err.message); }
   };
 
+  const handleDeleteFlight = async (flight) => {
+    if (!confirm(`Delete cancelled flight ${flight.flight_number} from the list?`)) return;
+    setError('');
+    try {
+      const res = await fetch(`${API_URL}/api/flights/${flight.id}`, {
+        method: 'DELETE', headers
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setScheduledFlights(prev => prev.filter(f => f.id !== flight.id));
+    } catch (err) { setError(err.message); }
+  };
+
   const handleSellToMarket = async () => {
     setSellingToMarket(true);
     try {
@@ -1903,6 +1916,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                       );
                     } else {
                     const st = f.status === 'completed' ? { label: 'Completed', cls: 'ontime', color: '#22c55e' }
+                      : f.status === 'cancelled' ? { label: 'Canceled', cls: 'cancelled', color: '#dc2626' }
                       : f.status === 'in-flight' ? computeArrStatus(f.departure_time, f.arrival_time, nowMs)
                       : computeDepStatus(f.departure_time, nowMs);
                     rows.push(
@@ -1986,6 +2000,12 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                             <button className="ad-sf-cancel-btn" onClick={() => handleCancelFlight(f)}
                               title="Cancel flight and refund passengers at 120%">
                               Cancel
+                            </button>
+                          )}
+                          {f.status === 'cancelled' && (
+                            <button className="ad-sf-delete-btn" onClick={() => handleDeleteFlight(f)}
+                              title="Remove this cancelled flight from the list">
+                              Delete
                             </button>
                           )}
                         </td>
@@ -3019,6 +3039,12 @@ const styles = `
     cursor: pointer; white-space: nowrap; transition: all 0.15s;
   }
   .ad-sf-cancel-btn:hover { background: #fee2e2; border-color: #dc2626; }
+  .ad-sf-delete-btn {
+    background: none; border: 1px solid #d1d5db; color: #6b7280;
+    padding: 0.28rem 0.6rem; border-radius: 5px; font-size: 0.78rem;
+    cursor: pointer; white-space: nowrap; transition: all 0.15s;
+  }
+  .ad-sf-delete-btn:hover { background: #f3f4f6; border-color: #9ca3af; color: #374151; }
 
   /* Show Flight modal */
   .sf-modal { max-width: 520px; }

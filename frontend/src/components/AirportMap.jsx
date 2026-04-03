@@ -31,7 +31,11 @@ export default function AirportMap({ lat, lng, airportName, iataCode }) {
 
     mapRef.current = map;
 
+    // Force re-layout after container has painted — fixes blank map on first render
+    const t = setTimeout(() => { map.invalidateSize(); }, 100);
+
     return () => {
+      clearTimeout(t);
       map.remove();
       mapRef.current = null;
     };

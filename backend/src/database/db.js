@@ -55,10 +55,21 @@ async function runStatements(stmts, context = '') {
 
     let pgStmt = stmt;
 
-    // INSERT OR IGNORE → INSERT ... ON CONFLICT DO NOTHING
+    // INSERT OR IGNORE → INSERT ... ON CONFLICT
     if (pgStmt.includes('__INSERT_IGNORE__')) {
       pgStmt = pgStmt.replace('__INSERT_IGNORE__', 'INSERT');
-      pgStmt += ' ON CONFLICT DO NOTHING';
+      // For airports with full details (category/coords): upsert so detailed rows overwrite basic ones
+      if (/INTO airports\s*\(/i.test(pgStmt) && /\blatitude\b/i.test(pgStmt)) {
+        pgStmt += ` ON CONFLICT (iata_code) DO UPDATE SET
+          name=EXCLUDED.name,
+          category=EXCLUDED.category,
+          continent=EXCLUDED.continent,
+          runway_length_m=EXCLUDED.runway_length_m,
+          latitude=EXCLUDED.latitude,
+          longitude=EXCLUDED.longitude`;
+      } else {
+        pgStmt += ' ON CONFLICT DO NOTHING';
+      }
     }
     // INSERT OR REPLACE for service_item_types → upsert
     if (pgStmt.includes('__INSERT_REPLACE__')) {

@@ -624,7 +624,85 @@ async function initDatabase() {
     WHERE fuel_consumption_per_km < 1
   `).catch(() => {});
 
-  // ── AIRPORT FEE SEED ──────────────────────────────────────────────────────────
+  // ── AIRPORT COORDINATE + CATEGORY SEED ───────────────────────────────────────
+  // Direct UPDATEs for every airport inserted without coordinates in schema.sql.
+  // Uses safeQuery so any error is logged but never crashes startup.
+  const airportGeoData = [
+    // [iata_code, category, continent, runway_m, lat, lng]
+    ['ZRH', 6, 'Europe',         3700,  47.4647,   8.5492],
+    ['GVA', 5, 'Europe',         3900,  46.2381,   6.1090],
+    ['BSL', 4, 'Europe',         3900,  47.5896,   7.5299],
+    ['FRA', 7, 'Europe',         4000,  50.0379,   8.5622],
+    ['MUC', 6, 'Europe',         4000,  48.3537,  11.7750],
+    ['BER', 6, 'Europe',         3600,  52.3667,  13.5033],
+    ['LHR', 8, 'Europe',         3902,  51.4700,  -0.4543],
+    ['LGW', 6, 'Europe',         3316,  51.1537,  -0.1821],
+    ['MAN', 5, 'Europe',         3048,  53.3537,  -2.2750],
+    ['CDG', 8, 'Europe',         4200,  49.0097,   2.5479],
+    ['ORY', 6, 'Europe',         3650,  48.7233,   2.3794],
+    ['AMS', 7, 'Europe',         3800,  52.3105,   4.7683],
+    ['JFK', 7, 'North America',  4423,  40.6413, -73.7781],
+    ['LAX', 8, 'North America',  3685,  33.9416,-118.4085],
+    ['ORD', 8, 'North America',  3962,  41.9742, -87.9073],
+    ['ATL', 8, 'North America',  3776,  33.6407, -84.4277],
+    ['DXB', 8, 'Asia',           4000,  25.2528,  55.3644],
+    ['SIN', 8, 'Asia',           4000,   1.3644, 103.9915],
+    ['NRT', 7, 'Asia',           4000,  35.7647, 140.3864],
+    ['HND', 7, 'Asia',           3360,  35.5494, 139.7798],
+    ['SYD', 6, 'Oceania',        3962, -33.9461, 151.1772],
+    ['MAD', 7, 'Europe',         4349,  40.4936,  -3.5668],
+    ['BCN', 6, 'Europe',         3743,  41.2974,   2.0833],
+    ['PMI', 5, 'Europe',         3270,  39.5517,   2.7388],
+    ['AGP', 5, 'Europe',         3200,  36.6749,  -4.4991],
+    ['ALC', 4, 'Europe',         3000,  38.2822,  -0.5582],
+    ['VLC', 4, 'Europe',         3210,  39.4893,  -0.4816],
+    ['BIL', 3, 'Europe',         2400,  43.3011,  -2.9106],
+    ['FCO', 6, 'Europe',         3900,  41.8003,  12.2389],
+    ['MXP', 5, 'Europe',         3920,  45.6306,   8.7281],
+    ['IST', 8, 'Europe',         4100,  41.2608,  28.7418],
+    ['DME', 6, 'Europe',         3794,  55.4088,  37.9063],
+    ['VIE', 5, 'Europe',         3600,  48.1103,  16.5697],
+    ['CPH', 5, 'Europe',         3600,  55.6180,  12.6560],
+    ['ARN', 5, 'Europe',         3301,  59.6519,  17.9186],
+    ['DUB', 5, 'Europe',         3110,  53.4213,  -6.2701],
+    ['OSL', 5, 'Europe',         3600,  60.1939,  11.1004],
+    ['HEL', 5, 'Europe',         3440,  60.3172,  24.9633],
+    ['LIS', 5, 'Europe',         3805,  38.7813,  -9.1359],
+    ['OPO', 5, 'Europe',         3480,  41.2481,  -8.6814],
+    ['FAO', 4, 'Europe',         2880,  37.0144,  -7.9659],
+    ['ATH', 5, 'Europe',         4000,  37.9364,  23.9445],
+    ['SKG', 4, 'Europe',         2600,  40.5197,  22.9709],
+    ['WAW', 5, 'Europe',         3690,  52.1657,  20.9671],
+    ['KRK', 3, 'Europe',         3580,  50.0777,  19.7848],
+    ['GDN', 3, 'Europe',         2800,  54.3776,  18.4662],
+    ['PRG', 4, 'Europe',         3715,  50.1008,  14.2632],
+    ['BRU', 5, 'Europe',         3638,  50.9010,   4.4844],
+    ['DUS', 5, 'Europe',         3000,  51.2895,   6.7668],
+    ['HAM', 4, 'Europe',         3666,  53.6304,  10.0062],
+    ['STR', 4, 'Europe',         3345,  48.6899,   9.2219],
+    ['TXL', 4, 'Europe',         2428,  52.5597,  13.2877],
+    ['BUD', 4, 'Europe',         3707,  47.4298,  19.2611],
+    ['OTP', 4, 'Europe',         3500,  44.5711,  26.0850],
+    ['SOF', 4, 'Europe',         3600,  42.6952,  23.4114],
+    ['ZAG', 4, 'Europe',         3252,  45.7429,  16.0688],
+    ['LJU', 3, 'Europe',         3300,  46.2237,  14.4576],
+    ['NCE', 5, 'Europe',         3000,  43.6584,   7.2159],
+    ['MRS', 4, 'Europe',         3500,  43.4393,   5.2214],
+    ['LYS', 4, 'Europe',         4000,  45.7256,   5.0811],
+    ['TLS', 4, 'Europe',         3500,  43.6293,   1.3638],
+    ['RIX', 4, 'Europe',         3200,  56.9236,  23.9711],
+    ['TLL', 3, 'Europe',         3070,  59.4133,  24.8328],
+    ['VNO', 3, 'Europe',         2515,  54.6341,  25.2858],
+  ];
+  for (const [code, cat, cont, rwy, lat, lng] of airportGeoData) {
+    await safeQuery(
+      `UPDATE airports SET category=$1, continent=$2, runway_length_m=$3, latitude=$4, longitude=$5 WHERE iata_code=$6`,
+      [cat, cont, rwy, lat, lng, code],
+      `geo ${code}`
+    );
+  }
+
+  // ── AIRPORT FEE SEED (runs after coordinate seed so category is correct) ─────
   const CAT_FEES = {
     8:[850,2900,7300,600,1200,2150], 7:[700,2400,5900,550,1075,1825],
     6:[600,1800,4000,500,950,1500],  5:[350,850,2850,450,800,1200],

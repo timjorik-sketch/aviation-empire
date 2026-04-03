@@ -408,11 +408,15 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     const weekMaintenanceRow   = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND (type='maintenance' OR description LIKE '%Maintenance%') AND amount<0 AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
     const weekCancellationsRow = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND (description LIKE '%Cancel%' OR description LIKE '%Penalty%') AND amount<0 AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
     const weekAircraftPurchRow = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND type='aircraft_purchase' AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
-    const weekOtherCostsRow    = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND amount<0 AND type NOT IN ('maintenance','aircraft_purchase') AND description NOT LIKE 'Flight Costs%' AND description NOT LIKE '%Cancel%' AND description NOT LIKE '%Penalty%' AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
+    const weekPayrollRow       = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND description='Wöchentliche Personalkosten' AND amount<0 AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
+    const weekExpansionRow     = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND amount<0 AND (description LIKE 'Opened destination%' OR description LIKE 'Mega Hub%' OR description LIKE 'Airport slot%') AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
+    const weekOtherCostsRow    = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND amount<0 AND type NOT IN ('maintenance','aircraft_purchase') AND description NOT LIKE 'Flight Costs%' AND description NOT LIKE '%Cancel%' AND description NOT LIKE '%Penalty%' AND description!='Wöchentliche Personalkosten' AND description NOT LIKE 'Opened destination%' AND description NOT LIKE 'Mega Hub%' AND description NOT LIKE 'Airport slot%' AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
 
     const weekMaintenance   = Math.round(parseFloat(weekMaintenanceRow.val) || 0);
     const weekCancellations = Math.round(parseFloat(weekCancellationsRow.val) || 0);
     const weekAircraftPurch = Math.round(parseFloat(weekAircraftPurchRow.val) || 0);
+    const weekPayroll       = Math.round(parseFloat(weekPayrollRow.val) || 0);
+    const weekExpansion     = Math.round(parseFloat(weekExpansionRow.val) || 0);
     const weekOtherCosts    = Math.round(parseFloat(weekOtherCostsRow.val) || 0);
 
     // ── Fuel price ───────────────────────────────────────────────────────────
@@ -472,6 +476,8 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
         maintenance: weekMaintenance,
         cancellations: weekCancellations,
         aircraft_purchases: weekAircraftPurch,
+        payroll: weekPayroll,
+        expansion: weekExpansion,
         other: weekOtherCosts,
         total: Math.round(weeklyCosts),
         fuel_price_per_liter: currentFuelPriceL,

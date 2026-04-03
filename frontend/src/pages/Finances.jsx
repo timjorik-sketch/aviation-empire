@@ -415,6 +415,8 @@ export default function Finances({ airline, onBack, onNavigateToAirport }) {
                 <BRow label="Maintenance" value={fmt(cb.maintenance)} />
                 <BRow label="Cancellation Penalties" value={fmt(cb.cancellations)} />
                 <BRow label="Aircraft Purchases" value={fmt(cb.aircraft_purchases)} />
+                {cb.payroll > 0 && <BRow label="Payroll" value={fmt(cb.payroll)} />}
+                {cb.expansion > 0 && <BRow label="Destinations & Slots" value={fmt(cb.expansion)} />}
                 {cb.other > 0 && <BRow label="Other" value={fmt(cb.other)} />}
                 <BRow label="Total Costs" value={fmt(cb.total)} bold />
               </tbody>

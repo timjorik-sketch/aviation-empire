@@ -94,27 +94,29 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
       .finally(() => setLoading(false));
   }, []);
 
-  // Max range across all types (for slider)
-  const maxRangeInData = useMemo(() => {
-    if (!allTypes.length) return 16000;
-    return Math.max(...allTypes.map(ac => ac.range_km));
-  }, [allTypes]);
+  // Only purchasable types (locked aircraft hidden entirely)
+  const purchasableTypes = useMemo(() => allTypes.filter(ac => ac.can_purchase), [allTypes]);
 
-  // All manufacturers (for sidebar)
+  // Max range across purchasable types (for slider)
+  const maxRangeInData = useMemo(() => {
+    if (!purchasableTypes.length) return 16000;
+    return Math.max(...purchasableTypes.map(ac => ac.range_km));
+  }, [purchasableTypes]);
+
+  // All manufacturers (for sidebar — only purchasable)
   const allManufacturers = useMemo(() => {
     const counts = {};
-    for (const ac of allTypes) {
+    for (const ac of purchasableTypes) {
       if (!counts[ac.manufacturer]) counts[ac.manufacturer] = 0;
       counts[ac.manufacturer]++;
     }
     return Object.entries(counts).sort(([a], [b]) => a.localeCompare(b));
-  }, [allTypes]);
+  }, [purchasableTypes]);
 
   // Filtered types
   const filteredTypes = useMemo(() => {
     const maxR = filterMaxRange ?? maxRangeInData;
-    return allTypes.filter(ac => {
-      if (!ac.can_purchase) return false; // hide locked aircraft entirely
+    return purchasableTypes.filter(ac => {
       if (selectedMfr && ac.manufacturer !== selectedMfr) return false;
       if (ac.range_km < filterMinRange || ac.range_km > maxR) return false;
       if (searchQuery) {
@@ -356,18 +358,13 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
                         const canAffordAc = airline.balance >= ac.new_price_usd;
                         const usedForType = usedListings.filter(l => l.type_id === ac.id);
                         return (
-                          <div key={ac.id} className={`am-card${!ac.can_purchase ? ' am-card--locked' : ''}`}>
+                          <div key={ac.id} className="am-card">
                             {/* Image */}
                             <div className="am-card-img-wrap">
                               {ac.image_filename
                                 ? <img src={`/aircraft-images/${ac.image_filename}`} alt={ac.full_name} className="am-card-img" />
                                 : <div className="am-card-img-placeholder">✈</div>
                               }
-                              {!ac.can_purchase && (
-                                <div className="am-lock-overlay">
-                                  <div className="am-lock-badge">Level {ac.required_level} required</div>
-                                </div>
-                              )}
                               {usedForType.length > 0 && (
                                 <div className="am-used-badge">{usedForType.length} Used Aircraft</div>
                               )}

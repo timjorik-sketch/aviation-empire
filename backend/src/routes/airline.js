@@ -5,23 +5,16 @@ import authMiddleware from '../middleware/auth.js';
 import { getAirlineSatisfactionScore } from '../utils/satisfaction.js';
 import { XP_THRESHOLDS } from './flights.js';
 import multer from 'multer';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import fs from 'fs';
+import { createClient } from '@supabase/supabase-js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const LOGOS_DIR = path.join(__dirname, '../../public/airline-logos');
-if (!fs.existsSync(LOGOS_DIR)) fs.mkdirSync(LOGOS_DIR, { recursive: true });
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY
+);
+const BUCKET = 'airline-logos';
 
-const logoStorage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, LOGOS_DIR),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    cb(null, `airline_${req.airlineId}_${Date.now()}${ext}`);
-  },
-});
 const logoUpload = multer({
-  storage: logoStorage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 2 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (/^image\/(png|jpeg|webp|svg\+xml)$/.test(file.mimetype)) cb(null, true);
@@ -496,20 +489,29 @@ router.post('/logo', authMiddleware, (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     try {
-      // Delete old logo file if present
+      // Delete old logo from Supabase Storage if present
       const oldResult = await pool.query('SELECT logo_filename FROM airlines WHERE id = $1', [req.airlineId]);
-      if (oldResult.rows[0]) {
-        const old = oldResult.rows[0].logo_filename;
-        if (old) {
-          const oldPath = path.join(LOGOS_DIR, old);
-          if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-        }
+      const oldVal = oldResult.rows[0]?.logo_filename;
+      if (oldVal) {
+        // logo_filename may be a full URL or just a path
+        const oldPath = oldVal.startsWith('http') ? oldVal.split(`/${BUCKET}/`)[1] : oldVal;
+        if (oldPath) await supabase.storage.from(BUCKET).remove([oldPath]);
       }
 
-      const filename = req.file.filename;
-      await pool.query('UPDATE airlines SET logo_filename = $1 WHERE id = $2', [filename, req.airlineId]);
+      // Upload new logo to Supabase Storage
+      const ext = req.file.mimetype.split('/')[1].replace('svg+xml', 'svg');
+      const storagePath = `airline_${req.airlineId}_${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from(BUCKET)
+        .upload(storagePath, req.file.buffer, { contentType: req.file.mimetype, upsert: true });
+      if (uploadError) throw uploadError;
 
-      res.json({ logo_filename: filename, logo_url: `/airline-logos/${filename}` });
+      const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(storagePath);
+
+      // Store full public URL so frontend can use it directly
+      await pool.query('UPDATE airlines SET logo_filename = $1 WHERE id = $2', [publicUrl, req.airlineId]);
+
+      res.json({ logo_filename: publicUrl, logo_url: publicUrl });
     } catch (error) {
       console.error('Logo upload error:', error);
       res.status(500).json({ error: 'Server error' });

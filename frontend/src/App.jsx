@@ -997,7 +997,7 @@ function App() {
                           title="Upload logo (480 × 120 px)"
                         >
                           {activeAirline.logo_filename
-                            ? <img src={`${API_URL}/airline-logos/${activeAirline.logo_filename}`} alt="logo" style={{ display: 'block', width: '100%', height: 'auto', aspectRatio: '4/1', objectFit: 'contain' }} />
+                            ? <img src={activeAirline.logo_filename.startsWith('http') ? activeAirline.logo_filename : `${API_URL}/airline-logos/${activeAirline.logo_filename}`} alt="logo" style={{ display: 'block', width: '100%', height: 'auto', aspectRatio: '4/1', objectFit: 'contain' }} />
                             : <div style={{ aspectRatio: '4/1', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#CCC', fontSize: '0.8rem' }}>Logo hochladen (480 × 120 px)</div>
                           }
                           <div className="ait-logo-hover-overlay">↑ Upload</div>

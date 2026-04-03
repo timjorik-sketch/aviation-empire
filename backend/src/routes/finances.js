@@ -1,55 +1,38 @@
 import express from 'express';
-import { getDatabase } from '../database/db.js';
+import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 
 const router = express.Router();
 
 // Get financial overview
-router.get('/overview', authMiddleware, (req, res) => {
+router.get('/overview', authMiddleware, async (req, res) => {
   try {
-    const db = getDatabase();
-
-    // Get airline
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
-    const airlineInfoStmt = db.prepare('SELECT balance, created_at FROM airlines WHERE id = ?');
-    airlineInfoStmt.bind([airlineId]);
-    if (!airlineInfoStmt.step()) { airlineInfoStmt.free(); return res.status(400).json({ error: 'No airline found' }); }
-    const airlineInfoRow = airlineInfoStmt.get();
-    const balance = airlineInfoRow[0];
-    const createdAt = airlineInfoRow[1];
-    airlineInfoStmt.free();
+
+    const airlineResult = await pool.query('SELECT balance, created_at FROM airlines WHERE id = $1', [airlineId]);
+    if (!airlineResult.rows[0]) return res.status(400).json({ error: 'No airline found' });
+    const { balance, created_at: createdAt } = airlineResult.rows[0];
 
     // Get total revenue from completed flights
-    const revenueStmt = db.prepare(`
+    const revenueResult = await pool.query(`
       SELECT COALESCE(SUM(revenue), 0) as total_revenue,
              COUNT(*) as total_flights,
              COALESCE(SUM(seats_sold), 0) as total_passengers
       FROM flights
-      WHERE airline_id = ? AND status = 'completed'
-    `);
-    revenueStmt.bind([airlineId]);
-    revenueStmt.step();
-    const revenueRow = revenueStmt.get();
-    const totalRevenue = revenueRow[0];
-    const totalFlights = revenueRow[1];
-    const totalPassengers = revenueRow[2];
-    revenueStmt.free();
+      WHERE airline_id = $1 AND status = 'completed'
+    `, [airlineId]);
+    const { total_revenue: totalRevenue, total_flights: totalFlights, total_passengers: totalPassengers } = revenueResult.rows[0];
 
     // Get total aircraft costs
-    const costsStmt = db.prepare(`
+    const costsResult = await pool.query(`
       SELECT COALESCE(SUM(at.new_price_usd), 0) as total_aircraft_cost,
              COUNT(*) as fleet_size
       FROM aircraft a
       JOIN aircraft_types at ON a.aircraft_type_id = at.id
-      WHERE a.airline_id = ?
-    `);
-    costsStmt.bind([airlineId]);
-    costsStmt.step();
-    const costsRow = costsStmt.get();
-    const totalAircraftCost = costsRow[0];
-    const fleetSize = costsRow[1];
-    costsStmt.free();
+      WHERE a.airline_id = $1
+    `, [airlineId]);
+    const { total_aircraft_cost: totalAircraftCost, fleet_size: fleetSize } = costsResult.rows[0];
 
     // Calculate profit/loss (starting balance was 50M)
     const startingBalance = 50000000;
@@ -72,16 +55,12 @@ router.get('/overview', authMiddleware, (req, res) => {
 });
 
 // Get revenue by route
-router.get('/revenue-by-route', authMiddleware, (req, res) => {
+router.get('/revenue-by-route', authMiddleware, async (req, res) => {
   try {
-    const db = getDatabase();
-
-    // Get airline
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
-    // Get revenue grouped by route
-    const routeRevenueStmt = db.prepare(`
+    const result = await pool.query(`
       SELECT
         r.id,
         r.flight_number,
@@ -92,32 +71,26 @@ router.get('/revenue-by-route', authMiddleware, (req, res) => {
         COALESCE(SUM(f.revenue), 0) as total_revenue,
         COALESCE(SUM(f.seats_sold), 0) as total_passengers,
         COALESCE(AVG(f.ticket_price), 0) as avg_ticket_price,
-        COALESCE(AVG(CAST(f.seats_sold AS FLOAT) / f.total_seats * 100), 0) as avg_load_factor
+        COALESCE(AVG(CAST(f.seats_sold AS FLOAT) / NULLIF(f.total_seats, 0) * 100), 0) as avg_load_factor
       FROM routes r
       LEFT JOIN flights f ON r.id = f.route_id AND f.status = 'completed'
-      WHERE r.airline_id = ?
-      GROUP BY r.id
+      WHERE r.airline_id = $1
+      GROUP BY r.id, r.flight_number, r.departure_airport, r.arrival_airport, r.distance_km
       ORDER BY total_revenue DESC
-    `);
-    routeRevenueStmt.bind([airlineId]);
+    `, [airlineId]);
 
-    const routeRevenue = [];
-    while (routeRevenueStmt.step()) {
-      const row = routeRevenueStmt.get();
-      routeRevenue.push({
-        id: row[0],
-        flight_number: row[1],
-        departure_airport: row[2],
-        arrival_airport: row[3],
-        distance_km: row[4],
-        flight_count: row[5],
-        total_revenue: row[6],
-        total_passengers: row[7],
-        avg_ticket_price: Math.round(row[8]),
-        avg_load_factor: Math.round(row[9])
-      });
-    }
-    routeRevenueStmt.free();
+    const routeRevenue = result.rows.map(row => ({
+      id: row.id,
+      flight_number: row.flight_number,
+      departure_airport: row.departure_airport,
+      arrival_airport: row.arrival_airport,
+      distance_km: row.distance_km,
+      flight_count: parseInt(row.flight_count),
+      total_revenue: parseFloat(row.total_revenue),
+      total_passengers: parseInt(row.total_passengers),
+      avg_ticket_price: Math.round(parseFloat(row.avg_ticket_price)),
+      avg_load_factor: Math.round(parseFloat(row.avg_load_factor))
+    }));
 
     res.json({ routeRevenue });
   } catch (error) {
@@ -127,16 +100,12 @@ router.get('/revenue-by-route', authMiddleware, (req, res) => {
 });
 
 // Get aircraft costs and performance
-router.get('/aircraft-costs', authMiddleware, (req, res) => {
+router.get('/aircraft-costs', authMiddleware, async (req, res) => {
   try {
-    const db = getDatabase();
-
-    // Get airline
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
-    // Get aircraft with costs and revenue
-    const aircraftStmt = db.prepare(`
+    const result = await pool.query(`
       SELECT
         a.id,
         a.registration,
@@ -151,32 +120,28 @@ router.get('/aircraft-costs', authMiddleware, (req, res) => {
       FROM aircraft a
       JOIN aircraft_types at ON a.aircraft_type_id = at.id
       LEFT JOIN flights f ON a.id = f.aircraft_id AND f.status = 'completed'
-      WHERE a.airline_id = ?
-      GROUP BY a.id
+      WHERE a.airline_id = $1
+      GROUP BY a.id, a.registration, a.name, a.purchased_at, at.full_name, at.new_price_usd, at.max_passengers
       ORDER BY total_revenue DESC
-    `);
-    aircraftStmt.bind([airlineId]);
+    `, [airlineId]);
 
-    const aircraftCosts = [];
-    while (aircraftStmt.step()) {
-      const row = aircraftStmt.get();
-      const purchasePrice = row[5];
-      const totalRevenue = row[8];
-      aircraftCosts.push({
-        id: row[0],
-        registration: row[1],
-        name: row[2],
-        purchased_at: row[3],
-        aircraft_type: row[4],
+    const aircraftCosts = result.rows.map(row => {
+      const purchasePrice = parseFloat(row.purchase_price);
+      const totalRevenue = parseFloat(row.total_revenue);
+      return {
+        id: row.id,
+        registration: row.registration,
+        name: row.name,
+        purchased_at: row.purchased_at,
+        aircraft_type: row.full_name,
         purchase_price: purchasePrice,
-        max_passengers: row[6],
-        flights_completed: row[7],
+        max_passengers: row.max_passengers,
+        flights_completed: parseInt(row.flights_completed),
         total_revenue: totalRevenue,
-        total_passengers: row[9],
+        total_passengers: parseInt(row.total_passengers),
         roi: purchasePrice > 0 ? Math.round((totalRevenue / purchasePrice) * 100) : 0
-      });
-    }
-    aircraftStmt.free();
+      };
+    });
 
     res.json({ aircraftCosts });
   } catch (error) {
@@ -186,72 +151,56 @@ router.get('/aircraft-costs', authMiddleware, (req, res) => {
 });
 
 // Get profit/loss over time (daily for last 30 days)
-router.get('/profit-history', authMiddleware, (req, res) => {
+router.get('/profit-history', authMiddleware, async (req, res) => {
   try {
-    const db = getDatabase();
-
-    // Get airline
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
     // Get daily revenue from completed flights (last 30 days)
-    const revenueHistoryStmt = db.prepare(`
+    const revenueResult = await pool.query(`
       SELECT
-        date(arrival_time) as day,
+        DATE(arrival_time) as day,
         SUM(revenue) as daily_revenue,
         COUNT(*) as flight_count,
         SUM(seats_sold) as passengers
       FROM flights
-      WHERE airline_id = ?
+      WHERE airline_id = $1
         AND status = 'completed'
-        AND arrival_time >= datetime('now', '-30 days')
-      GROUP BY date(arrival_time)
+        AND arrival_time >= NOW() - INTERVAL '30 days'
+      GROUP BY DATE(arrival_time)
       ORDER BY day ASC
-    `);
-    revenueHistoryStmt.bind([airlineId]);
+    `, [airlineId]);
 
-    const revenueHistory = [];
-    while (revenueHistoryStmt.step()) {
-      const row = revenueHistoryStmt.get();
-      revenueHistory.push({
-        date: row[0],
-        revenue: row[1],
-        flights: row[2],
-        passengers: row[3]
-      });
-    }
-    revenueHistoryStmt.free();
+    const revenueHistory = revenueResult.rows.map(row => ({
+      date: row.day,
+      revenue: parseFloat(row.daily_revenue),
+      flights: parseInt(row.flight_count),
+      passengers: parseInt(row.passengers)
+    }));
 
     // Get aircraft purchases by date
-    const purchaseHistoryStmt = db.prepare(`
+    const purchaseResult = await pool.query(`
       SELECT
-        date(a.purchased_at) as day,
+        DATE(a.purchased_at) as day,
         SUM(at.new_price_usd) as daily_cost,
         COUNT(*) as aircraft_count
       FROM aircraft a
       JOIN aircraft_types at ON a.aircraft_type_id = at.id
-      WHERE a.airline_id = ?
-        AND a.purchased_at >= datetime('now', '-30 days')
-      GROUP BY date(a.purchased_at)
+      WHERE a.airline_id = $1
+        AND a.purchased_at >= NOW() - INTERVAL '30 days'
+      GROUP BY DATE(a.purchased_at)
       ORDER BY day ASC
-    `);
-    purchaseHistoryStmt.bind([airlineId]);
+    `, [airlineId]);
 
-    const purchaseHistory = [];
-    while (purchaseHistoryStmt.step()) {
-      const row = purchaseHistoryStmt.get();
-      purchaseHistory.push({
-        date: row[0],
-        cost: row[1],
-        count: row[2]
-      });
-    }
-    purchaseHistoryStmt.free();
+    const purchaseHistory = purchaseResult.rows.map(row => ({
+      date: row.day,
+      cost: parseFloat(row.daily_cost),
+      count: parseInt(row.aircraft_count)
+    }));
 
     // Combine into daily profit/loss
     const days = new Map();
 
-    // Add revenue data
     for (const entry of revenueHistory) {
       days.set(entry.date, {
         date: entry.date,
@@ -262,7 +211,6 @@ router.get('/profit-history', authMiddleware, (req, res) => {
       });
     }
 
-    // Add cost data
     for (const entry of purchaseHistory) {
       if (days.has(entry.date)) {
         days.get(entry.date).costs = entry.cost;
@@ -277,7 +225,6 @@ router.get('/profit-history', authMiddleware, (req, res) => {
       }
     }
 
-    // Convert to array and calculate profit
     const profitHistory = Array.from(days.values())
       .sort((a, b) => a.date.localeCompare(b.date))
       .map(day => ({
@@ -293,64 +240,53 @@ router.get('/profit-history', authMiddleware, (req, res) => {
 });
 
 // Get recent transactions
-router.get('/transactions', authMiddleware, (req, res) => {
+router.get('/transactions', authMiddleware, async (req, res) => {
   try {
-    const db = getDatabase();
-
-    // Get airline
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
-    // Get recent transactions from flights (as revenue) and aircraft (as costs)
-    // Since we don't have a transactions table populated yet, derive from data
     const transactions = [];
 
     // Get recent completed flights as revenue transactions
-    const flightsStmt = db.prepare(`
+    const flightsResult = await pool.query(`
       SELECT f.id, f.flight_number, f.revenue, f.arrival_time,
              r.departure_airport, r.arrival_airport
       FROM flights f
       JOIN routes r ON f.route_id = r.id
-      WHERE f.airline_id = ? AND f.status = 'completed'
+      WHERE f.airline_id = $1 AND f.status = 'completed'
       ORDER BY f.arrival_time DESC
       LIMIT 20
-    `);
-    flightsStmt.bind([airlineId]);
+    `, [airlineId]);
 
-    while (flightsStmt.step()) {
-      const row = flightsStmt.get();
+    for (const row of flightsResult.rows) {
       transactions.push({
-        id: `flight_${row[0]}`,
+        id: `flight_${row.id}`,
         type: 'flight_revenue',
-        amount: row[2],
-        description: `${row[1]}: ${row[4]} → ${row[5]}`,
-        date: row[3]
+        amount: parseFloat(row.revenue),
+        description: `${row.flight_number}: ${row.departure_airport} → ${row.arrival_airport}`,
+        date: row.arrival_time
       });
     }
-    flightsStmt.free();
 
     // Get recent aircraft purchases as cost transactions
-    const aircraftStmt = db.prepare(`
+    const aircraftResult = await pool.query(`
       SELECT a.id, a.registration, at.new_price_usd, at.full_name, a.purchased_at
       FROM aircraft a
       JOIN aircraft_types at ON a.aircraft_type_id = at.id
-      WHERE a.airline_id = ?
+      WHERE a.airline_id = $1
       ORDER BY a.purchased_at DESC
       LIMIT 10
-    `);
-    aircraftStmt.bind([airlineId]);
+    `, [airlineId]);
 
-    while (aircraftStmt.step()) {
-      const row = aircraftStmt.get();
+    for (const row of aircraftResult.rows) {
       transactions.push({
-        id: `aircraft_${row[0]}`,
+        id: `aircraft_${row.id}`,
         type: 'aircraft_purchase',
-        amount: -row[2],
-        description: `${row[3]} (${row[1]})`,
-        date: row[4]
+        amount: -parseFloat(row.new_price_usd),
+        description: `${row.full_name} (${row.registration})`,
+        date: row.purchased_at
       });
     }
-    aircraftStmt.free();
 
     // Sort by date descending
     transactions.sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -363,30 +299,25 @@ router.get('/transactions', authMiddleware, (req, res) => {
 });
 
 // Get operational cost breakdown from completed flights
-router.get('/cost-breakdown', authMiddleware, (req, res) => {
+router.get('/cost-breakdown', authMiddleware, async (req, res) => {
   try {
-    const db = getDatabase();
-
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
-    const stmt = db.prepare(`
+    const result = await pool.query(`
       SELECT
         COALESCE(SUM(atc_fee), 0)  as total_atc,
         COALESCE(SUM(fuel_cost), 0) as total_fuel,
         COUNT(*) as completed_flights
       FROM flights
-      WHERE airline_id = ? AND status = 'completed' AND booking_revenue_collected = 1
-    `);
-    stmt.bind([airlineId]);
-    stmt.step();
-    const row = stmt.get();
-    stmt.free();
+      WHERE airline_id = $1 AND status = 'completed' AND booking_revenue_collected = 1
+    `, [airlineId]);
+    const row = result.rows[0];
 
     res.json({
-      total_atc: Math.round(row[0]),
-      total_fuel: Math.round(row[1]),
-      completed_flights: row[2]
+      total_atc: Math.round(parseFloat(row.total_atc)),
+      total_fuel: Math.round(parseFloat(row.total_fuel)),
+      completed_flights: parseInt(row.completed_flights)
     });
   } catch (error) {
     console.error('Get cost breakdown error:', error);
@@ -395,88 +326,129 @@ router.get('/cost-breakdown', authMiddleware, (req, res) => {
 });
 
 // Comprehensive dashboard endpoint
-router.get('/dashboard', authMiddleware, (req, res) => {
+router.get('/dashboard', authMiddleware, async (req, res) => {
   try {
-    const db = getDatabase();
-
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
-    const airlineBalStmt2 = db.prepare('SELECT balance FROM airlines WHERE id = ?');
-    airlineBalStmt2.bind([airlineId]);
-    if (!airlineBalStmt2.step()) { airlineBalStmt2.free(); return res.status(400).json({ error: 'No airline found' }); }
-    const balance = airlineBalStmt2.get()[0];
-    airlineBalStmt2.free();
 
-    const q = (sql, params) => {
-      const s = db.prepare(sql); s.bind(params); s.step(); const r = s.get(); s.free(); return r;
+    const balResult = await pool.query('SELECT balance FROM airlines WHERE id = $1', [airlineId]);
+    if (!balResult.rows[0]) return res.status(400).json({ error: 'No airline found' });
+    const balance = parseFloat(balResult.rows[0].balance);
+
+    // Helper: single-row query returning first row
+    const q = async (sql, params) => {
+      const r = await pool.query(sql, params);
+      return r.rows[0];
     };
 
     // ── Weekly KPIs ──────────────────────────────────────────────────────────
-    const weeklyRevenue     = q(`SELECT COALESCE(SUM(amount),0) FROM transactions WHERE airline_id=? AND type='flight_revenue' AND created_at>=datetime('now','-7 days')`, [airlineId])[0];
-    const prevWeeklyRevenue = q(`SELECT COALESCE(SUM(amount),0) FROM transactions WHERE airline_id=? AND type='flight_revenue' AND created_at>=datetime('now','-14 days') AND created_at<datetime('now','-7 days')`, [airlineId])[0];
-    const weeklyCosts       = q(`SELECT COALESCE(SUM(ABS(amount)),0) FROM transactions WHERE airline_id=? AND amount<0 AND created_at>=datetime('now','-7 days')`, [airlineId])[0];
-    const prevWeeklyCosts   = q(`SELECT COALESCE(SUM(ABS(amount)),0) FROM transactions WHERE airline_id=? AND amount<0 AND created_at>=datetime('now','-14 days') AND created_at<datetime('now','-7 days')`, [airlineId])[0];
+    const weeklyRevenueRow     = await q(`SELECT COALESCE(SUM(amount),0) as val FROM transactions WHERE airline_id=$1 AND type='flight_revenue' AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
+    const prevWeeklyRevenueRow = await q(`SELECT COALESCE(SUM(amount),0) as val FROM transactions WHERE airline_id=$1 AND type='flight_revenue' AND created_at>=NOW()-INTERVAL '14 days' AND created_at<NOW()-INTERVAL '7 days'`, [airlineId]);
+    const weeklyCostsRow       = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND amount<0 AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
+    const prevWeeklyCostsRow   = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND amount<0 AND created_at>=NOW()-INTERVAL '14 days' AND created_at<NOW()-INTERVAL '7 days'`, [airlineId]);
+
+    const weeklyRevenue     = parseFloat(weeklyRevenueRow.val) || 0;
+    const prevWeeklyRevenue = parseFloat(prevWeeklyRevenueRow.val) || 0;
+    const weeklyCosts       = parseFloat(weeklyCostsRow.val) || 0;
+    const prevWeeklyCosts   = parseFloat(prevWeeklyCostsRow.val) || 0;
     const weeklyProfit     = weeklyRevenue - weeklyCosts;
     const prevWeeklyProfit = prevWeeklyRevenue - prevWeeklyCosts;
     const balancePrevWeek  = balance - weeklyProfit;
 
     // ── Daily history (5 days) ───────────────────────────────────────────────
-    const dailyRevStmt = db.prepare(`SELECT date(created_at) as d, COALESCE(SUM(amount),0) FROM transactions WHERE airline_id=? AND type='flight_revenue' AND created_at>=datetime('now','-7 days') GROUP BY d ORDER BY d ASC`);
-    dailyRevStmt.bind([airlineId]);
+    const dailyRevResult = await pool.query(
+      `SELECT DATE(created_at) as d, COALESCE(SUM(amount),0) as rev FROM transactions WHERE airline_id=$1 AND type='flight_revenue' AND created_at>=NOW()-INTERVAL '7 days' GROUP BY d ORDER BY d ASC`,
+      [airlineId]
+    );
     const dailyMap = new Map();
-    while (dailyRevStmt.step()) { const r = dailyRevStmt.get(); dailyMap.set(r[0], { date: r[0], revenue: r[1], costs: 0 }); }
-    dailyRevStmt.free();
+    for (const r of dailyRevResult.rows) {
+      dailyMap.set(r.d.toISOString ? r.d.toISOString().slice(0, 10) : r.d, { date: r.d, revenue: parseFloat(r.rev), costs: 0 });
+    }
 
-    const dailyCostStmt = db.prepare(`SELECT date(created_at) as d, COALESCE(SUM(ABS(amount)),0) FROM transactions WHERE airline_id=? AND amount<0 AND created_at>=datetime('now','-7 days') GROUP BY d ORDER BY d ASC`);
-    dailyCostStmt.bind([airlineId]);
-    while (dailyCostStmt.step()) { const r = dailyCostStmt.get(); if (dailyMap.has(r[0])) { dailyMap.get(r[0]).costs = r[1]; } else { dailyMap.set(r[0], { date: r[0], revenue: 0, costs: r[1] }); } }
-    dailyCostStmt.free();
-
-    const dailyHistory = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date)).map(d => ({ ...d, profit: d.revenue - d.costs }));
+    const dailyCostResult = await pool.query(
+      `SELECT DATE(created_at) as d, COALESCE(SUM(ABS(amount)),0) as cost FROM transactions WHERE airline_id=$1 AND amount<0 AND created_at>=NOW()-INTERVAL '7 days' GROUP BY d ORDER BY d ASC`,
+      [airlineId]
+    );
+    for (const r of dailyCostResult.rows) {
+      const key = r.d.toISOString ? r.d.toISOString().slice(0, 10) : r.d;
+      if (dailyMap.has(key)) {
+        dailyMap.get(key).costs = parseFloat(r.cost);
+      } else {
+        dailyMap.set(key, { date: r.d, revenue: 0, costs: parseFloat(r.cost) });
+      }
+    }
+    const dailyHistory = Array.from(dailyMap.values())
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+      .map(d => ({ ...d, profit: d.revenue - d.costs }));
 
     // ── Revenue breakdown (this week) ────────────────────────────────────────
-    const ticketRevenue    = q(`SELECT COALESCE(SUM(amount),0) FROM transactions WHERE airline_id=? AND type='flight_revenue' AND created_at>=datetime('now','-7 days')`, [airlineId])[0];
-    const aircraftSalesRev = q(`SELECT COALESCE(SUM(amount),0) FROM transactions WHERE airline_id=? AND amount>0 AND type!='flight_revenue' AND description LIKE '%Sale%' AND created_at>=datetime('now','-7 days')`, [airlineId])[0];
-    const otherRevenue     = q(`SELECT COALESCE(SUM(amount),0) FROM transactions WHERE airline_id=? AND amount>0 AND type!='flight_revenue' AND description NOT LIKE '%Sale%' AND created_at>=datetime('now','-7 days')`, [airlineId])[0];
+    const ticketRevenueRow    = await q(`SELECT COALESCE(SUM(amount),0) as val FROM transactions WHERE airline_id=$1 AND type='flight_revenue' AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
+    const aircraftSalesRevRow = await q(`SELECT COALESCE(SUM(amount),0) as val FROM transactions WHERE airline_id=$1 AND amount>0 AND type!='flight_revenue' AND description LIKE '%Sale%' AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
+    const otherRevenueRow     = await q(`SELECT COALESCE(SUM(amount),0) as val FROM transactions WHERE airline_id=$1 AND amount>0 AND type!='flight_revenue' AND description NOT LIKE '%Sale%' AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
+
+    const ticketRevenue    = parseFloat(ticketRevenueRow.val) || 0;
+    const aircraftSalesRev = parseFloat(aircraftSalesRevRow.val) || 0;
+    const otherRevenue     = parseFloat(otherRevenueRow.val) || 0;
 
     // ── Cost breakdown (this week) ───────────────────────────────────────────
-    const fcRow = q(`SELECT COALESCE(SUM(fuel_cost),0), COALESCE(SUM(atc_fee),0), COUNT(*), COALESCE(SUM(seats_sold),0), COALESCE(AVG(CAST(seats_sold AS FLOAT)/NULLIF(total_seats,0)*100),0) FROM flights WHERE airline_id=? AND status='completed' AND arrival_time>=datetime('now','-7 days')`, [airlineId]);
-    const weekFuel = Math.round(fcRow[0]);
-    const weekAtc  = Math.round(fcRow[1]);
-    const weekFlights    = fcRow[2];
-    const weekPassengers = fcRow[3];
-    const weekLoadFactor = Math.round(fcRow[4]);
+    const fcRow = await q(
+      `SELECT COALESCE(SUM(fuel_cost),0) as fuel, COALESCE(SUM(atc_fee),0) as atc, COUNT(*) as cnt, COALESCE(SUM(seats_sold),0) as pax, COALESCE(AVG(CAST(seats_sold AS FLOAT)/NULLIF(total_seats,0)*100),0) as lf FROM flights WHERE airline_id=$1 AND status='completed' AND arrival_time>=NOW()-INTERVAL '7 days'`,
+      [airlineId]
+    );
+    const weekFuel = Math.round(parseFloat(fcRow.fuel));
+    const weekAtc  = Math.round(parseFloat(fcRow.atc));
+    const weekFlights    = parseInt(fcRow.cnt);
+    const weekPassengers = parseInt(fcRow.pax);
+    const weekLoadFactor = Math.round(parseFloat(fcRow.lf));
 
-    const totalFlightCostTx = q(`SELECT COALESCE(SUM(ABS(amount)),0) FROM transactions WHERE airline_id=? AND description LIKE 'Flight Costs%' AND created_at>=datetime('now','-7 days')`, [airlineId])[0];
+    const totalFlightCostTxRow = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND description LIKE 'Flight Costs%' AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
+    const totalFlightCostTx = parseFloat(totalFlightCostTxRow.val) || 0;
     const airportFeesCatering = Math.max(0, Math.round(totalFlightCostTx - weekFuel - weekAtc));
-    const weekMaintenance     = Math.round(q(`SELECT COALESCE(SUM(ABS(amount)),0) FROM transactions WHERE airline_id=? AND (type='maintenance' OR description LIKE '%Maintenance%') AND amount<0 AND created_at>=datetime('now','-7 days')`, [airlineId])[0]);
-    const weekCancellations   = Math.round(q(`SELECT COALESCE(SUM(ABS(amount)),0) FROM transactions WHERE airline_id=? AND (description LIKE '%Cancel%' OR description LIKE '%Penalty%') AND amount<0 AND created_at>=datetime('now','-7 days')`, [airlineId])[0]);
-    const weekAircraftPurch   = Math.round(q(`SELECT COALESCE(SUM(ABS(amount)),0) FROM transactions WHERE airline_id=? AND type='aircraft_purchase' AND created_at>=datetime('now','-7 days')`, [airlineId])[0]);
-    const weekOtherCosts      = Math.round(q(`SELECT COALESCE(SUM(ABS(amount)),0) FROM transactions WHERE airline_id=? AND amount<0 AND type NOT IN ('maintenance','aircraft_purchase') AND description NOT LIKE 'Flight Costs%' AND description NOT LIKE '%Cancel%' AND description NOT LIKE '%Penalty%' AND created_at>=datetime('now','-7 days')`, [airlineId])[0]);
+
+    const weekMaintenanceRow   = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND (type='maintenance' OR description LIKE '%Maintenance%') AND amount<0 AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
+    const weekCancellationsRow = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND (description LIKE '%Cancel%' OR description LIKE '%Penalty%') AND amount<0 AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
+    const weekAircraftPurchRow = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND type='aircraft_purchase' AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
+    const weekOtherCostsRow    = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND amount<0 AND type NOT IN ('maintenance','aircraft_purchase') AND description NOT LIKE 'Flight Costs%' AND description NOT LIKE '%Cancel%' AND description NOT LIKE '%Penalty%' AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
+
+    const weekMaintenance   = Math.round(parseFloat(weekMaintenanceRow.val) || 0);
+    const weekCancellations = Math.round(parseFloat(weekCancellationsRow.val) || 0);
+    const weekAircraftPurch = Math.round(parseFloat(weekAircraftPurchRow.val) || 0);
+    const weekOtherCosts    = Math.round(parseFloat(weekOtherCostsRow.val) || 0);
 
     // ── Fuel price ───────────────────────────────────────────────────────────
-    const fuelPriceStmt = db.prepare('SELECT price_per_liter FROM fuel_prices ORDER BY created_at DESC LIMIT 2');
-    fuelPriceStmt.bind([]);
+    const fuelResult = await pool.query(
+      'SELECT price_per_liter FROM fuel_prices ORDER BY created_at DESC LIMIT 2'
+    );
     let currentFuelPriceL = 0.64;
     let prevFuelPriceL = null;
-    if (fuelPriceStmt.step()) currentFuelPriceL = fuelPriceStmt.get()[0];
-    if (fuelPriceStmt.step()) prevFuelPriceL = fuelPriceStmt.get()[0];
-    fuelPriceStmt.free();
+    if (fuelResult.rows[0]) currentFuelPriceL = parseFloat(fuelResult.rows[0].price_per_liter);
+    if (fuelResult.rows[1]) prevFuelPriceL = parseFloat(fuelResult.rows[1].price_per_liter);
 
     // ── Ops stats ────────────────────────────────────────────────────────────
-    const activeAircraft = q(`SELECT COUNT(*) FROM aircraft WHERE airline_id=? AND is_active=1`, [airlineId])[0];
-    const activeRoutes   = q(`SELECT COUNT(*) FROM routes WHERE airline_id=?`, [airlineId])[0];
-    const destinations   = q(`SELECT COUNT(DISTINCT arrival_airport) FROM routes WHERE airline_id=?`, [airlineId])[0];
+    const activeAircraftRow = await q(`SELECT COUNT(*) as val FROM aircraft WHERE airline_id=$1 AND is_active=1`, [airlineId]);
+    const activeRoutesRow   = await q(`SELECT COUNT(*) as val FROM routes WHERE airline_id=$1`, [airlineId]);
+    const destinationsRow   = await q(`SELECT COUNT(DISTINCT arrival_airport) as val FROM routes WHERE airline_id=$1`, [airlineId]);
+
+    const activeAircraft = parseInt(activeAircraftRow.val);
+    const activeRoutes   = parseInt(activeRoutesRow.val);
+    const destinations   = parseInt(destinationsRow.val);
 
     // ── Recent transactions (last 50) ────────────────────────────────────────
-    const txStmt = db.prepare(`SELECT id, type, amount, description, created_at FROM transactions WHERE airline_id=? ORDER BY created_at DESC LIMIT 50`);
-    txStmt.bind([airlineId]);
-    const txRows = [];
-    while (txStmt.step()) { const r = txStmt.get(); txRows.push({ id: r[0], type: r[1], amount: r[2], description: r[3], created_at: r[4] }); }
-    txStmt.free();
+    const txResult = await pool.query(
+      `SELECT id, type, amount, description, created_at FROM transactions WHERE airline_id=$1 ORDER BY created_at DESC LIMIT 50`,
+      [airlineId]
+    );
+    const txRows = txResult.rows.map(r => ({
+      id: r.id, type: r.type, amount: parseFloat(r.amount),
+      description: r.description, created_at: r.created_at
+    }));
 
     let runningBalance = balance;
-    const transactions = txRows.map(tx => { const balAfter = Math.round(runningBalance); runningBalance -= tx.amount; return { ...tx, balance_after: balAfter }; });
+    const transactions = txRows.map(tx => {
+      const balAfter = Math.round(runningBalance);
+      runningBalance -= tx.amount;
+      return { ...tx, balance_after: balAfter };
+    });
 
     res.json({
       balance: Math.round(balance),
@@ -522,30 +494,25 @@ router.get('/dashboard', authMiddleware, (req, res) => {
 });
 
 // Get fuel price history (last 3 days, public — no auth needed)
-router.get('/fuel-price-history', (req, res) => {
+router.get('/fuel-price-history', async (req, res) => {
   try {
-    const db = getDatabase();
-
-    // Last 72h, up to 48 entries (one per 6h = 12, but keep extras for density)
-    const stmt = db.prepare(`
+    const result = await pool.query(`
       SELECT price_per_liter, created_at
       FROM fuel_prices
-      WHERE created_at >= datetime('now', '-3 days')
+      WHERE created_at >= NOW() - INTERVAL '3 days'
       ORDER BY created_at ASC
     `);
 
-    const prices = [];
-    while (stmt.step()) {
-      const row = stmt.get();
-      prices.push({ price_per_liter: row[0], created_at: row[1] });
-    }
-    stmt.free();
+    const prices = result.rows.map(row => ({
+      price_per_liter: parseFloat(row.price_per_liter),
+      created_at: row.created_at
+    }));
 
     // Current price = most recent entry
-    const currentStmt = db.prepare('SELECT price_per_liter FROM fuel_prices ORDER BY created_at DESC LIMIT 1');
-    let currentPrice = 0.64;
-    if (currentStmt.step()) currentPrice = currentStmt.get()[0];
-    currentStmt.free();
+    const currentResult = await pool.query(
+      'SELECT price_per_liter FROM fuel_prices ORDER BY created_at DESC LIMIT 1'
+    );
+    const currentPrice = currentResult.rows[0] ? parseFloat(currentResult.rows[0].price_per_liter) : 0.64;
 
     res.json({ prices, currentPrice });
   } catch (error) {

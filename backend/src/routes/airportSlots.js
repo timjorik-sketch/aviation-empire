@@ -1,5 +1,5 @@
 import express from 'express';
-import { getDatabase, saveDatabase } from '../database/db.js';
+import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 
 const router = express.Router();
@@ -24,36 +24,31 @@ export function getNextMondayISO(weekStart) {
 }
 
 // GET /api/airport-slots
-router.get('/', authMiddleware, (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
   if (!req.airlineId) return res.json({ slots: [], week_start: getCurrentWeekStart(), departures_per_slot: DEPARTURES_PER_SLOT });
   try {
-    const db = getDatabase();
     const weekStart = getCurrentWeekStart();
 
-    const stmt = db.prepare(`
+    const result = await pool.query(`
       SELECT s.id, s.airport_code, ap.name, s.category, s.slots_count, s.cost_per_slot,
              COALESCE((
                SELECT su.departures_used FROM slot_usage su
-               WHERE su.airline_id = s.airline_id AND su.airport_code = s.airport_code AND su.week_start = ?
+               WHERE su.airline_id = s.airline_id AND su.airport_code = s.airport_code AND su.week_start = $1
              ), 0) AS week_usage
       FROM airport_slots s
       LEFT JOIN airports ap ON ap.iata_code = s.airport_code
-      WHERE s.airline_id = ?
+      WHERE s.airline_id = $2
       ORDER BY s.airport_code
-    `);
-    stmt.bind([weekStart, req.airlineId]);
+    `, [weekStart, req.airlineId]);
 
-    const slots = [];
-    while (stmt.step()) {
-      const r = stmt.get();
-      const capacity = r[4] * DEPARTURES_PER_SLOT;
-      slots.push({
-        id: r[0], airport_code: r[1], airport_name: r[2],
-        category: r[3], slots_count: r[4], cost_per_slot: r[5],
-        week_usage: r[6], capacity, week_start: weekStart,
-      });
-    }
-    stmt.free();
+    const slots = result.rows.map(r => {
+      const capacity = r.slots_count * DEPARTURES_PER_SLOT;
+      return {
+        id: r.id, airport_code: r.airport_code, airport_name: r.name,
+        category: r.category, slots_count: r.slots_count, cost_per_slot: r.cost_per_slot,
+        week_usage: parseInt(r.week_usage), capacity, week_start: weekStart,
+      };
+    });
 
     res.json({ slots, week_start: weekStart, departures_per_slot: DEPARTURES_PER_SLOT });
   } catch (error) {
@@ -63,72 +58,63 @@ router.get('/', authMiddleware, (req, res) => {
 });
 
 // POST /api/airport-slots/purchase
-router.post('/purchase', authMiddleware, (req, res) => {
+router.post('/purchase', authMiddleware, async (req, res) => {
   if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
   try {
     const { airport_code } = req.body;
     if (!airport_code) return res.status(400).json({ error: 'airport_code required' });
     const code = airport_code.toUpperCase();
-    const db = getDatabase();
 
     // Airport exists + category
-    const apStmt = db.prepare('SELECT category FROM airports WHERE iata_code = ?');
-    apStmt.bind([code]);
-    if (!apStmt.step()) { apStmt.free(); return res.status(404).json({ error: 'Airport not found.' }); }
-    const category = apStmt.get()[0] || 4;
-    apStmt.free();
+    const apResult = await pool.query('SELECT category FROM airports WHERE iata_code = $1', [code]);
+    if (!apResult.rows[0]) return res.status(404).json({ error: 'Airport not found.' });
+    const category = apResult.rows[0].category || 4;
 
     // Destination opened
-    const destStmt = db.prepare('SELECT id FROM airline_destinations WHERE airline_id = ? AND airport_code = ?');
-    destStmt.bind([req.airlineId, code]);
-    if (!destStmt.step()) { destStmt.free(); return res.status(400).json({ error: 'Open this destination first.' }); }
-    destStmt.free();
+    const destResult = await pool.query(
+      'SELECT id FROM airline_destinations WHERE airline_id = $1 AND airport_code = $2',
+      [req.airlineId, code]
+    );
+    if (!destResult.rows[0]) return res.status(400).json({ error: 'Open this destination first.' });
 
     const cost = category * COST_PER_CATEGORY_POINT;
 
     // Balance
-    const balStmt = db.prepare('SELECT balance FROM airlines WHERE id = ?');
-    balStmt.bind([req.airlineId]);
-    balStmt.step();
-    const balance = balStmt.get()[0];
-    balStmt.free();
+    const balResult = await pool.query('SELECT balance FROM airlines WHERE id = $1', [req.airlineId]);
+    const balance = balResult.rows[0].balance;
     if (balance < cost) return res.status(400).json({ error: `Insufficient balance. One slot here costs $${cost.toLocaleString()}.` });
 
     // Deduct
-    const deduct = db.prepare('UPDATE airlines SET balance = balance - ? WHERE id = ?');
-    deduct.bind([cost, req.airlineId]);
-    deduct.step(); deduct.free();
+    await pool.query('UPDATE airlines SET balance = balance - $1 WHERE id = $2', [cost, req.airlineId]);
 
     // Transaction
-    const tx = db.prepare("INSERT INTO transactions (airline_id, type, amount, description) VALUES (?, 'other', ?, ?)");
-    tx.bind([req.airlineId, -cost, `Airport slot purchased: ${code}`]);
-    tx.step(); tx.free();
+    await pool.query(
+      "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
+      [req.airlineId, -cost, `Airport slot purchased: ${code}`]
+    );
 
     // Upsert slot
-    const existStmt = db.prepare('SELECT id FROM airport_slots WHERE airline_id = ? AND airport_code = ?');
-    existStmt.bind([req.airlineId, code]);
-    const isFirstSlot = !existStmt.step();
-    if (!isFirstSlot) {
-      const slotId = existStmt.get()[0];
-      existStmt.free();
-      const upd = db.prepare('UPDATE airport_slots SET slots_count = slots_count + 1, cost_per_slot = ? WHERE id = ?');
-      upd.bind([cost, slotId]);
-      upd.step(); upd.free();
+    const existResult = await pool.query(
+      'SELECT id FROM airport_slots WHERE airline_id = $1 AND airport_code = $2',
+      [req.airlineId, code]
+    );
+    if (existResult.rows[0]) {
+      const slotId = existResult.rows[0].id;
+      await pool.query(
+        'UPDATE airport_slots SET slots_count = slots_count + 1, cost_per_slot = $1 WHERE id = $2',
+        [cost, slotId]
+      );
     } else {
-      existStmt.free();
-      const ins = db.prepare('INSERT INTO airport_slots (airline_id, airport_code, category, slots_count, cost_per_slot) VALUES (?, ?, ?, 1, ?)');
-      ins.bind([req.airlineId, code, category, cost]);
-      ins.step(); ins.free();
+      await pool.query(
+        'INSERT INTO airport_slots (airline_id, airport_code, category, slots_count, cost_per_slot) VALUES ($1, $2, $3, 1, $4)',
+        [req.airlineId, code, category, cost]
+      );
     }
 
     // New balance
-    const newBalStmt = db.prepare('SELECT balance FROM airlines WHERE id = ?');
-    newBalStmt.bind([req.airlineId]);
-    newBalStmt.step();
-    const newBalance = newBalStmt.get()[0];
-    newBalStmt.free();
+    const newBalResult = await pool.query('SELECT balance FROM airlines WHERE id = $1', [req.airlineId]);
+    const newBalance = newBalResult.rows[0].balance;
 
-    saveDatabase();
     res.json({ message: `Slot purchased at ${code}`, new_balance: newBalance });
   } catch (error) {
     console.error('Purchase airport slot error:', error);
@@ -137,29 +123,29 @@ router.post('/purchase', authMiddleware, (req, res) => {
 });
 
 // GET /api/airport-slots/usage/:airport_code
-router.get('/usage/:airport_code', authMiddleware, (req, res) => {
+router.get('/usage/:airport_code', authMiddleware, async (req, res) => {
   if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
   try {
     const code = req.params.airport_code.toUpperCase();
-    const db = getDatabase();
     const weekStart = getCurrentWeekStart();
 
-    const slotStmt = db.prepare('SELECT slots_count, category FROM airport_slots WHERE airline_id = ? AND airport_code = ?');
-    slotStmt.bind([req.airlineId, code]);
-    if (!slotStmt.step()) {
-      slotStmt.free();
+    const slotResult = await pool.query(
+      'SELECT slots_count, category FROM airport_slots WHERE airline_id = $1 AND airport_code = $2',
+      [req.airlineId, code]
+    );
+    if (!slotResult.rows[0]) {
       return res.json({ has_slots: false, capacity: 0, week_usage: 0, week_start: weekStart });
     }
-    const slotRow = slotStmt.get();
-    slotStmt.free();
-    const capacity = slotRow[0] * DEPARTURES_PER_SLOT;
+    const slotRow = slotResult.rows[0];
+    const capacity = slotRow.slots_count * DEPARTURES_PER_SLOT;
 
-    const usageStmt = db.prepare('SELECT departures_used FROM slot_usage WHERE airline_id = ? AND airport_code = ? AND week_start = ?');
-    usageStmt.bind([req.airlineId, code, weekStart]);
-    const weekUsage = usageStmt.step() ? usageStmt.get()[0] : 0;
-    usageStmt.free();
+    const usageResult = await pool.query(
+      'SELECT departures_used FROM slot_usage WHERE airline_id = $1 AND airport_code = $2 AND week_start = $3',
+      [req.airlineId, code, weekStart]
+    );
+    const weekUsage = usageResult.rows[0] ? parseInt(usageResult.rows[0].departures_used) : 0;
 
-    res.json({ has_slots: true, slots_count: slotRow[0], capacity, week_usage: weekUsage, week_start: weekStart });
+    res.json({ has_slots: true, slots_count: slotRow.slots_count, capacity, week_usage: weekUsage, week_start: weekStart });
   } catch (error) {
     console.error('Slot usage error:', error);
     res.status(500).json({ error: 'Server error' });

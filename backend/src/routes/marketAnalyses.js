@@ -1,5 +1,5 @@
 import express from 'express';
-import { getDatabase, saveDatabase } from '../database/db.js';
+import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 
 const router = express.Router();
@@ -34,156 +34,133 @@ function getWeekStart() {
 }
 
 // Get or create analysis_limits row; resets if week changed
-function getLimitsRow(db, airlineId) {
+async function getLimitsRow(airlineId) {
   const weekStart = getWeekStart();
-  const stmt = db.prepare('SELECT week_start, analyses_this_week FROM analysis_limits WHERE airline_id = ?');
-  stmt.bind([airlineId]);
-  if (stmt.step()) {
-    const row = stmt.get();
-    stmt.free();
-    if (row[0] !== weekStart) {
+  const result = await pool.query(
+    'SELECT week_start, analyses_this_week FROM analysis_limits WHERE airline_id = $1',
+    [airlineId]
+  );
+  if (result.rows[0]) {
+    const row = result.rows[0];
+    if (row.week_start !== weekStart) {
       // New week — reset counter
-      const upd = db.prepare('UPDATE analysis_limits SET week_start = ?, analyses_this_week = 0 WHERE airline_id = ?');
-      upd.bind([weekStart, airlineId]);
-      upd.step();
-      upd.free();
+      await pool.query(
+        'UPDATE analysis_limits SET week_start = $1, analyses_this_week = 0 WHERE airline_id = $2',
+        [weekStart, airlineId]
+      );
       return { week_start: weekStart, analyses_this_week: 0 };
     }
-    return { week_start: row[0], analyses_this_week: row[1] };
+    return { week_start: row.week_start, analyses_this_week: row.analyses_this_week };
   }
-  stmt.free();
   // Insert new row
-  const ins = db.prepare('INSERT INTO analysis_limits (airline_id, week_start, analyses_this_week) VALUES (?, ?, 0)');
-  ins.bind([airlineId, weekStart]);
-  ins.step();
-  ins.free();
+  await pool.query(
+    'INSERT INTO analysis_limits (airline_id, week_start, analyses_this_week) VALUES ($1, $2, 0)',
+    [airlineId, weekStart]
+  );
   return { week_start: weekStart, analyses_this_week: 0 };
 }
 
 // POST /api/market-analyses/request
-router.post('/request', authMiddleware, (req, res) => {
+router.post('/request', authMiddleware, async (req, res) => {
   try {
     if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
     const { route_id } = req.body;
     if (!route_id) return res.status(400).json({ error: 'route_id required' });
 
-    const db = getDatabase();
-
     // Verify route belongs to airline
-    const routeStmt = db.prepare('SELECT id, distance_km, economy_price, business_price, first_price FROM routes WHERE id = ? AND airline_id = ?');
-    routeStmt.bind([route_id, req.airlineId]);
-    if (!routeStmt.step()) {
-      routeStmt.free();
+    const routeResult = await pool.query(
+      'SELECT id, distance_km, economy_price, business_price, first_price FROM routes WHERE id = $1 AND airline_id = $2',
+      [route_id, req.airlineId]
+    );
+    if (!routeResult.rows[0]) {
       return res.status(404).json({ error: 'Route not found' });
     }
-    const routeRow = routeStmt.get();
-    routeStmt.free();
-    const distKm = routeRow[1];
-    const ecoPrice = routeRow[2];
-    const bizPrice = routeRow[3];
-    const firstPrice = routeRow[4];
+    const routeRow = routeResult.rows[0];
+    const distKm = routeRow.distance_km;
+    const ecoPrice = routeRow.economy_price;
+    const bizPrice = routeRow.business_price;
+    const firstPrice = routeRow.first_price;
 
     // Route must have scheduled flights
-    const schedStmt = db.prepare('SELECT COUNT(*) FROM weekly_schedule ws JOIN aircraft a ON ws.aircraft_id = a.id WHERE ws.route_id = ? AND a.airline_id = ?');
-    schedStmt.bind([route_id, req.airlineId]);
-    schedStmt.step();
-    const schedCount = schedStmt.get()[0];
-    schedStmt.free();
+    const schedResult = await pool.query(
+      'SELECT COUNT(*) FROM weekly_schedule ws JOIN aircraft a ON ws.aircraft_id = a.id WHERE ws.route_id = $1 AND a.airline_id = $2',
+      [route_id, req.airlineId]
+    );
+    const schedCount = parseInt(schedResult.rows[0].count);
     if (schedCount === 0) return res.status(400).json({ error: 'Route has no scheduled flights' });
 
     // No duplicate pending analysis
-    const dupStmt = db.prepare("SELECT id FROM market_analyses WHERE airline_id = ? AND route_id = ? AND status = 'pending'");
-    dupStmt.bind([req.airlineId, route_id]);
-    const hasDup = dupStmt.step();
-    dupStmt.free();
-    if (hasDup) return res.status(400).json({ error: 'A pending analysis already exists for this route' });
+    const dupResult = await pool.query(
+      "SELECT id FROM market_analyses WHERE airline_id = $1 AND route_id = $2 AND status = 'pending'",
+      [req.airlineId, route_id]
+    );
+    if (dupResult.rows[0]) return res.status(400).json({ error: 'A pending analysis already exists for this route' });
 
     // Weekly limit
-    const limits = getLimitsRow(db, req.airlineId);
+    const limits = await getLimitsRow(req.airlineId);
     if (limits.analyses_this_week >= 4) return res.status(400).json({ error: 'Weekly analysis limit reached (4/week)' });
 
     const cost = getCost(distKm);
 
     // Balance check
-    const balStmt = db.prepare('SELECT balance FROM airlines WHERE id = ?');
-    balStmt.bind([req.airlineId]);
-    balStmt.step();
-    const balance = balStmt.get()[0];
-    balStmt.free();
+    const balResult = await pool.query('SELECT balance FROM airlines WHERE id = $1', [req.airlineId]);
+    const balance = balResult.rows[0].balance;
     if (balance < cost) return res.status(400).json({ error: 'Insufficient balance' });
 
-    // Calculate market price: use average of recent completed flights on this route
-    // Market price = average market_price_economy/business/first from completed flights on route, last 30 days
-    // Falls back to a distance-based formula if no flights
-    function getMarketPrice(cabin) {
+    // Calculate market price
+    async function getMarketPrice(cabin) {
       const col = `market_price_${cabin}`;
-      const mpStmt = db.prepare(`SELECT AVG(f.${col}) FROM flights f WHERE f.route_id = ? AND f.status = 'completed' AND f.${col} > 0 AND f.departure_time > datetime('now', '-30 days')`);
-      mpStmt.bind([route_id]);
-      mpStmt.step();
-      const avg = mpStmt.get()[0];
-      mpStmt.free();
+      const mpResult = await pool.query(
+        `SELECT AVG(f.${col}) FROM flights f WHERE f.route_id = $1 AND f.status = 'completed' AND f.${col} > 0 AND f.departure_time > NOW() - INTERVAL '30 days'`,
+        [route_id]
+      );
+      const avg = mpResult.rows[0] ? parseFloat(mpResult.rows[0].avg) : null;
       if (avg && avg > 0) return Math.round(avg);
       // Fallback: distance-based formula
       const base = { economy: 0.08, business: 0.20, first: 0.38 };
       return Math.round(distKm * (base[cabin] || 0.08));
     }
 
-    const ecoMarket   = getMarketPrice('economy');
-    const bizMarket   = getMarketPrice('business');
-    const firstMarket = getMarketPrice('first');
+    const ecoMarket   = await getMarketPrice('economy');
+    const bizMarket   = await getMarketPrice('business');
+    const firstMarket = await getMarketPrice('first');
 
     // completed_at = now + 12 hours
     const completedAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
 
-    // Insert analysis
-    const insStmt = db.prepare(`
+    // Insert analysis with RETURNING id
+    const insResult = await pool.query(`
       INSERT INTO market_analyses
         (airline_id, route_id, status, completed_at, cost,
          economy_price, business_price, first_price,
          economy_market_price, business_market_price, first_market_price)
-      VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    insStmt.bind([
+      VALUES ($1, $2, 'pending', $3, $4, $5, $6, $7, $8, $9, $10)
+      RETURNING id
+    `, [
       req.airlineId, route_id, completedAt, cost,
       ecoPrice, bizPrice, firstPrice,
       ecoMarket, bizMarket, firstMarket
     ]);
-    insStmt.step();
-    insStmt.free();
-
-    // Get new analysis id
-    const idStmt = db.prepare('SELECT id FROM market_analyses WHERE airline_id = ? AND route_id = ? ORDER BY id DESC LIMIT 1');
-    idStmt.bind([req.airlineId, route_id]);
-    idStmt.step();
-    const analysisId = idStmt.get()[0];
-    idStmt.free();
+    const analysisId = insResult.rows[0].id;
 
     // Deduct cost
-    const deductStmt = db.prepare('UPDATE airlines SET balance = balance - ? WHERE id = ?');
-    deductStmt.bind([cost, req.airlineId]);
-    deductStmt.step();
-    deductStmt.free();
+    await pool.query('UPDATE airlines SET balance = balance - $1 WHERE id = $2', [cost, req.airlineId]);
 
     // Record transaction
-    const txStmt = db.prepare("INSERT INTO transactions (airline_id, amount, description) VALUES (?, ?, ?)");
-    txStmt.bind([req.airlineId, -cost, 'Market Analysis']);
-    txStmt.step();
-    txStmt.free();
+    await pool.query(
+      "INSERT INTO transactions (airline_id, amount, description) VALUES ($1, $2, $3)",
+      [req.airlineId, -cost, 'Market Analysis']
+    );
 
     // Increment weekly counter
-    const updLimit = db.prepare('UPDATE analysis_limits SET analyses_this_week = analyses_this_week + 1 WHERE airline_id = ?');
-    updLimit.bind([req.airlineId]);
-    updLimit.step();
-    updLimit.free();
-
-    saveDatabase();
+    await pool.query(
+      'UPDATE analysis_limits SET analyses_this_week = analyses_this_week + 1 WHERE airline_id = $1',
+      [req.airlineId]
+    );
 
     // Return new balance
-    const newBalStmt = db.prepare('SELECT balance FROM airlines WHERE id = ?');
-    newBalStmt.bind([req.airlineId]);
-    newBalStmt.step();
-    const newBalance = newBalStmt.get()[0];
-    newBalStmt.free();
+    const newBalResult = await pool.query('SELECT balance FROM airlines WHERE id = $1', [req.airlineId]);
+    const newBalance = newBalResult.rows[0].balance;
 
     res.json({ analysis_id: analysisId, completed_at: completedAt, cost, new_balance: newBalance });
   } catch (e) {
@@ -193,37 +170,32 @@ router.post('/request', authMiddleware, (req, res) => {
 });
 
 // GET /api/market-analyses
-router.get('/', authMiddleware, (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
   try {
     if (!req.airlineId) return res.json({ analyses: [], week_used: 0, week_limit: 4, week_start: getWeekStart() });
-    const db = getDatabase();
 
-    const stmt = db.prepare(`
+    const result = await pool.query(`
       SELECT ma.id, ma.route_id, ma.status, ma.requested_at, ma.completed_at, ma.cost,
              ma.economy_price, ma.business_price, ma.first_price,
              ma.economy_rating, ma.business_rating, ma.first_rating,
              r.departure_airport, r.arrival_airport, r.distance_km, r.flight_number
       FROM market_analyses ma
       JOIN routes r ON ma.route_id = r.id
-      WHERE ma.airline_id = ?
+      WHERE ma.airline_id = $1
       ORDER BY ma.requested_at DESC
-    `);
-    stmt.bind([req.airlineId]);
-    const analyses = [];
-    while (stmt.step()) {
-      const row = stmt.get();
-      analyses.push({
-        id: row[0], route_id: row[1], status: row[2],
-        requested_at: row[3], completed_at: row[4], cost: row[5],
-        economy_price: row[6], business_price: row[7], first_price: row[8],
-        economy_rating: row[9], business_rating: row[10], first_rating: row[11],
-        departure_airport: row[12], arrival_airport: row[13],
-        distance_km: row[14], flight_number: row[15],
-      });
-    }
-    stmt.free();
+    `, [req.airlineId]);
 
-    const limits = getLimitsRow(db, req.airlineId);
+    const analyses = result.rows.map(row => ({
+      id: row.id, route_id: row.route_id, status: row.status,
+      requested_at: row.requested_at, completed_at: row.completed_at, cost: row.cost,
+      economy_price: row.economy_price, business_price: row.business_price,
+      first_price: row.first_price, economy_rating: row.economy_rating,
+      business_rating: row.business_rating, first_rating: row.first_rating,
+      departure_airport: row.departure_airport, arrival_airport: row.arrival_airport,
+      distance_km: row.distance_km, flight_number: row.flight_number,
+    }));
+
+    const limits = await getLimitsRow(req.airlineId);
 
     res.json({ analyses, week_used: limits.analyses_this_week, week_limit: 4, week_start: limits.week_start });
   } catch (e) {
@@ -234,12 +206,9 @@ router.get('/', authMiddleware, (req, res) => {
 
 // Start background processor — runs every 5 minutes
 export function startMarketAnalysesProcessor() {
-  setInterval(() => {
+  setInterval(async () => {
     try {
-      const db = getDatabase();
-      if (!db) return;
-      processMarketAnalyses(db);
-      saveDatabase();
+      await processMarketAnalyses();
     } catch (e) {
       console.error('[MarketAnalysis] Processor tick error:', e);
     }
@@ -247,32 +216,27 @@ export function startMarketAnalysesProcessor() {
 }
 
 // Background job: complete pending analyses
-export function processMarketAnalyses(db) {
+export async function processMarketAnalyses() {
   try {
     const now = new Date().toISOString();
-    const pendingStmt = db.prepare("SELECT id, economy_price, business_price, first_price, economy_market_price, business_market_price, first_market_price FROM market_analyses WHERE status = 'pending' AND completed_at <= ?");
-    pendingStmt.bind([now]);
-    const pending = [];
-    while (pendingStmt.step()) {
-      const r = pendingStmt.get();
-      pending.push({ id: r[0], eco: r[1], biz: r[2], fir: r[3], ecoMkt: r[4], bizMkt: r[5], firMkt: r[6] });
+    const pendingResult = await pool.query(
+      "SELECT id, economy_price, business_price, first_price, economy_market_price, business_market_price, first_market_price FROM market_analyses WHERE status = 'pending' AND completed_at <= $1",
+      [now]
+    );
+
+    if (pendingResult.rows.length === 0) return;
+
+    for (const r of pendingResult.rows) {
+      const ecoRating = getRating(r.economy_price, r.economy_market_price);
+      const bizRating = getRating(r.business_price, r.business_market_price);
+      const firRating = getRating(r.first_price, r.first_market_price);
+      await pool.query(
+        "UPDATE market_analyses SET status = 'completed', economy_rating = $1, business_rating = $2, first_rating = $3 WHERE id = $4",
+        [ecoRating, bizRating, firRating, r.id]
+      );
     }
-    pendingStmt.free();
 
-    if (pending.length === 0) return;
-
-    const updStmt = db.prepare("UPDATE market_analyses SET status = 'completed', economy_rating = ?, business_rating = ?, first_rating = ? WHERE id = ?");
-    for (const p of pending) {
-      const ecoRating = getRating(p.eco, p.ecoMkt);
-      const bizRating = getRating(p.biz, p.bizMkt);
-      const firRating = getRating(p.fir, p.firMkt);
-      updStmt.bind([ecoRating, bizRating, firRating, p.id]);
-      updStmt.step();
-      updStmt.reset();
-    }
-    updStmt.free();
-
-    console.log(`[MarketAnalysis] Completed ${pending.length} analysis(es)`);
+    console.log(`[MarketAnalysis] Completed ${pendingResult.rows.length} analysis(es)`);
   } catch (e) {
     console.error('[MarketAnalysis] Background job error:', e);
   }

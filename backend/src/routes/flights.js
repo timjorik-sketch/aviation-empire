@@ -1,6 +1,6 @@
 import express from 'express';
 import { body, validationResult } from 'express-validator';
-import { getDatabase, saveDatabase } from '../database/db.js';
+import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 import { calcFlightSatisfaction, getAirlineSatisfactionScore, getSatisfactionMultiplier } from '../utils/satisfaction.js';
 
@@ -21,20 +21,14 @@ function calcFlightXP(distanceKm, loadFactor) {
   return Math.round(50 * distMult * loadMult);
 }
 
-function checkLevelUp(db, airlineId) {
-  const stmt = db.prepare('SELECT level, total_points FROM airlines WHERE id = ?');
-  stmt.bind([airlineId]);
-  if (!stmt.step()) { stmt.free(); return { leveledUp: false }; }
-  const row = stmt.get();
-  const currentLevel = row[0], totalPoints = row[1];
-  stmt.free();
+async function checkLevelUp(airlineId) {
+  const result = await pool.query('SELECT level, total_points FROM airlines WHERE id = $1', [airlineId]);
+  if (!result.rows[0]) return { leveledUp: false };
+  const { level: currentLevel, total_points: totalPoints } = result.rows[0];
   let newLevel = currentLevel;
   while (newLevel < 15 && totalPoints >= XP_THRESHOLDS[newLevel]) newLevel++;
   if (newLevel > currentLevel) {
-    const upd = db.prepare('UPDATE airlines SET level = ? WHERE id = ?');
-    upd.bind([newLevel, airlineId]);
-    upd.step();
-    upd.free();
+    await pool.query('UPDATE airlines SET level = $1 WHERE id = $2', [newLevel, airlineId]);
     console.log(`[XP] Airline ${airlineId}: Level ${currentLevel} → ${newLevel}!`);
     return { leveledUp: true, oldLevel: currentLevel, newLevel };
   }
@@ -105,19 +99,17 @@ function calcPriceAttractiveness(actual, market) {
   return 0.01;
 }
 
-function calcServiceFactor(db, serviceProfileId, cabinClass = 'economy') {
+async function calcServiceFactor(serviceProfileId, cabinClass = 'economy') {
   if (!serviceProfileId) return 1.0;
   try {
     const priceCol = cabinClass === 'first' ? 'price_first'
                    : cabinClass === 'business' ? 'price_business'
                    : 'price_economy';
-    const stmt = db.prepare(
-      `SELECT COALESCE(SUM(t.${priceCol}), 0) FROM service_profile_items i JOIN service_item_types t ON i.item_type_id = t.id WHERE i.profile_id = ? AND i.cabin_class = ?`
+    const result = await pool.query(
+      `SELECT COALESCE(SUM(t.${priceCol}), 0) as cost FROM service_profile_items i JOIN service_item_types t ON i.item_type_id = t.id WHERE i.profile_id = $1 AND i.cabin_class = $2`,
+      [serviceProfileId, cabinClass]
     );
-    stmt.bind([serviceProfileId, cabinClass]);
-    let cost = 0;
-    if (stmt.step()) cost = stmt.get()[0] || 0;
-    stmt.free();
+    const cost = result.rows[0]?.cost || 0;
     if (cost <= 5)   return 0.7;
     if (cost <= 15)  return 0.9;
     if (cost <= 35)  return 1.1;
@@ -144,16 +136,12 @@ function calcCateringCost(distKm, bookedEco, bookedBiz, bookedFir) {
 }
 
 // Get all flights for airline
-router.get('/', authMiddleware, (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
   try {
-    const db = getDatabase();
-
-    // Get airline ID
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
-    // Get flights with route and aircraft details
-    const flightsStmt = db.prepare(`
+    const result = await pool.query(`
       SELECT
         f.id, f.flight_number, f.departure_time, f.arrival_time,
         f.ticket_price, f.total_seats, f.seats_sold, f.status, f.revenue, f.created_at,
@@ -167,38 +155,32 @@ router.get('/', authMiddleware, (req, res) => {
       JOIN airports arr ON r.arrival_airport = arr.iata_code
       JOIN aircraft ac ON f.aircraft_id = ac.id
       JOIN aircraft_types at ON ac.aircraft_type_id = at.id
-      WHERE f.airline_id = ?
+      WHERE f.airline_id = $1
       ORDER BY f.departure_time DESC
-    `);
-    flightsStmt.bind([airlineId]);
+    `, [airlineId]);
 
-    const flights = [];
-    while (flightsStmt.step()) {
-      const row = flightsStmt.get();
-      flights.push({
-        id: row[0],
-        flight_number: row[1],
-        departure_time: row[2],
-        arrival_time: row[3],
-        ticket_price: row[4],
-        total_seats: row[5],
-        seats_sold: row[6],
-        status: row[7],
-        revenue: row[8],
-        created_at: row[9],
-        departure_airport: row[10],
-        arrival_airport: row[11],
-        distance_km: row[12],
-        departure_name: row[13],
-        arrival_name: row[14],
-        aircraft_registration: row[15],
-        aircraft_type: row[16],
-        aircraft_id: row[17],
-        satisfaction_score: row[18],
-        violated_rules: row[19] ? JSON.parse(row[19]) : [],
-      });
-    }
-    flightsStmt.free();
+    const flights = result.rows.map(row => ({
+      id: row.id,
+      flight_number: row.flight_number,
+      departure_time: row.departure_time,
+      arrival_time: row.arrival_time,
+      ticket_price: row.ticket_price,
+      total_seats: row.total_seats,
+      seats_sold: row.seats_sold,
+      status: row.status,
+      revenue: row.revenue,
+      created_at: row.created_at,
+      departure_airport: row.departure_airport,
+      arrival_airport: row.arrival_airport,
+      distance_km: row.distance_km,
+      departure_name: row.departure_name,
+      arrival_name: row.arrival_name,
+      aircraft_registration: row.registration,
+      aircraft_type: row.aircraft_type,
+      aircraft_id: row.aircraft_id,
+      satisfaction_score: row.satisfaction_score,
+      violated_rules: row.violated_rules ? JSON.parse(row.violated_rules) : [],
+    }));
 
     res.json({ flights });
   } catch (error) {
@@ -208,16 +190,12 @@ router.get('/', authMiddleware, (req, res) => {
 });
 
 // Get routes available for scheduling (with assigned aircraft)
-router.get('/available-routes', authMiddleware, (req, res) => {
+router.get('/available-routes', authMiddleware, async (req, res) => {
   try {
-    const db = getDatabase();
-
-    // Get airline ID
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
-    // Get routes with assigned aircraft
-    const routesStmt = db.prepare(`
+    const result = await pool.query(`
       SELECT
         r.id, r.flight_number, r.departure_airport, r.arrival_airport, r.distance_km,
         ac.id as aircraft_id, ac.registration,
@@ -225,28 +203,22 @@ router.get('/available-routes', authMiddleware, (req, res) => {
       FROM routes r
       JOIN aircraft ac ON r.aircraft_id = ac.id
       JOIN aircraft_types at ON ac.aircraft_type_id = at.id
-      WHERE r.airline_id = ? AND r.aircraft_id IS NOT NULL
+      WHERE r.airline_id = $1 AND r.aircraft_id IS NOT NULL
       ORDER BY r.flight_number
-    `);
-    routesStmt.bind([airlineId]);
+    `, [airlineId]);
 
-    const routes = [];
-    while (routesStmt.step()) {
-      const row = routesStmt.get();
-      routes.push({
-        id: row[0],
-        flight_number: row[1],
-        departure_airport: row[2],
-        arrival_airport: row[3],
-        distance_km: row[4],
-        aircraft_id: row[5],
-        aircraft_registration: row[6],
-        aircraft_type: row[7],
-        max_passengers: row[8],
-        estimated_duration: calculateFlightDuration(row[4])
-      });
-    }
-    routesStmt.free();
+    const routes = result.rows.map(row => ({
+      id: row.id,
+      flight_number: row.flight_number,
+      departure_airport: row.departure_airport,
+      arrival_airport: row.arrival_airport,
+      distance_km: row.distance_km,
+      aircraft_id: row.aircraft_id,
+      aircraft_registration: row.registration,
+      aircraft_type: row.aircraft_type,
+      max_passengers: row.max_passengers,
+      estimated_duration: calculateFlightDuration(row.distance_km)
+    }));
 
     res.json({ routes });
   } catch (error) {
@@ -261,7 +233,7 @@ router.post('/schedule',
   body('route_id').isInt({ min: 1 }).withMessage('Invalid route ID'),
   body('ticket_price').isFloat({ min: 1 }).withMessage('Ticket price must be positive'),
   body('departure_time').optional().isISO8601().withMessage('Invalid departure time'),
-  (req, res) => {
+  async (req, res) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
@@ -269,57 +241,48 @@ router.post('/schedule',
       }
 
       const { route_id, ticket_price, departure_time } = req.body;
-      const db = getDatabase();
 
-      // Get airline
       const airlineId = req.airlineId;
       if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
-      // Get route with aircraft details
-      const routeStmt = db.prepare(`
+      const routeResult = await pool.query(`
         SELECT r.id, r.flight_number, r.distance_km, r.aircraft_id,
                at.max_passengers
         FROM routes r
         JOIN aircraft ac ON r.aircraft_id = ac.id
         JOIN aircraft_types at ON ac.aircraft_type_id = at.id
-        WHERE r.id = ? AND r.airline_id = ?
-      `);
-      routeStmt.bind([route_id, airlineId]);
+        WHERE r.id = $1 AND r.airline_id = $2
+      `, [route_id, airlineId]);
 
-      if (!routeStmt.step()) {
-        routeStmt.free();
+      if (!routeResult.rows[0]) {
         return res.status(400).json({ error: 'Route not found or no aircraft assigned' });
       }
 
-      const routeRow = routeStmt.get();
+      const routeRow = routeResult.rows[0];
       const route = {
-        id: routeRow[0],
-        flight_number: routeRow[1],
-        distance_km: routeRow[2],
-        aircraft_id: routeRow[3],
-        max_passengers: routeRow[4]
+        id: routeRow.id,
+        flight_number: routeRow.flight_number,
+        distance_km: routeRow.distance_km,
+        aircraft_id: routeRow.aircraft_id,
+        max_passengers: routeRow.max_passengers
       };
-      routeStmt.free();
 
       if (!route.aircraft_id) {
         return res.status(400).json({ error: 'No aircraft assigned to this route' });
       }
 
-      // Calculate flight times
       const flightDurationMinutes = calculateFlightDuration(route.distance_km);
       const depTime = departure_time ? new Date(departure_time) : new Date();
       const arrTime = new Date(depTime.getTime() + flightDurationMinutes * 60 * 1000);
 
-      // Simulate bookings
       const seatsSold = simulateBookings(route.max_passengers, ticket_price, route.distance_km);
 
-      // Create flight
-      const insertStmt = db.prepare(`
+      const insertResult = await pool.query(`
         INSERT INTO flights (airline_id, route_id, aircraft_id, flight_number,
                             departure_time, arrival_time, ticket_price, total_seats, seats_sold, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled')
-      `);
-      insertStmt.bind([
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'scheduled')
+        RETURNING id
+      `, [
         airlineId,
         route.id,
         route.aircraft_id,
@@ -330,16 +293,8 @@ router.post('/schedule',
         route.max_passengers,
         seatsSold
       ]);
-      insertStmt.step();
-      insertStmt.free();
 
-      // Get created flight ID
-      const fetchStmt = db.prepare('SELECT last_insert_rowid()');
-      fetchStmt.step();
-      const flightId = fetchStmt.get()[0];
-      fetchStmt.free();
-
-      saveDatabase();
+      const flightId = insertResult.rows[0].id;
 
       res.status(201).json({
         message: 'Flight scheduled successfully',
@@ -363,19 +318,17 @@ router.post('/schedule',
 );
 
 // Active flights for Live Map — flights currently in the air (status = 'in-flight')
-router.get('/active', authMiddleware, (req, res) => {
+router.get('/active', authMiddleware, async (req, res) => {
   try {
-    const db = getDatabase();
-
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
-    // Flights may have route_id (direct) OR weekly_schedule_id (schedule-based) — use COALESCE
-    const stmt = db.prepare(`
+    const result = await pool.query(`
       SELECT f.flight_number, f.departure_time, f.arrival_time,
              COALESCE(r.departure_airport, ws.departure_airport) as origin_iata,
              COALESCE(r.arrival_airport,   ws.arrival_airport)   as dest_iata,
-             dep.latitude, dep.longitude, arr.latitude, arr.longitude,
+             dep.latitude as origin_lat, dep.longitude as origin_lon,
+             arr.latitude as dest_lat, arr.longitude as dest_lon,
              ac.registration
       FROM flights f
       LEFT JOIN routes r          ON f.route_id           = r.id
@@ -383,19 +336,17 @@ router.get('/active', authMiddleware, (req, res) => {
       LEFT JOIN airports dep ON COALESCE(r.departure_airport, ws.departure_airport) = dep.iata_code
       LEFT JOIN airports arr ON COALESCE(r.arrival_airport,   ws.arrival_airport)   = arr.iata_code
       LEFT JOIN aircraft ac  ON f.aircraft_id = ac.id
-      WHERE f.airline_id = ? AND f.status = 'in-flight'
-    `);
-    stmt.bind([airlineId]);
+      WHERE f.airline_id = $1 AND f.status = 'in-flight'
+    `, [airlineId]);
 
     const now = Date.now();
     const flights = [];
 
-    while (stmt.step()) {
-      const [fn, depTime, arrTime, originIata, destIata, originLat, originLon, destLat, destLon, reg] = stmt.get();
-      if (originLat == null || destLat == null) continue;
+    for (const row of result.rows) {
+      if (row.origin_lat == null || row.dest_lat == null) continue;
 
-      const dep = new Date(depTime).getTime();
-      const arr = new Date(arrTime).getTime();
+      const dep = new Date(row.departure_time).getTime();
+      const arr = new Date(row.arrival_time).getTime();
       const total = arr - dep;
       if (total <= 0) continue;
 
@@ -403,11 +354,19 @@ router.get('/active', authMiddleware, (req, res) => {
       if (progress <= 0 || progress >= 1) continue;
 
       const remaining_ms = Math.round((1 - progress) * total);
-      flights.push({ flight_number: fn, registration: reg, origin_iata: originIata,
-        destination_iata: destIata, origin_lat: originLat, origin_lon: originLon,
-        dest_lat: destLat, dest_lon: destLon, progress, remaining_ms });
+      flights.push({
+        flight_number: row.flight_number,
+        registration: row.registration,
+        origin_iata: row.origin_iata,
+        destination_iata: row.dest_iata,
+        origin_lat: row.origin_lat,
+        origin_lon: row.origin_lon,
+        dest_lat: row.dest_lat,
+        dest_lon: row.dest_lon,
+        progress,
+        remaining_ms
+      });
     }
-    stmt.free();
 
     res.json({ flights });
   } catch (error) {
@@ -417,35 +376,25 @@ router.get('/active', authMiddleware, (req, res) => {
 });
 
 // Edit a flight (PATCH /:id)
-router.patch('/:id', authMiddleware, (req, res) => {
+router.patch('/:id', authMiddleware, async (req, res) => {
   try {
     const flightId = parseInt(req.params.id);
-    const db = getDatabase();
 
-    // Get airline
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
-    // Get flight and verify ownership
-    const flightStmt = db.prepare(`
+    const flightResult = await pool.query(`
       SELECT f.id, f.status, f.aircraft_id, f.route_id, f.departure_time, f.arrival_time,
              f.ticket_price, f.total_seats, r.distance_km
       FROM flights f
       JOIN routes r ON f.route_id = r.id
-      WHERE f.id = ? AND f.airline_id = ?
-    `);
-    flightStmt.bind([flightId, airlineId]);
-    if (!flightStmt.step()) {
-      flightStmt.free();
+      WHERE f.id = $1 AND f.airline_id = $2
+    `, [flightId, airlineId]);
+
+    if (!flightResult.rows[0]) {
       return res.status(404).json({ error: 'Flight not found' });
     }
-    const row = flightStmt.get();
-    const flight = {
-      id: row[0], status: row[1], aircraft_id: row[2], route_id: row[3],
-      departure_time: row[4], arrival_time: row[5], ticket_price: row[6],
-      total_seats: row[7], distance_km: row[8]
-    };
-    flightStmt.free();
+    const flight = flightResult.rows[0];
 
     if (flight.status !== 'scheduled') {
       return res.status(400).json({ error: 'Only scheduled flights can be edited' });
@@ -454,27 +403,23 @@ router.patch('/:id', authMiddleware, (req, res) => {
     const { departure_time, ticket_price, service_profile_id } = req.body;
     const updates = [];
     const params = [];
+    let paramIdx = 1;
 
     let newDepTime = flight.departure_time;
     let newArrTime = flight.arrival_time;
     let newPrice = flight.ticket_price;
 
-    // Validate service_profile_id if provided
     if (service_profile_id !== undefined) {
       if (service_profile_id !== null) {
-        const spStmt = db.prepare('SELECT id FROM airline_service_profiles WHERE id = ? AND airline_id = ?');
-        spStmt.bind([service_profile_id, airlineId]);
-        if (!spStmt.step()) {
-          spStmt.free();
+        const spResult = await pool.query('SELECT id FROM airline_service_profiles WHERE id = $1 AND airline_id = $2', [service_profile_id, airlineId]);
+        if (!spResult.rows[0]) {
           return res.status(400).json({ error: 'Service profile not found' });
         }
-        spStmt.free();
       }
-      updates.push('service_profile_id = ?');
+      updates.push(`service_profile_id = $${paramIdx++}`);
       params.push(service_profile_id);
     }
 
-    // Handle departure time change
     if (departure_time) {
       const depTime = new Date(departure_time);
       const durationMin = calculateFlightDuration(flight.distance_km);
@@ -482,53 +427,44 @@ router.patch('/:id', authMiddleware, (req, res) => {
       newDepTime = depTime.toISOString();
       newArrTime = arrTime.toISOString();
 
-      // Check overlap with other flights on same aircraft (excluding this flight)
       const GROUND_TIME_MS = 30 * 60 * 1000;
-      const overlapStmt = db.prepare(`
-        SELECT f.departure_time, f.arrival_time
-        FROM flights f
-        WHERE f.aircraft_id = ? AND f.airline_id = ? AND f.id != ? AND f.status != 'cancelled'
-      `);
-      overlapStmt.bind([flight.aircraft_id, airlineId, flightId]);
-      while (overlapStmt.step()) {
-        const oRow = overlapStmt.get();
-        const existDep = new Date(oRow[0]);
-        const existArr = new Date(oRow[1]);
+      const overlapResult = await pool.query(`
+        SELECT departure_time, arrival_time
+        FROM flights
+        WHERE aircraft_id = $1 AND airline_id = $2 AND id != $3 AND status != 'cancelled'
+      `, [flight.aircraft_id, airlineId, flightId]);
+
+      for (const oRow of overlapResult.rows) {
+        const existDep = new Date(oRow.departure_time);
+        const existArr = new Date(oRow.arrival_time);
         const existEnd = new Date(existArr.getTime() + GROUND_TIME_MS);
         const newEnd = new Date(arrTime.getTime() + GROUND_TIME_MS);
         if (depTime < existEnd && existDep < newEnd) {
-          overlapStmt.free();
           return res.status(400).json({ error: 'New time overlaps with an existing flight' });
         }
       }
-      overlapStmt.free();
 
-      // Check overlap with maintenance
-      const maintStmt = db.prepare(`
+      const maintResult = await pool.query(`
         SELECT start_time, end_time FROM maintenance_schedule
-        WHERE aircraft_id = ? AND airline_id = ?
-      `);
-      maintStmt.bind([flight.aircraft_id, airlineId]);
-      while (maintStmt.step()) {
-        const mRow = maintStmt.get();
-        const mStart = new Date(mRow[0]);
-        const mEnd = new Date(mRow[1]);
+        WHERE aircraft_id = $1 AND airline_id = $2
+      `, [flight.aircraft_id, airlineId]);
+
+      for (const mRow of maintResult.rows) {
+        const mStart = new Date(mRow.start_time);
+        const mEnd = new Date(mRow.end_time);
         if (depTime < mEnd && mStart < arrTime) {
-          maintStmt.free();
           return res.status(400).json({ error: 'New time overlaps with a maintenance window' });
         }
       }
-      maintStmt.free();
 
-      updates.push('departure_time = ?', 'arrival_time = ?');
+      updates.push(`departure_time = $${paramIdx++}`, `arrival_time = $${paramIdx++}`);
       params.push(newDepTime, newArrTime);
     }
 
-    // Handle price change -> re-simulate bookings
     if (ticket_price !== undefined) {
       newPrice = ticket_price;
       const seatsSold = simulateBookings(flight.total_seats, newPrice, flight.distance_km);
-      updates.push('ticket_price = ?', 'seats_sold = ?');
+      updates.push(`ticket_price = $${paramIdx++}`, `seats_sold = $${paramIdx++}`);
       params.push(newPrice, seatsSold);
     }
 
@@ -537,35 +473,25 @@ router.patch('/:id', authMiddleware, (req, res) => {
     }
 
     params.push(flightId);
-    const sql = `UPDATE flights SET ${updates.join(', ')} WHERE id = ?`;
-    const updateStmt = db.prepare(sql);
-    updateStmt.bind(params);
-    updateStmt.step();
-    updateStmt.free();
+    await pool.query(`UPDATE flights SET ${updates.join(', ')} WHERE id = $${paramIdx}`, params);
 
-    saveDatabase();
-
-    // Fetch updated flight
-    const updatedStmt = db.prepare(`
+    const updatedResult = await pool.query(`
       SELECT f.id, f.flight_number, f.departure_time, f.arrival_time,
              f.ticket_price, f.total_seats, f.seats_sold, f.status, f.service_profile_id,
              r.departure_airport, r.arrival_airport
       FROM flights f
       JOIN routes r ON f.route_id = r.id
-      WHERE f.id = ?
-    `);
-    updatedStmt.bind([flightId]);
-    updatedStmt.step();
-    const uRow = updatedStmt.get();
-    updatedStmt.free();
+      WHERE f.id = $1
+    `, [flightId]);
+    const uRow = updatedResult.rows[0];
 
     res.json({
       message: 'Flight updated successfully',
       flight: {
-        id: uRow[0], flight_number: uRow[1], departure_time: uRow[2],
-        arrival_time: uRow[3], ticket_price: uRow[4], total_seats: uRow[5],
-        seats_sold: uRow[6], status: uRow[7], service_profile_id: uRow[8],
-        departure_airport: uRow[9], arrival_airport: uRow[10]
+        id: uRow.id, flight_number: uRow.flight_number, departure_time: uRow.departure_time,
+        arrival_time: uRow.arrival_time, ticket_price: uRow.ticket_price, total_seats: uRow.total_seats,
+        seats_sold: uRow.seats_sold, status: uRow.status, service_profile_id: uRow.service_profile_id,
+        departure_airport: uRow.departure_airport, arrival_airport: uRow.arrival_airport
       }
     });
   } catch (error) {
@@ -575,47 +501,37 @@ router.patch('/:id', authMiddleware, (req, res) => {
 });
 
 // Delete a flight (DELETE /:id)
-router.delete('/:id', authMiddleware, (req, res) => {
+router.delete('/:id', authMiddleware, async (req, res) => {
   try {
     const flightId = parseInt(req.params.id);
-    const db = getDatabase();
 
-    // Get airline
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
-    // Get airline balance for penalty
-    const airlineBalStmt = db.prepare('SELECT balance FROM airlines WHERE id = ?');
-    airlineBalStmt.bind([airlineId]);
-    airlineBalStmt.step();
-    const currentBalance = airlineBalStmt.get()[0];
-    airlineBalStmt.free();
+    const airlineBalResult = await pool.query('SELECT balance FROM airlines WHERE id = $1', [airlineId]);
+    const currentBalance = airlineBalResult.rows[0]?.balance;
 
-    // Get flight and verify ownership
-    const flightStmt = db.prepare(`
+    const flightResult = await pool.query(`
       SELECT id, status, flight_number,
              booked_economy, booked_business, booked_first,
              economy_price, business_price, first_price,
              booking_revenue_collected
-      FROM flights WHERE id = ? AND airline_id = ?
-    `);
-    flightStmt.bind([flightId, airlineId]);
-    if (!flightStmt.step()) {
-      flightStmt.free();
+      FROM flights WHERE id = $1 AND airline_id = $2
+    `, [flightId, airlineId]);
+
+    if (!flightResult.rows[0]) {
       return res.status(404).json({ error: 'Flight not found' });
     }
-    const fr = flightStmt.get();
-    const [, status, flightNumber,
-      bookedEco, bookedBiz, bookedFirst,
-      ecoPrice, bizPrice, firstPrice,
-      bookingRevenueCollected] = fr;
-    flightStmt.free();
+    const fr = flightResult.rows[0];
+    const { status, flight_number: flightNumber,
+      booked_economy: bookedEco, booked_business: bookedBiz, booked_first: bookedFirst,
+      economy_price: ecoPrice, business_price: bizPrice, first_price: firstPrice,
+      booking_revenue_collected: bookingRevenueCollected } = fr;
 
     if (status === 'completed') {
       return res.status(400).json({ error: 'Cannot delete a completed flight' });
     }
 
-    // Apply cancellation penalty if revenue was already collected
     if (bookingRevenueCollected) {
       const penalty = Math.round(
         (bookedEco   || 0) * (ecoPrice   || 0) * 1.2 +
@@ -623,26 +539,15 @@ router.delete('/:id', authMiddleware, (req, res) => {
         (bookedFirst || 0) * (firstPrice || ecoPrice || 0) * 1.2
       );
       if (penalty > 0) {
-        const updBalStmt = db.prepare('UPDATE airlines SET balance = ? WHERE id = ?');
-        updBalStmt.bind([currentBalance - penalty, airlineId]);
-        updBalStmt.step();
-        updBalStmt.free();
-
-        const txStmt = db.prepare(
-          "INSERT INTO transactions (airline_id, type, amount, description) VALUES (?, 'other', ?, ?)"
+        await pool.query('UPDATE airlines SET balance = $1 WHERE id = $2', [currentBalance - penalty, airlineId]);
+        await pool.query(
+          "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
+          [airlineId, -penalty, `Flight Cancellation Penalty - ${flightNumber}`]
         );
-        txStmt.bind([airlineId, -penalty, `Flight Cancellation Penalty - ${flightNumber}`]);
-        txStmt.step();
-        txStmt.free();
       }
     }
 
-    const deleteStmt = db.prepare('DELETE FROM flights WHERE id = ?');
-    deleteStmt.bind([flightId]);
-    deleteStmt.step();
-    deleteStmt.free();
-
-    saveDatabase();
+    await pool.query('DELETE FROM flights WHERE id = $1', [flightId]);
 
     res.json({ message: 'Flight deleted successfully' });
   } catch (error) {
@@ -652,40 +557,34 @@ router.delete('/:id', authMiddleware, (req, res) => {
 });
 
 // Cancel a flight
-router.post('/:id/cancel', authMiddleware, (req, res) => {
+router.post('/:id/cancel', authMiddleware, async (req, res) => {
   try {
     const flightId = parseInt(req.params.id);
-    const db = getDatabase();
 
-    // Get airline with balance
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
-    const airlineBalStmt = db.prepare('SELECT balance FROM airlines WHERE id = ?');
-    airlineBalStmt.bind([airlineId]);
-    if (!airlineBalStmt.step()) { airlineBalStmt.free(); return res.status(400).json({ error: 'No airline found' }); }
-    const currentBalance = airlineBalStmt.get()[0];
-    airlineBalStmt.free();
 
-    // Get flight with booked passengers and prices
-    const flightStmt = db.prepare(`
+    const airlineBalResult = await pool.query('SELECT balance FROM airlines WHERE id = $1', [airlineId]);
+    if (!airlineBalResult.rows[0]) return res.status(400).json({ error: 'No airline found' });
+    const currentBalance = airlineBalResult.rows[0].balance;
+
+    const flightResult = await pool.query(`
       SELECT id, status, flight_number,
              booked_economy, booked_business, booked_first,
              economy_price, business_price, first_price,
              booking_revenue_collected
-      FROM flights WHERE id = ? AND airline_id = ?
-    `);
-    flightStmt.bind([flightId, airlineId]);
-    if (!flightStmt.step()) {
-      flightStmt.free();
+      FROM flights WHERE id = $1 AND airline_id = $2
+    `, [flightId, airlineId]);
+
+    if (!flightResult.rows[0]) {
       return res.status(404).json({ error: 'Flight not found' });
     }
-    const fr = flightStmt.get();
-    flightStmt.free();
+    const fr = flightResult.rows[0];
 
-    const [, status, flightNumber,
-      bookedEco, bookedBiz, bookedFirst,
-      ecoPrice, bizPrice, firstPrice,
-      bookingRevenueCollected] = fr;
+    const { status, flight_number: flightNumber,
+      booked_economy: bookedEco, booked_business: bookedBiz, booked_first: bookedFirst,
+      economy_price: ecoPrice, business_price: bizPrice, first_price: firstPrice,
+      booking_revenue_collected: bookingRevenueCollected } = fr;
 
     if (status === 'completed' || status === 'cancelled') {
       return res.status(400).json({ error: 'Cannot cancel a completed or already cancelled flight' });
@@ -694,7 +593,6 @@ router.post('/:id/cancel', authMiddleware, (req, res) => {
       return res.status(400).json({ error: 'Cannot cancel a flight that is already in the air' });
     }
 
-    // Only apply refund + 20% penalty if booking revenue was already collected
     let penalty = 0;
     if (bookingRevenueCollected) {
       penalty = Math.round(
@@ -704,25 +602,16 @@ router.post('/:id/cancel', authMiddleware, (req, res) => {
       );
     }
 
-    // Deduct penalty from balance and record transaction
     if (penalty > 0) {
       const newBalance = currentBalance - penalty;
-      const updStmt = db.prepare('UPDATE airlines SET balance = ? WHERE id = ?');
-      updStmt.bind([newBalance, airlineId]);
-      updStmt.step(); updStmt.free();
-
-      const txStmt = db.prepare("INSERT INTO transactions (airline_id, type, amount, description) VALUES (?, 'other', ?, ?)");
-      txStmt.bind([airlineId, -penalty, `Flight Cancellation Penalty - ${flightNumber}`]);
-      txStmt.step(); txStmt.free();
+      await pool.query('UPDATE airlines SET balance = $1 WHERE id = $2', [newBalance, airlineId]);
+      await pool.query(
+        "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
+        [airlineId, -penalty, `Flight Cancellation Penalty - ${flightNumber}`]
+      );
     }
 
-    // Cancel flight
-    const updateStmt = db.prepare("UPDATE flights SET status = 'cancelled' WHERE id = ?");
-    updateStmt.bind([flightId]);
-    updateStmt.step();
-    updateStmt.free();
-
-    saveDatabase();
+    await pool.query("UPDATE flights SET status = 'cancelled' WHERE id = $1", [flightId]);
 
     const totalPax = (bookedEco || 0) + (bookedBiz || 0) + (bookedFirst || 0);
     res.json({
@@ -752,52 +641,42 @@ function cetToUTC(cetDateStr, cetTimeStr) {
 }
 
 // Generate flight instances from weekly_schedule templates for active aircraft (next 72h)
-function generateFlights() {
+async function generateFlights() {
   try {
-    const db = getDatabase();
-    if (!db) return;
-
     const now = new Date();
     const horizon = new Date(now.getTime() + 72 * 60 * 60 * 1000);
 
-    // Active aircraft that have at least one weekly_schedule entry
-    const acStmt = db.prepare(`
+    const acResult = await pool.query(`
       SELECT a.id, a.airline_id, a.airline_cabin_profile_id, at.max_passengers, a.condition
       FROM aircraft a
       JOIN aircraft_types at ON a.aircraft_type_id = at.id
       WHERE a.is_active = 1
         AND EXISTS (SELECT 1 FROM weekly_schedule ws WHERE ws.aircraft_id = a.id)
     `);
-    const aircraft = [];
-    while (acStmt.step()) {
-      const r = acStmt.get();
-      aircraft.push({ id: r[0], airline_id: r[1], cabin_profile_id: r[2], max_passengers: r[3], condition: r[4] ?? 100 });
-    }
-    acStmt.free();
+    const aircraft = acResult.rows.map(r => ({
+      id: r.id, airline_id: r.airline_id, cabin_profile_id: r.airline_cabin_profile_id,
+      max_passengers: r.max_passengers, condition: r.condition ?? 100
+    }));
 
     let generated = 0;
 
     for (const ac of aircraft) {
-      // Resolve per-class seat counts and seat types from cabin profile
       let ecoSeats = 0, bizSeats = 0, firstSeats = 0;
       let ecoSeatType = 'economy', bizSeatType = 'business', firstSeatType = 'first';
       if (ac.cabin_profile_id) {
-        const clStmt = db.prepare(
-          'SELECT class_type, actual_capacity, seat_type FROM airline_cabin_classes WHERE profile_id = ?'
+        const clResult = await pool.query(
+          'SELECT class_type, actual_capacity, seat_type FROM airline_cabin_classes WHERE profile_id = $1',
+          [ac.cabin_profile_id]
         );
-        clStmt.bind([ac.cabin_profile_id]);
-        while (clStmt.step()) {
-          const cr = clStmt.get();
-          if (cr[0] === 'economy')       { ecoSeats = cr[1]; if (cr[2]) ecoSeatType = cr[2]; }
-          else if (cr[0] === 'business') { bizSeats = cr[1]; if (cr[2]) bizSeatType = cr[2]; }
-          else if (cr[0] === 'first')    { firstSeats = cr[1]; if (cr[2]) firstSeatType = cr[2]; }
+        for (const cr of clResult.rows) {
+          if (cr.class_type === 'economy')       { ecoSeats = cr.actual_capacity; if (cr.seat_type) ecoSeatType = cr.seat_type; }
+          else if (cr.class_type === 'business') { bizSeats = cr.actual_capacity; if (cr.seat_type) bizSeatType = cr.seat_type; }
+          else if (cr.class_type === 'first')    { firstSeats = cr.actual_capacity; if (cr.seat_type) firstSeatType = cr.seat_type; }
         }
-        clStmt.free();
       }
       const totalSeats = (ecoSeats + bizSeats + firstSeats) || ac.max_passengers;
 
-      // Weekly schedule entries for this aircraft (join routes for distance_km)
-      const wsStmt = db.prepare(`
+      const wsResult = await pool.query(`
         SELECT ws.id, ws.day_of_week, ws.flight_number,
                ws.departure_airport, ws.arrival_airport,
                ws.departure_time, ws.arrival_time,
@@ -806,46 +685,37 @@ function generateFlights() {
                COALESCE(r.distance_km, 0) as distance_km
         FROM weekly_schedule ws
         LEFT JOIN routes r ON ws.route_id = r.id
-        WHERE ws.aircraft_id = ?
-      `);
-      wsStmt.bind([ac.id]);
-      const entries = [];
-      while (wsStmt.step()) {
-        const r = wsStmt.get();
-        entries.push({
-          id: r[0], day_of_week: r[1], flight_number: r[2],
-          dep_airport: r[3], arr_airport: r[4],
-          dep_time: r[5], arr_time: r[6],
-          eco_price: r[7], biz_price: r[8], first_price: r[9],
-          route_id: r[10], service_profile_id: r[11],
-          distance_km: r[12]
-        });
-      }
-      wsStmt.free();
+        WHERE ws.aircraft_id = $1
+      `, [ac.id]);
+
+      const entries = wsResult.rows.map(r => ({
+        id: r.id, day_of_week: r.day_of_week, flight_number: r.flight_number,
+        dep_airport: r.departure_airport, arr_airport: r.arrival_airport,
+        dep_time: r.departure_time, arr_time: r.arrival_time,
+        eco_price: r.economy_price, biz_price: r.business_price, first_price: r.first_price,
+        route_id: r.route_id, service_profile_id: r.service_profile_id,
+        distance_km: r.distance_km
+      }));
+
       if (!entries.length) continue;
 
-      // Check each of the next 3 CET calendar days
       for (let d = 0; d < 3; d++) {
         const dayUTC = new Date(now.getTime() + d * 86400000);
 
-        // Date string in Europe/Berlin (YYYY-MM-DD)
         const cetDateStr = new Intl.DateTimeFormat('en-CA', {
           timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit'
         }).format(dayUTC);
 
-        // Day-of-week in Berlin: noon UTC on that CET date is always same calendar day
         const noonUTC = new Date(`${cetDateStr}T12:00:00Z`);
-        const jsDay   = noonUTC.getUTCDay();   // 0=Sun
-        const ourDay  = (jsDay + 6) % 7;       // 0=Mon
+        const jsDay   = noonUTC.getUTCDay();
+        const ourDay  = (jsDay + 6) % 7;
 
         for (const entry of entries) {
           if (entry.day_of_week !== ourDay) continue;
 
-          // Parse dep_time as CET → UTC
           const depDT = cetToUTC(cetDateStr, entry.dep_time);
           if (depDT <= now || depDT > horizon) continue;
 
-          // Arrival datetime (handles midnight overflow)
           const [dh, dm] = entry.dep_time.split(':').map(Number);
           const [ah, am] = entry.arr_time.split(':').map(Number);
           const dMin = dh * 60 + dm;
@@ -853,41 +723,32 @@ function generateFlights() {
           const durMin = ((aMin - dMin) + 1440) % 1440 || 1;
           const arrDT = new Date(depDT.getTime() + durMin * 60000);
 
-          // Dup check uses UTC date of the stored ISO departure_time
           const utcDateStr = depDT.toISOString().slice(0, 10);
-          const dupStmt = db.prepare(
-            'SELECT id FROM flights WHERE aircraft_id = ? AND weekly_schedule_id = ? AND date(departure_time) = ?'
+          const dupResult = await pool.query(
+            "SELECT id FROM flights WHERE aircraft_id = $1 AND weekly_schedule_id = $2 AND departure_time::date = $3::date",
+            [ac.id, entry.id, utcDateStr]
           );
-          dupStmt.bind([ac.id, entry.id, utcDateStr]);
-          const dup = dupStmt.step();
-          dupStmt.free();
-          if (dup) continue;
+          if (dupResult.rows[0]) continue;
 
           const ecoPrice   = entry.eco_price   ?? 0;
           const bizPrice   = entry.biz_price   ?? ecoPrice;
           const firstPrice = entry.first_price ?? ecoPrice;
           const distKm     = entry.distance_km || 1000;
 
-          // Fetch airport categories for market price calculation
           let depCat = 4, arrCat = 4;
           try {
-            const catStmt = db.prepare('SELECT iata_code, category FROM airports WHERE iata_code IN (?, ?)');
-            catStmt.bind([entry.dep_airport, entry.arr_airport]);
-            while (catStmt.step()) {
-              const cr = catStmt.get();
-              if (cr[0] === entry.dep_airport) depCat = cr[1] || 4;
-              else arrCat = cr[1] || 4;
+            const catResult = await pool.query('SELECT iata_code, category FROM airports WHERE iata_code IN ($1, $2)', [entry.dep_airport, entry.arr_airport]);
+            for (const cr of catResult.rows) {
+              if (cr.iata_code === entry.dep_airport) depCat = cr.category || 4;
+              else arrCat = cr.category || 4;
             }
-            catStmt.free();
           } catch (e) { /* use defaults */ }
 
-          // Calculate hidden market prices (NEVER exposed to user)
           const mp = calcMarketPrices(distKm, depCat, arrCat);
           const atcFee = Math.round(distKm * ATC_RATE_PER_KM);
 
-          // Calculate passenger satisfaction score and violations for this flight
           const satEcoSeats = (ecoSeats + bizSeats + firstSeats > 0) ? ecoSeats : totalSeats;
-          const { score: satisfactionScore, violations } = calcFlightSatisfaction(db, {
+          const { score: satisfactionScore, violations } = await calcFlightSatisfaction({
             distKm,
             serviceProfileId: entry.service_profile_id ?? null,
             condition: ac.condition ?? 100,
@@ -900,8 +761,7 @@ function generateFlights() {
           });
           const violatedRulesJson = JSON.stringify(violations);
 
-          // Insert flight with 0 bookings — hourly booking processor fills it over 72h
-          const insStmt = db.prepare(`
+          await pool.query(`
             INSERT INTO flights (
               airline_id, route_id, aircraft_id, flight_number,
               departure_time, arrival_time,
@@ -912,9 +772,8 @@ function generateFlights() {
               revenue, booking_revenue_collected, atc_fee,
               market_price_economy, market_price_business, market_price_first,
               satisfaction_score, violated_rules
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 'scheduled', ?, ?, 0, 1, ?, ?, ?, ?, ?, ?)
-          `);
-          insStmt.bind([
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0, 0, 0, 0, 'scheduled', $12, $13, 0, 1, $14, $15, $16, $17, $18, $19)
+          `, [
             ac.airline_id, entry.route_id ?? null, ac.id, entry.flight_number,
             depDT.toISOString(), arrDT.toISOString(),
             ecoPrice, ecoPrice, entry.biz_price ?? null, entry.first_price ?? null,
@@ -922,8 +781,6 @@ function generateFlights() {
             entry.id, entry.service_profile_id ?? null,
             atcFee, mp.eco, mp.biz, mp.first, satisfactionScore, violatedRulesJson
           ]);
-          insStmt.step();
-          insStmt.free();
 
           generated++;
         }
@@ -931,7 +788,6 @@ function generateFlights() {
     }
 
     if (generated > 0) {
-      saveDatabase();
       console.log(`[FlightGen] Generated ${generated} flight(s) from weekly templates`);
     }
   } catch (err) {
@@ -940,16 +796,12 @@ function generateFlights() {
 }
 
 // ── Hourly booking processor (runs every hour) ────────────────────────────────
-function processBookings() {
+async function processBookings() {
   try {
-    const db = getDatabase();
-    if (!db) return;
-
     const now = new Date();
     const windowEnd = new Date(now.getTime() + 72 * 60 * 60 * 1000);
 
-    // Flights in 0–72h booking window that still have capacity
-    const stmt = db.prepare(`
+    const result = await pool.query(`
       SELECT f.id, f.airline_id, f.flight_number,
              COALESCE(f.economy_price, 0)  as eco_price,
              COALESCE(f.business_price, 0) as biz_price,
@@ -980,57 +832,47 @@ function processBookings() {
       LEFT JOIN airline_cabin_classes biz_cl ON biz_cl.profile_id = ac.airline_cabin_profile_id AND biz_cl.class_type = 'business'
       LEFT JOIN airline_cabin_classes fir_cl ON fir_cl.profile_id = ac.airline_cabin_profile_id AND fir_cl.class_type = 'first'
       WHERE f.status IN ('scheduled', 'boarding')
-        AND datetime(f.departure_time) > datetime(?)
-        AND datetime(f.departure_time) <= datetime(?)
-    `);
-    stmt.bind([now.toISOString(), windowEnd.toISOString()]);
+        AND f.departure_time > $1
+        AND f.departure_time <= $2
+    `, [now.toISOString(), windowEnd.toISOString()]);
 
-    const flightsList = [];
-    while (stmt.step()) {
-      const r = stmt.get();
-      flightsList.push({
-        id: r[0], airline_id: r[1], flight_number: r[2],
-        eco_price: r[3], biz_price: r[4], fir_price: r[5],
-        booked_eco: r[6], booked_biz: r[7], booked_fir: r[8],
-        mp_eco: r[9], mp_biz: r[10], mp_fir: r[11],
-        service_profile_id: r[12], total_seats: r[13], distance_km: r[14],
-        dep_cat: r[15], arr_cat: r[16], condition: r[17],
-        eco_cap: r[18], biz_cap: r[19], fir_cap: r[20],
-      });
-    }
-    stmt.free();
+    const flightsList = result.rows.map(r => ({
+      id: r.id, airline_id: r.airline_id, flight_number: r.flight_number,
+      eco_price: r.eco_price, biz_price: r.biz_price, fir_price: r.fir_price,
+      booked_eco: r.booked_eco, booked_biz: r.booked_biz, booked_fir: r.booked_fir,
+      mp_eco: r.mp_eco, mp_biz: r.mp_biz, mp_fir: r.mp_fir,
+      service_profile_id: r.service_profile_id, total_seats: r.total_seats,
+      distance_km: r.distance_km, dep_cat: r.dep_cat, arr_cat: r.arr_cat,
+      condition: r.condition, eco_cap: r.eco_cap, biz_cap: r.biz_cap, fir_cap: r.fir_cap,
+    }));
 
     if (!flightsList.length) return;
 
-    // Compute satisfaction-based booking multiplier once per airline
     const airlineSatMultipliers = {};
     for (const f of flightsList) {
       if (!(f.airline_id in airlineSatMultipliers)) {
-        const avgScore = getAirlineSatisfactionScore(db, f.airline_id);
+        const avgScore = await getAirlineSatisfactionScore(f.airline_id);
         airlineSatMultipliers[f.airline_id] = getSatisfactionMultiplier(avgScore);
       }
     }
 
     let totalNewPax = 0, totalRevenue = 0;
-    // Accumulate revenue and pax per airline for a single consolidated transaction
-    const airlineTotals = {}; // airline_id → { revenue, pax }
+    const airlineTotals = {};
 
     for (const f of flightsList) {
-      // Resolve per-class seat capacities
       let ecoCap = f.eco_cap;
       let bizCap = f.biz_cap;
       let firCap = f.fir_cap;
       if (ecoCap + bizCap + firCap === 0) {
-        // No cabin profile → treat all seats as economy
         ecoCap = f.total_seats;
       }
 
-      const baseDemand      = calcBaseDemandPerHour(f.dep_cat, f.arr_cat);
-      const distMod         = calcDistanceMod(f.distance_km);
-      const condFactor      = calcConditionFactor(f.condition);
-      const svcEco  = calcServiceFactor(db, f.service_profile_id, 'economy');
-      const svcBiz  = calcServiceFactor(db, f.service_profile_id, 'business');
-      const svcFir  = calcServiceFactor(db, f.service_profile_id, 'first');
+      const baseDemand = calcBaseDemandPerHour(f.dep_cat, f.arr_cat);
+      const distMod    = calcDistanceMod(f.distance_km);
+      const condFactor = calcConditionFactor(f.condition);
+      const svcEco  = await calcServiceFactor(f.service_profile_id, 'economy');
+      const svcBiz  = await calcServiceFactor(f.service_profile_id, 'business');
+      const svcFir  = await calcServiceFactor(f.service_profile_id, 'first');
       const satMult = airlineSatMultipliers[f.airline_id] || 1.0;
 
       let newEco = 0, newBiz = 0, newFir = 0, addedRev = 0;
@@ -1064,18 +906,15 @@ function processBookings() {
       const newTotal = (f.booked_eco + newEco) + (f.booked_biz + newBiz) + (f.booked_fir + newFir);
       const revToAdd = Math.round(addedRev);
 
-      const updStmt = db.prepare(`
+      await pool.query(`
         UPDATE flights SET
-          booked_economy  = booked_economy  + ?,
-          booked_business = booked_business + ?,
-          booked_first    = booked_first    + ?,
-          seats_sold      = ?,
-          revenue         = revenue + ?
-        WHERE id = ?
-      `);
-      updStmt.bind([newEco, newBiz, newFir, newTotal, revToAdd, f.id]);
-      updStmt.step();
-      updStmt.free();
+          booked_economy  = booked_economy  + $1,
+          booked_business = booked_business + $2,
+          booked_first    = booked_first    + $3,
+          seats_sold      = $4,
+          revenue         = revenue + $5
+        WHERE id = $6
+      `, [newEco, newBiz, newFir, newTotal, revToAdd, f.id]);
 
       if (revToAdd > 0) {
         if (!airlineTotals[f.airline_id]) airlineTotals[f.airline_id] = { revenue: 0, pax: 0 };
@@ -1087,24 +926,16 @@ function processBookings() {
       totalRevenue += revToAdd;
     }
 
-    // One balance update + one transaction per airline
     for (const [airlineId, totals] of Object.entries(airlineTotals)) {
       if (totals.revenue <= 0) continue;
-      const balStmt = db.prepare('UPDATE airlines SET balance = balance + ? WHERE id = ?');
-      balStmt.bind([totals.revenue, Number(airlineId)]);
-      balStmt.step();
-      balStmt.free();
-
-      const txStmt = db.prepare(
-        "INSERT INTO transactions (airline_id, type, amount, description) VALUES (?, 'flight_revenue', ?, ?)"
+      await pool.query('UPDATE airlines SET balance = balance + $1 WHERE id = $2', [totals.revenue, Number(airlineId)]);
+      await pool.query(
+        "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'flight_revenue', $2, $3)",
+        [Number(airlineId), totals.revenue, `Ticket Sales (${totals.pax} passengers)`]
       );
-      txStmt.bind([Number(airlineId), totals.revenue, `Ticket Sales (${totals.pax} passengers)`]);
-      txStmt.step();
-      txStmt.free();
     }
 
     if (totalNewPax > 0) {
-      saveDatabase();
       console.log(`[Bookings] +${totalNewPax} pax, $${totalRevenue.toLocaleString()} revenue`);
     }
   } catch (err) {
@@ -1113,8 +944,8 @@ function processBookings() {
 }
 
 // Backfill satisfaction_score for flights that have NULL scores (up to 30 per cycle)
-function patchNullSatisfactionScores(db) {
-  const findStmt = db.prepare(`
+async function patchNullSatisfactionScores() {
+  const findResult = await pool.query(`
     SELECT f.id, f.service_profile_id, f.aircraft_id,
            COALESCE(r.distance_km, ws_r.distance_km, 1000) AS distance_km
     FROM flights f
@@ -1124,12 +955,10 @@ function patchNullSatisfactionScores(db) {
     WHERE f.satisfaction_score IS NULL AND f.status != 'cancelled'
     LIMIT 30
   `);
-  const toFix = [];
-  while (findStmt.step()) {
-    const r = findStmt.get();
-    toFix.push({ id: r[0], service_profile_id: r[1], aircraft_id: r[2], distance_km: r[3] || 1000 });
-  }
-  findStmt.free();
+  const toFix = findResult.rows.map(r => ({
+    id: r.id, service_profile_id: r.service_profile_id, aircraft_id: r.aircraft_id,
+    distance_km: r.distance_km || 1000
+  }));
 
   for (const f of toFix) {
     let ecoSeats = 0, bizSeats = 0, firstSeats = 0;
@@ -1137,40 +966,34 @@ function patchNullSatisfactionScores(db) {
     let condition = 100;
 
     if (f.aircraft_id) {
-      const acStmt = db.prepare(`
+      const acResult = await pool.query(`
         SELECT ac.airline_cabin_profile_id, ac.condition, at.max_passengers
         FROM aircraft ac JOIN aircraft_types at ON ac.aircraft_type_id = at.id
-        WHERE ac.id = ?
-      `);
-      acStmt.bind([f.aircraft_id]);
+        WHERE ac.id = $1
+      `, [f.aircraft_id]);
       let cabinProfileId = null, maxPax = 100;
-      if (acStmt.step()) {
-        const ar = acStmt.get();
-        cabinProfileId = ar[0];
-        condition = ar[1] ?? 100;
-        maxPax = ar[2] ?? 100;
+      if (acResult.rows[0]) {
+        cabinProfileId = acResult.rows[0].airline_cabin_profile_id;
+        condition = acResult.rows[0].condition ?? 100;
+        maxPax = acResult.rows[0].max_passengers ?? 100;
       }
-      acStmt.free();
 
       if (cabinProfileId) {
-        const clStmt = db.prepare(
-          'SELECT class_type, actual_capacity, seat_type FROM airline_cabin_classes WHERE profile_id = ?'
+        const clResult = await pool.query(
+          'SELECT class_type, actual_capacity, seat_type FROM airline_cabin_classes WHERE profile_id = $1',
+          [cabinProfileId]
         );
-        clStmt.bind([cabinProfileId]);
-        while (clStmt.step()) {
-          const cr = clStmt.get();
-          if (cr[0] === 'economy')       { ecoSeats = cr[1]; if (cr[2]) ecoSeatType = cr[2]; }
-          else if (cr[0] === 'business') { bizSeats = cr[1]; if (cr[2]) bizSeatType = cr[2]; }
-          else if (cr[0] === 'first')    { firstSeats = cr[1]; if (cr[2]) firstSeatType = cr[2]; }
+        for (const cr of clResult.rows) {
+          if (cr.class_type === 'economy')       { ecoSeats = cr.actual_capacity; if (cr.seat_type) ecoSeatType = cr.seat_type; }
+          else if (cr.class_type === 'business') { bizSeats = cr.actual_capacity; if (cr.seat_type) bizSeatType = cr.seat_type; }
+          else if (cr.class_type === 'first')    { firstSeats = cr.actual_capacity; if (cr.seat_type) firstSeatType = cr.seat_type; }
         }
-        clStmt.free();
       }
 
-      // No cabin profile or empty profile → treat all seats as economy
       if (ecoSeats + bizSeats + firstSeats === 0) ecoSeats = maxPax;
     }
 
-    const { score: satScore, violations: satViolations } = calcFlightSatisfaction(db, {
+    const { score: satScore, violations: satViolations } = await calcFlightSatisfaction({
       distKm: f.distance_km,
       serviceProfileId: f.service_profile_id ?? null,
       condition,
@@ -1182,10 +1005,8 @@ function patchNullSatisfactionScores(db) {
       firstSeatType,
     });
 
-    const updStmt = db.prepare('UPDATE flights SET satisfaction_score = ?, violated_rules = ? WHERE id = ?');
-    updStmt.bind([satScore, JSON.stringify(satViolations), f.id]);
-    updStmt.step();
-    updStmt.free();
+    await pool.query('UPDATE flights SET satisfaction_score = $1, violated_rules = $2 WHERE id = $3',
+      [satScore, JSON.stringify(satViolations), f.id]);
   }
 
   if (toFix.length > 0) {
@@ -1195,97 +1016,69 @@ function patchNullSatisfactionScores(db) {
 }
 
 // Process flights - update statuses and calculate revenue
-function processFlights() {
+async function processFlights() {
   try {
-    const db = getDatabase();
-    if (!db) return;
-
-    // Backfill any missing satisfaction scores from before the system existed
-    patchNullSatisfactionScores(db);
+    await patchNullSatisfactionScores();
 
     const now = new Date();
 
     // ── Maintenance completion: restore condition to 100% ──────────────────
-    // game uses 0=Mon..6=Sun; JS getDay() uses 0=Sun..6=Sat
     const jsDay = now.getDay();
     const gameDow = jsDay === 0 ? 6 : jsDay - 1;
     const currentWeekMin = gameDow * 1440 + now.getHours() * 60 + now.getMinutes();
 
-    // Maintenance cost base rates by wake turbulence category
     const MAINT_BASE_COST = { L: 2000, M: 8000, H: 15000 };
 
-    const pendingMaintStmt = db.prepare(`
+    const pendingMaintResult = await pool.query(`
       SELECT ms.id, ms.aircraft_id, ms.day_of_week, ms.start_minutes, ms.duration_minutes, ms.airline_id
       FROM maintenance_schedule ms
       WHERE ms.last_completed_at IS NULL
-         OR ms.last_completed_at < datetime('now', '-6 days')
+         OR ms.last_completed_at < NOW() - INTERVAL '6 days'
     `);
-    const pendingMaint = [];
-    while (pendingMaintStmt.step()) {
-      const r = pendingMaintStmt.get();
-      pendingMaint.push({ id: r[0], aircraft_id: r[1], day_of_week: r[2], start_minutes: r[3], duration_minutes: r[4], airline_id: r[5] });
-    }
-    pendingMaintStmt.free();
+    const pendingMaint = pendingMaintResult.rows.map(r => ({
+      id: r.id, aircraft_id: r.aircraft_id, day_of_week: r.day_of_week,
+      start_minutes: r.start_minutes, duration_minutes: r.duration_minutes, airline_id: r.airline_id
+    }));
 
     for (const m of pendingMaint) {
       const maintWeekMin = m.day_of_week * 1440 + m.start_minutes + m.duration_minutes;
       if (currentWeekMin >= maintWeekMin) {
-        // Fetch aircraft condition and wake category at maintenance time
-        const acInfoStmt = db.prepare(`
+        const acInfoResult = await pool.query(`
           SELECT a.condition, t.wake_turbulence_category, a.registration, a.home_airport
           FROM aircraft a
           JOIN aircraft_types t ON a.aircraft_type_id = t.id
-          WHERE a.id = ?
-        `);
-        acInfoStmt.bind([m.aircraft_id]);
+          WHERE a.id = $1
+        `, [m.aircraft_id]);
         let condition = 100, wakeCategory = 'M', registration = '', homeAirport = '';
-        if (acInfoStmt.step()) {
-          const ar = acInfoStmt.get();
-          condition    = ar[0] ?? 100;
-          wakeCategory = ar[1] ?? 'M';
-          registration = ar[2] ?? '';
-          homeAirport  = ar[3] ?? '';
+        if (acInfoResult.rows[0]) {
+          const ar = acInfoResult.rows[0];
+          condition    = ar.condition ?? 100;
+          wakeCategory = ar.wake_turbulence_category ?? 'M';
+          registration = ar.registration ?? '';
+          homeAirport  = ar.home_airport ?? '';
         }
-        acInfoStmt.free();
 
-        // Restore condition to 100%
-        const restoreStmt = db.prepare('UPDATE aircraft SET condition = 100 WHERE id = ?');
-        restoreStmt.bind([m.aircraft_id]);
-        restoreStmt.step();
-        restoreStmt.free();
+        await pool.query('UPDATE aircraft SET condition = 100 WHERE id = $1', [m.aircraft_id]);
 
-        // Calculate and deduct maintenance cost
         const baseCost  = MAINT_BASE_COST[wakeCategory] ?? MAINT_BASE_COST.M;
         const maintCost = Math.round(baseCost * (2 - condition / 100));
 
         if (maintCost > 0 && m.airline_id) {
-          const deductStmt = db.prepare('UPDATE airlines SET balance = balance - ? WHERE id = ?');
-          deductStmt.bind([maintCost, m.airline_id]);
-          deductStmt.step();
-          deductStmt.free();
-
-          const txStmt = db.prepare(
-            "INSERT INTO transactions (airline_id, type, amount, description) VALUES (?, 'maintenance', ?, ?)"
-          );
+          await pool.query('UPDATE airlines SET balance = balance - $1 WHERE id = $2', [maintCost, m.airline_id]);
           const desc = `Maintenance - ${registration}${homeAirport ? ' - ' + homeAirport : ''}`;
-          txStmt.bind([m.airline_id, -maintCost, desc]);
-          txStmt.step();
-          txStmt.free();
+          await pool.query(
+            "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'maintenance', $2, $3)",
+            [m.airline_id, -maintCost, desc]
+          );
         }
 
-        const markStmt = db.prepare('UPDATE maintenance_schedule SET last_completed_at = ? WHERE id = ?');
-        markStmt.bind([now.toISOString(), m.id]);
-        markStmt.step();
-        markStmt.free();
-
+        await pool.query('UPDATE maintenance_schedule SET last_completed_at = $1 WHERE id = $2', [now.toISOString(), m.id]);
         console.log(`[Maintenance] Aircraft ${m.aircraft_id} (${registration}) completed — condition restored to 100%, cost: $${maintCost.toLocaleString()}`);
       }
     }
-    // ───────────────────────────────────────────────────────────────────────
 
     // Scheduled → Boarding (15 min before departure)
-    // Check aircraft location: if not at departure airport → cancel with refund penalty.
-    const boardingCandidatesStmt = db.prepare(`
+    const boardingCandidatesResult = await pool.query(`
       SELECT
         f.id, f.flight_number, f.airline_id, f.aircraft_id,
         COALESCE(r.departure_airport, ws.departure_airport) AS dep_airport,
@@ -1302,25 +1095,19 @@ function processFlights() {
       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
       LEFT JOIN aircraft ac        ON f.aircraft_id        = ac.id
       WHERE f.status = 'scheduled'
-        AND datetime(f.departure_time) <= datetime(?, '+15 minutes')
-    `);
-    boardingCandidatesStmt.bind([now.toISOString()]);
-    const boardingCandidates = [];
-    while (boardingCandidatesStmt.step()) {
-      const r = boardingCandidatesStmt.get();
-      boardingCandidates.push({
-        id: r[0], flight_number: r[1], airline_id: r[2], aircraft_id: r[3],
-        dep_airport: r[4],
-        booked_eco: r[5], booked_biz: r[6], booked_fir: r[7],
-        eco_price: r[8], biz_price: r[9], fir_price: r[10],
-        rev_collected: r[11],
-        current_location: r[12],
-      });
-    }
-    boardingCandidatesStmt.free();
+        AND f.departure_time <= $1 + INTERVAL '15 minutes'
+    `, [now.toISOString()]);
+
+    const boardingCandidates = boardingCandidatesResult.rows.map(r => ({
+      id: r.id, flight_number: r.flight_number, airline_id: r.airline_id, aircraft_id: r.aircraft_id,
+      dep_airport: r.dep_airport,
+      booked_eco: r.booked_eco, booked_biz: r.booked_biz, booked_fir: r.booked_fir,
+      eco_price: r.eco_price, biz_price: r.biz_price, fir_price: r.fir_price,
+      rev_collected: r.rev_collected,
+      current_location: r.current_location,
+    }));
 
     for (const f of boardingCandidates) {
-      // If current_location is known and doesn't match departure airport → cancel
       if (f.current_location !== null && f.current_location !== f.dep_airport) {
         let penalty = 0;
         if (f.rev_collected) {
@@ -1330,41 +1117,25 @@ function processFlights() {
         }
         penalty = Math.round(penalty);
 
-        const cancelStmt = db.prepare("UPDATE flights SET status = 'cancelled' WHERE id = ?");
-        cancelStmt.bind([f.id]);
-        cancelStmt.step();
-        cancelStmt.free();
+        await pool.query("UPDATE flights SET status = 'cancelled' WHERE id = $1", [f.id]);
 
         if (penalty > 0) {
-          const penStmt = db.prepare('UPDATE airlines SET balance = balance - ? WHERE id = ?');
-          penStmt.bind([penalty, f.airline_id]);
-          penStmt.step();
-          penStmt.free();
-
-          const txStmt = db.prepare(
-            "INSERT INTO transactions (airline_id, type, amount, description) VALUES (?, 'other', ?, ?)"
+          await pool.query('UPDATE airlines SET balance = balance - $1 WHERE id = $2', [penalty, f.airline_id]);
+          await pool.query(
+            "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
+            [f.airline_id, -penalty, `Flight ${f.flight_number} cancelled - aircraft not at ${f.dep_airport} (at ${f.current_location})`]
           );
-          txStmt.bind([
-            f.airline_id, -penalty,
-            `Flight ${f.flight_number} cancelled - aircraft not at ${f.dep_airport} (at ${f.current_location})`,
-          ]);
-          txStmt.step();
-          txStmt.free();
         }
 
         console.log(`[FlightProc] ${f.flight_number} CANCELLED - not at ${f.dep_airport}, at ${f.current_location}, penalty $${penalty}`);
         continue;
       }
 
-      // Location OK (or unknown) → proceed to boarding
-      const boardStmt = db.prepare("UPDATE flights SET status = 'boarding' WHERE id = ?");
-      boardStmt.bind([f.id]);
-      boardStmt.step();
-      boardStmt.free();
+      await pool.query("UPDATE flights SET status = 'boarding' WHERE id = $1", [f.id]);
     }
 
-    // Boarding → In-Flight: calculate fuel cost at departure using current live price
-    const boardingReadyStmt = db.prepare(`
+    // Boarding → In-Flight
+    const boardingReadyResult = await pool.query(`
       SELECT f.id, f.flight_number,
              COALESCE(r.distance_km, ws_r.distance_km, 0) as distance_km,
              COALESCE(at.fuel_consumption_per_km, 2.8) as fuel_per_km
@@ -1375,39 +1146,31 @@ function processFlights() {
       LEFT JOIN aircraft ac ON f.aircraft_id = ac.id
       LEFT JOIN aircraft_types at ON ac.aircraft_type_id = at.id
       WHERE f.status = 'boarding'
-      AND datetime(f.departure_time) <= datetime(?)
-    `);
-    boardingReadyStmt.bind([now.toISOString()]);
-    const departingFlights = [];
-    while (boardingReadyStmt.step()) {
-      const r = boardingReadyStmt.get();
-      departingFlights.push({ id: r[0], flight_number: r[1], distance_km: r[2], fuel_per_km: r[3] });
-    }
-    boardingReadyStmt.free();
+      AND f.departure_time <= $1
+    `, [now.toISOString()]);
+
+    const departingFlights = boardingReadyResult.rows.map(r => ({
+      id: r.id, flight_number: r.flight_number, distance_km: r.distance_km, fuel_per_km: r.fuel_per_km
+    }));
 
     if (departingFlights.length > 0) {
-      // Fetch current fuel price
-      const fpStmt = db.prepare('SELECT price_per_liter FROM fuel_prices ORDER BY created_at DESC LIMIT 1');
+      const fpResult = await pool.query('SELECT price_per_liter FROM fuel_prices ORDER BY created_at DESC LIMIT 1');
       let currentFuelPrice = 0.64;
-      if (fpStmt.step()) currentFuelPrice = fpStmt.get()[0];
-      fpStmt.free();
+      if (fpResult.rows[0]) currentFuelPrice = fpResult.rows[0].price_per_liter;
 
       for (const f of departingFlights) {
-        // fuel_consumption_per_km is in kg/km
         const fuelKg = Math.round(f.distance_km * f.fuel_per_km);
         const fuelCost = Math.round(fuelKg * currentFuelPrice);
-        const updStmt = db.prepare(
-          "UPDATE flights SET status = 'in-flight', fuel_cost = ? WHERE id = ?"
+        await pool.query(
+          "UPDATE flights SET status = 'in-flight', fuel_cost = $1 WHERE id = $2",
+          [fuelCost, f.id]
         );
-        updStmt.bind([fuelCost, f.id]);
-        updStmt.step();
-        updStmt.free();
       }
       console.log(`[FlightProc] ${departingFlights.length} flight(s) departed at $${currentFuelPrice.toFixed(2)}/kg fuel`);
     }
 
-    // In-Flight → Completed (deduct costs for new-flow flights; post net revenue for legacy)
-    const completedStmt = db.prepare(`
+    // In-Flight → Completed
+    const completedResult = await pool.query(`
       SELECT f.id, f.airline_id, f.seats_sold, f.ticket_price, f.aircraft_id,
              COALESCE(r.arrival_airport, ws.arrival_airport) as arrival_airport,
              f.service_profile_id, f.departure_time, f.arrival_time,
@@ -1439,46 +1202,38 @@ function processFlights() {
       LEFT JOIN airports arr_apt ON COALESCE(r.arrival_airport, ws.arrival_airport) = arr_apt.iata_code
       LEFT JOIN airports dep_apt ON COALESCE(r.departure_airport, ws.departure_airport) = dep_apt.iata_code
       WHERE f.status = 'in-flight'
-      AND datetime(f.arrival_time) <= datetime(?)
-    `);
-    completedStmt.bind([now.toISOString()]);
+      AND f.arrival_time <= $1
+    `, [now.toISOString()]);
 
-    const completedFlights = [];
-    while (completedStmt.step()) {
-      const row = completedStmt.get();
-      completedFlights.push({
-        id: row[0],
-        airline_id: row[1],
-        seats_sold: row[2],
-        ticket_price: row[3],
-        aircraft_id: row[4],
-        arrival_airport: row[5],
-        service_profile_id: row[6],
-        departure_time: row[7],
-        arrival_time: row[8],
-        booking_revenue_collected: row[9],
-        flight_number: row[10],
-        departure_airport: row[11],
-        distance_km: row[12],
-        wake_cat: row[13],
-        fuel_cost: row[14],
-        atc_fee: row[15],
-        landing_fee_light: row[16],
-        landing_fee_medium: row[17],
-        landing_fee_heavy: row[18],
-        arr_gh_light: row[19], arr_gh_medium: row[20], arr_gh_heavy: row[21],
-        dep_gh_light: row[22], dep_gh_medium: row[23], dep_gh_heavy: row[24],
-        booked_eco: row[25],
-        booked_biz: row[26],
-        booked_fir: row[27],
-        total_capacity: row[28],
-      });
-    }
-    completedStmt.free();
+    const completedFlights = completedResult.rows.map(row => ({
+      id: row.id,
+      airline_id: row.airline_id,
+      seats_sold: row.seats_sold,
+      ticket_price: row.ticket_price,
+      aircraft_id: row.aircraft_id,
+      arrival_airport: row.arrival_airport,
+      service_profile_id: row.service_profile_id,
+      departure_time: row.departure_time,
+      arrival_time: row.arrival_time,
+      booking_revenue_collected: row.booking_revenue_collected,
+      flight_number: row.flight_number,
+      departure_airport: row.departure_airport,
+      distance_km: row.distance_km,
+      wake_cat: row.wake_cat,
+      fuel_cost: row.fuel_cost,
+      atc_fee: row.atc_fee,
+      landing_fee_light: row.landing_fee_light,
+      landing_fee_medium: row.landing_fee_medium,
+      landing_fee_heavy: row.landing_fee_heavy,
+      arr_gh_light: row.arr_gh_light, arr_gh_medium: row.arr_gh_medium, arr_gh_heavy: row.arr_gh_heavy,
+      dep_gh_light: row.dep_gh_light, dep_gh_medium: row.dep_gh_medium, dep_gh_heavy: row.dep_gh_heavy,
+      booked_eco: row.booked_eco,
+      booked_biz: row.booked_biz,
+      booked_fir: row.booked_fir,
+      total_capacity: row.total_capacity,
+    }));
 
-    // Process each completed flight
     for (const flight of completedFlights) {
-      // Distance-based catering cost per cabin class
       const cateringCost = calcCateringCost(
         flight.distance_km,
         flight.booked_eco,
@@ -1487,98 +1242,67 @@ function processFlights() {
       );
 
       if (flight.booking_revenue_collected) {
-        // NEW FLOW: revenue already collected at booking — deduct costs only at landing
         const distKm = flight.distance_km || 0;
         const wakeCategory = flight.wake_cat || 'M';
 
-        // Landing fee at arrival airport, based on wake turbulence category
         let landingFee = 0;
         if (wakeCategory === 'L') landingFee = flight.landing_fee_light  || 500;
         else if (wakeCategory === 'M') landingFee = flight.landing_fee_medium || 1500;
         else                           landingFee = flight.landing_fee_heavy  || 5000;
 
-        // Ground handling at both airports
         const wc = (flight.wake_cat || 'M').toUpperCase();
         const arrGH = wc === 'L' ? (flight.arr_gh_light || 400)  : wc === 'H' ? (flight.arr_gh_heavy || 950)  : (flight.arr_gh_medium || 650);
         const depGH = wc === 'L' ? (flight.dep_gh_light || 400)  : wc === 'H' ? (flight.dep_gh_heavy || 950)  : (flight.dep_gh_medium || 650);
         const groundHandling = arrGH + depGH;
 
-        // ATC / navigation fees — use stored value (calculated at scheduling), fallback to live calc
         const atcFee = flight.atc_fee > 0 ? flight.atc_fee : Math.round(distKm * ATC_RATE_PER_KM);
-
-        // Fuel cost already calculated at departure (using live price at takeoff)
         const fuelCost = flight.fuel_cost || 0;
-
         const totalCosts = landingFee + groundHandling + atcFee + fuelCost + cateringCost;
 
-        // Mark flight completed; persist costs for profit calculation
-        const updateFlightStmt = db.prepare(
-          'UPDATE flights SET status = ?, atc_fee = CASE WHEN atc_fee = 0 THEN ? ELSE atc_fee END, landing_fee = ?, ground_handling_cost = ?, catering_cost = ? WHERE id = ?'
+        await pool.query(
+          'UPDATE flights SET status = $1, atc_fee = CASE WHEN atc_fee = 0 THEN $2 ELSE atc_fee END, landing_fee = $3, ground_handling_cost = $4, catering_cost = $5 WHERE id = $6',
+          ['completed', atcFee, landingFee, groundHandling, cateringCost, flight.id]
         );
-        updateFlightStmt.bind(['completed', atcFee, landingFee, groundHandling, cateringCost, flight.id]);
-        updateFlightStmt.step();
-        updateFlightStmt.free();
 
-        // Update aircraft physical location, flight hours, and condition
         if (flight.aircraft_id) {
           const flightHours = flight.departure_time && flight.arrival_time
             ? (new Date(flight.arrival_time) - new Date(flight.departure_time)) / 3600000
             : 0;
-          const updateLocStmt = db.prepare(
-            'UPDATE aircraft SET current_location = ?, total_flight_hours = total_flight_hours + ? WHERE id = ?'
+          await pool.query(
+            'UPDATE aircraft SET current_location = $1, total_flight_hours = total_flight_hours + $2 WHERE id = $3',
+            [flight.arrival_airport || null, flightHours, flight.aircraft_id]
           );
-          updateLocStmt.bind([flight.arrival_airport || null, flightHours, flight.aircraft_id]);
-          updateLocStmt.step();
-          updateLocStmt.free();
-          degradeCondition(db, flight.aircraft_id, flightHours, flight.wake_cat);
+          await degradeCondition(flight.aircraft_id, flightHours, flight.wake_cat);
         }
 
-        // Deduct costs from airline balance
         if (totalCosts > 0) {
-          const updateBalanceStmt = db.prepare('UPDATE airlines SET balance = balance - ? WHERE id = ?');
-          updateBalanceStmt.bind([totalCosts, flight.airline_id]);
-          updateBalanceStmt.step();
-          updateBalanceStmt.free();
-
-          const txStmt = db.prepare(
-            "INSERT INTO transactions (airline_id, type, amount, description) VALUES (?, 'other', ?, ?)"
+          await pool.query('UPDATE airlines SET balance = balance - $1 WHERE id = $2', [totalCosts, flight.airline_id]);
+          await pool.query(
+            "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
+            [flight.airline_id, -totalCosts, `Flight Costs - ${flight.flight_number}`]
           );
-          txStmt.bind([flight.airline_id, -totalCosts, `Flight Costs - ${flight.flight_number}`]);
-          txStmt.step();
-          txStmt.free();
         }
 
         console.log(`Flight ${flight.id} (${flight.flight_number}) landed. Landing: $${landingFee.toLocaleString()}, Ground: $${groundHandling.toLocaleString()}, ATC: $${atcFee.toLocaleString()}, Fuel: $${fuelCost.toLocaleString()}, Catering: $${cateringCost.toLocaleString()}, Total costs: $${totalCosts.toLocaleString()}`);
       } else {
-        // LEGACY FLOW: no upfront revenue collected — post net revenue at landing
         const revenue = flight.seats_sold * flight.ticket_price;
         const netRevenue = revenue - cateringCost;
 
-        // Update flight status and revenue; persist catering cost for profit calculation
-        const updateFlightStmt = db.prepare('UPDATE flights SET status = ?, revenue = ?, catering_cost = ? WHERE id = ?');
-        updateFlightStmt.bind(['completed', netRevenue, cateringCost, flight.id]);
-        updateFlightStmt.step();
-        updateFlightStmt.free();
+        await pool.query('UPDATE flights SET status = $1, revenue = $2, catering_cost = $3 WHERE id = $4',
+          ['completed', netRevenue, cateringCost, flight.id]);
 
-        // Update aircraft physical location, flight hours, and condition
         if (flight.aircraft_id) {
           const flightHours = flight.departure_time && flight.arrival_time
             ? (new Date(flight.arrival_time) - new Date(flight.departure_time)) / 3600000
             : 0;
-          const updateLocStmt = db.prepare(
-            'UPDATE aircraft SET current_location = ?, total_flight_hours = total_flight_hours + ? WHERE id = ?'
+          await pool.query(
+            'UPDATE aircraft SET current_location = $1, total_flight_hours = total_flight_hours + $2 WHERE id = $3',
+            [flight.arrival_airport || null, flightHours, flight.aircraft_id]
           );
-          updateLocStmt.bind([flight.arrival_airport || null, flightHours, flight.aircraft_id]);
-          updateLocStmt.step();
-          updateLocStmt.free();
-          degradeCondition(db, flight.aircraft_id, flightHours, flight.wake_cat);
+          await degradeCondition(flight.aircraft_id, flightHours, flight.wake_cat);
         }
 
-        // Add net revenue to airline balance
-        const updateBalanceStmt = db.prepare('UPDATE airlines SET balance = balance + ? WHERE id = ?');
-        updateBalanceStmt.bind([netRevenue, flight.airline_id]);
-        updateBalanceStmt.step();
-        updateBalanceStmt.free();
+        await pool.query('UPDATE airlines SET balance = balance + $1 WHERE id = $2', [netRevenue, flight.airline_id]);
 
         console.log(`Flight ${flight.id} completed (legacy). Revenue: $${revenue.toLocaleString()}, Catering: $${cateringCost.toLocaleString()}, Net: $${netRevenue.toLocaleString()}`);
       }
@@ -1587,52 +1311,33 @@ function processFlights() {
       const totalBooked = (flight.booked_eco || 0) + (flight.booked_biz || 0) + (flight.booked_fir || 0);
       const loadFactor  = flight.total_capacity > 0 ? totalBooked / flight.total_capacity : 0.7;
       const xpEarned    = calcFlightXP(flight.distance_km || 0, loadFactor);
-      const xpStmt = db.prepare('UPDATE airlines SET total_points = total_points + ? WHERE id = ?');
-      xpStmt.bind([xpEarned, flight.airline_id]);
-      xpStmt.step();
-      xpStmt.free();
-      checkLevelUp(db, flight.airline_id);
+      await pool.query('UPDATE airlines SET total_points = total_points + $1 WHERE id = $2', [xpEarned, flight.airline_id]);
+      await checkLevelUp(flight.airline_id);
       console.log(`[XP] Flight ${flight.flight_number}: +${xpEarned} XP (dist=${flight.distance_km}km, load=${(loadFactor*100).toFixed(0)}%)`);
-    }
-
-    if (completedFlights.length > 0) {
-      saveDatabase();
     }
 
     // ── Complete transfer flights that have landed ──────────────────────────
     try {
-      const pendingTransferStmt = db.prepare(`
+      const pendingTransferResult = await pool.query(`
         SELECT id, aircraft_id, airline_id, arrival_airport, departure_time, arrival_time
         FROM transfer_flights WHERE status = 'scheduled'
       `);
-      const pendingTransfers = [];
-      while (pendingTransferStmt.step()) {
-        const r = pendingTransferStmt.get();
-        pendingTransfers.push({ id: r[0], aircraft_id: r[1], airline_id: r[2], arrival_airport: r[3], departure_time: r[4], arrival_time: r[5] });
-      }
-      pendingTransferStmt.free();
+      const pendingTransfers = pendingTransferResult.rows.map(r => ({
+        id: r.id, aircraft_id: r.aircraft_id, airline_id: r.airline_id,
+        arrival_airport: r.arrival_airport, departure_time: r.departure_time, arrival_time: r.arrival_time
+      }));
 
-      let transferCompleted = false;
       for (const t of pendingTransfers) {
         if (now >= new Date(t.arrival_time)) {
-          // Mark completed
-          const completeStmt = db.prepare("UPDATE transfer_flights SET status = 'completed' WHERE id = ?");
-          completeStmt.bind([t.id]);
-          completeStmt.step();
-          completeStmt.free();
-
-          // Update aircraft location
+          await pool.query("UPDATE transfer_flights SET status = 'completed' WHERE id = $1", [t.id]);
           const flightHours = (new Date(t.arrival_time) - new Date(t.departure_time)) / 3600000;
-          const locStmt = db.prepare('UPDATE aircraft SET current_location = ?, total_flight_hours = total_flight_hours + ? WHERE id = ?');
-          locStmt.bind([t.arrival_airport, flightHours, t.aircraft_id]);
-          locStmt.step();
-          locStmt.free();
-
-          transferCompleted = true;
+          await pool.query(
+            'UPDATE aircraft SET current_location = $1, total_flight_hours = total_flight_hours + $2 WHERE id = $3',
+            [t.arrival_airport, flightHours, t.aircraft_id]
+          );
           console.log(`Transfer flight ${t.id} completed → ${t.arrival_airport}`);
         }
       }
-      if (transferCompleted) saveDatabase();
     } catch (err) {
       console.error('Transfer flight processing error:', err);
     }
@@ -1643,43 +1348,31 @@ function processFlights() {
 
 // Degrade aircraft condition after landing
 const CONDITION_RATE = { L: 0.20, M: 0.25, H: 0.30 };
-function degradeCondition(db, aircraftId, flightHours, wakeCategory) {
+async function degradeCondition(aircraftId, flightHours, wakeCategory) {
   try {
     const rate = CONDITION_RATE[wakeCategory] ?? CONDITION_RATE.M;
     const loss = parseFloat(((flightHours * rate) + 0.15).toFixed(4));
-    const stmt = db.prepare(
-      'UPDATE aircraft SET condition = MAX(0, ROUND(condition - ?, 2)) WHERE id = ?'
+    await pool.query(
+      'UPDATE aircraft SET condition = GREATEST(0, ROUND((condition - $1)::numeric, 2)) WHERE id = $2',
+      [loss, aircraftId]
     );
-    stmt.bind([loss, aircraftId]);
-    stmt.step();
-    stmt.free();
   } catch (err) {
     console.error('degradeCondition error:', err);
   }
 }
 
-// Backfill fuel price history if fewer than 24 entries exist (covers last 3 days at 3h intervals)
-function backfillFuelPrices() {
+// Backfill fuel price history if fewer than 24 entries exist
+async function backfillFuelPrices() {
   try {
-    const db = getDatabase();
-    if (!db) return;
+    const countResult = await pool.query('SELECT COUNT(*) as cnt FROM fuel_prices');
+    const count = parseInt(countResult.rows[0].cnt);
+    if (count >= 24) return;
 
-    const countStmt = db.prepare('SELECT COUNT(*) FROM fuel_prices');
-    countStmt.step();
-    const count = countStmt.get()[0];
-    countStmt.free();
-
-    if (count >= 24) return; // Enough history already
-
-    // Get current seed price
-    const curStmt = db.prepare('SELECT price_per_liter FROM fuel_prices ORDER BY created_at DESC LIMIT 1');
+    const curResult = await pool.query('SELECT price_per_liter FROM fuel_prices ORDER BY created_at DESC LIMIT 1');
     let price = 0.75;
-    if (curStmt.step()) price = curStmt.get()[0];
-    curStmt.free();
+    if (curResult.rows[0]) price = curResult.rows[0].price_per_liter;
 
-    // Add entries spaced 3h apart going back from now
     const needed = 24 - count;
-    const insStmt = db.prepare("INSERT INTO fuel_prices (price_per_liter, price_per_kg, created_at) VALUES (?, ?, datetime('now', ? || ' hours'))");
     for (let i = needed; i >= 1; i--) {
       const isSpike = Math.random() < 0.10;
       let delta = isSpike ? (Math.random() * 0.60) - 0.30 : (Math.random() * 0.10) - 0.05;
@@ -1687,12 +1380,11 @@ function backfillFuelPrices() {
       if (price < 0.50) delta += 0.01;
       price = Math.max(FUEL_MIN_PER_KG, Math.min(FUEL_MAX_PER_KG, price + delta));
       price = Math.round(price * 100) / 100;
-      insStmt.bind([price, Math.round(price * 1.25 * 100) / 100, String(-(i * 3))]);
-      insStmt.step();
-      insStmt.reset();
+      await pool.query(
+        "INSERT INTO fuel_prices (price_per_liter, price_per_kg, created_at) VALUES ($1, $2, NOW() - ($3 * INTERVAL '1 hour'))",
+        [price, Math.round(price * 1.25 * 100) / 100, i * 3]
+      );
     }
-    insStmt.free();
-    saveDatabase();
     console.log(`[FuelPrice] Backfilled ${needed} historical price entries`);
   } catch (err) {
     console.error('backfillFuelPrices error:', err);
@@ -1700,15 +1392,11 @@ function backfillFuelPrices() {
 }
 
 // Generate a new fuel price — smooth random walk with occasional spikes
-function generateFuelPrice() {
+async function generateFuelPrice() {
   try {
-    const db = getDatabase();
-    if (!db) return;
-
-    const lastStmt = db.prepare('SELECT price_per_liter FROM fuel_prices ORDER BY created_at DESC LIMIT 1');
+    const lastResult = await pool.query('SELECT price_per_liter FROM fuel_prices ORDER BY created_at DESC LIMIT 1');
     let previousPrice = 0.75;
-    if (lastStmt.step()) previousPrice = lastStmt.get()[0];
-    lastStmt.free();
+    if (lastResult.rows[0]) previousPrice = lastResult.rows[0].price_per_liter;
 
     const isSpike = Math.random() < 0.10;
     let delta = isSpike ? (Math.random() * 0.60) - 0.30 : (Math.random() * 0.10) - 0.05;
@@ -1717,17 +1405,12 @@ function generateFuelPrice() {
     const newPrice = Math.max(FUEL_MIN_PER_KG, Math.min(FUEL_MAX_PER_KG, previousPrice + delta));
     const rounded = Math.round(newPrice * 100) / 100;
 
-    const insStmt = db.prepare('INSERT INTO fuel_prices (price_per_liter, price_per_kg) VALUES (?, ?)');
-    insStmt.bind([rounded, Math.round(rounded * 1.25 * 100) / 100]);
-    insStmt.step();
-    insStmt.free();
+    await pool.query('INSERT INTO fuel_prices (price_per_liter, price_per_kg) VALUES ($1, $2)',
+      [rounded, Math.round(rounded * 1.25 * 100) / 100]);
 
     // Keep only last 3 days of history
-    const cleanStmt = db.prepare("DELETE FROM fuel_prices WHERE created_at < datetime('now', '-3 days')");
-    cleanStmt.step();
-    cleanStmt.free();
+    await pool.query("DELETE FROM fuel_prices WHERE created_at < NOW() - INTERVAL '3 days'");
 
-    saveDatabase();
     console.log(`[FuelPrice] New price: $${rounded.toFixed(2)}/kg${isSpike ? ' (spike)' : ''}`);
   } catch (err) {
     console.error('generateFuelPrice error:', err);
@@ -1735,9 +1418,8 @@ function generateFuelPrice() {
 }
 
 // ── DEV: Route price calculator ───────────────────────────────────────────────
-router.get('/dev/route-calc', authMiddleware, (req, res) => {
+router.get('/dev/route-calc', authMiddleware, async (req, res) => {
   try {
-    const db = getDatabase();
     const { dep, arr, eco_price, biz_price, fir_price, condition = 100,
             service_profile_id, eco_cap, biz_cap, fir_cap } = req.query;
 
@@ -1750,17 +1432,17 @@ router.get('/dev/route-calc', authMiddleware, (req, res) => {
       return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
     }
 
-    const getApt = (code) => {
-      const s = db.prepare('SELECT category, latitude, longitude, name FROM airports WHERE iata_code = ?');
-      s.bind([code]);
-      let r = null;
-      if (s.step()) { const row = s.get(); r = { category: row[0] || 4, lat: row[1], lon: row[2], name: row[3] }; }
-      s.free();
-      return r || { category: 4, lat: null, lon: null, name: code };
+    const getApt = async (code) => {
+      const result = await pool.query('SELECT category, latitude, longitude, name FROM airports WHERE iata_code = $1', [code]);
+      if (result.rows[0]) {
+        const row = result.rows[0];
+        return { category: row.category || 4, lat: row.latitude, lon: row.longitude, name: row.name };
+      }
+      return { category: 4, lat: null, lon: null, name: code };
     };
 
-    const depApt = getApt(dep.toUpperCase());
-    const arrApt = getApt(arr.toUpperCase());
+    const depApt = await getApt(dep.toUpperCase());
+    const arrApt = await getApt(arr.toUpperCase());
 
     let distKm = parseInt(req.query.dist_km) || 1000;
     if (depApt.lat != null && arrApt.lat != null) {
@@ -1779,9 +1461,9 @@ router.get('/dev/route-calc', authMiddleware, (req, res) => {
     const mkt        = calcMarketPrices(distKm, depApt.category, arrApt.category);
     const baseDemand = calcBaseDemandPerHour(depApt.category, arrApt.category);
     const distMod    = calcDistanceMod(distKm);
-    const svcEco     = calcServiceFactor(db, spId, 'economy');
-    const svcBiz     = calcServiceFactor(db, spId, 'business');
-    const svcFir     = calcServiceFactor(db, spId, 'first');
+    const svcEco     = await calcServiceFactor(spId, 'economy');
+    const svcBiz     = await calcServiceFactor(spId, 'business');
+    const svcFir     = await calcServiceFactor(spId, 'first');
     const condFactor = calcConditionFactor(cond);
     const baseRate   = calcBaseRate(distKm);
     const aptPremium = calcAirportPremium(depApt.category, arrApt.category);
@@ -1860,11 +1542,10 @@ function stopFlightProcessor() {
 }
 
 // ── Client feedback: completed flights in last 24h with satisfaction issues ───
-router.get('/client-feedback', authMiddleware, (req, res) => {
+router.get('/client-feedback', authMiddleware, async (req, res) => {
   try {
-    const db = getDatabase();
     const airlineId = req.airlineId;
-    const stmt = db.prepare(`
+    const result = await pool.query(`
       SELECT f.id, f.flight_number, f.satisfaction_score, f.violated_rules,
              f.arrival_time, f.aircraft_id,
              COALESCE(r.departure_airport, ws.departure_airport) AS dep_iata,
@@ -1874,28 +1555,23 @@ router.get('/client-feedback', authMiddleware, (req, res) => {
       LEFT JOIN routes r ON f.route_id = r.id
       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
       LEFT JOIN aircraft ac ON f.aircraft_id = ac.id
-      WHERE f.airline_id = ?
+      WHERE f.airline_id = $1
         AND f.status = 'completed'
         AND f.satisfaction_score IS NOT NULL
         AND f.satisfaction_score < 85
         AND f.violated_rules IS NOT NULL
-        AND f.arrival_time >= datetime('now', '-24 hours')
+        AND f.arrival_time >= NOW() - INTERVAL '24 hours'
       ORDER BY f.arrival_time DESC
       LIMIT 50
-    `);
-    stmt.bind([airlineId]);
-    const items = [];
-    while (stmt.step()) {
-      const r = stmt.get();
-      items.push({
-        id: r[0], flight_number: r[1], satisfaction_score: r[2],
-        violated_rules: r[3] ? JSON.parse(r[3]) : [],
-        arrival_time: r[4], aircraft_id: r[5],
-        departure_airport: r[6], arrival_airport: r[7],
-        registration: r[8],
-      });
-    }
-    stmt.free();
+    `, [airlineId]);
+
+    const items = result.rows.map(r => ({
+      id: r.id, flight_number: r.flight_number, satisfaction_score: r.satisfaction_score,
+      violated_rules: r.violated_rules ? JSON.parse(r.violated_rules) : [],
+      arrival_time: r.arrival_time, aircraft_id: r.aircraft_id,
+      departure_airport: r.dep_iata, arrival_airport: r.arr_iata,
+      registration: r.registration,
+    }));
     res.json({ items });
   } catch (err) {
     console.error('client-feedback error:', err);
@@ -1904,13 +1580,12 @@ router.get('/client-feedback', authMiddleware, (req, res) => {
 });
 
 // ── Weekly flight schedule (all aircraft, all routes) ────────────────────────
-router.get('/weekly-schedule', authMiddleware, (req, res) => {
+router.get('/weekly-schedule', authMiddleware, async (req, res) => {
   try {
-    const db = getDatabase();
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
-    const stmt = db.prepare(`
+    const result = await pool.query(`
       SELECT
         ws.id, ws.day_of_week, ws.flight_number,
         ws.departure_airport, ws.arrival_airport,
@@ -1924,22 +1599,17 @@ router.get('/weekly-schedule', authMiddleware, (req, res) => {
       JOIN aircraft_types at ON ac.aircraft_type_id = at.id
       JOIN airports dep ON ws.departure_airport = dep.iata_code
       JOIN airports arr ON ws.arrival_airport = arr.iata_code
-      WHERE ac.airline_id = ?
+      WHERE ac.airline_id = $1
       ORDER BY arr.name ASC, ws.day_of_week ASC, ws.departure_time ASC
-    `);
-    stmt.bind([airlineId]);
-    const entries = [];
-    while (stmt.step()) {
-      const r = stmt.get();
-      entries.push({
-        id: r[0], day_of_week: r[1], flight_number: r[2],
-        departure_airport: r[3], arrival_airport: r[4],
-        departure_time: r[5], arrival_time: r[6],
-        aircraft_id: r[7], registration: r[8], is_active: r[9],
-        aircraft_type: r[10], departure_name: r[11], arrival_name: r[12],
-      });
-    }
-    stmt.free();
+    `, [airlineId]);
+
+    const entries = result.rows.map(r => ({
+      id: r.id, day_of_week: r.day_of_week, flight_number: r.flight_number,
+      departure_airport: r.departure_airport, arrival_airport: r.arrival_airport,
+      departure_time: r.departure_time, arrival_time: r.arrival_time,
+      aircraft_id: r.aircraft_id, registration: r.registration, is_active: r.is_active,
+      aircraft_type: r.aircraft_type, departure_name: r.departure_name, arrival_name: r.arrival_name,
+    }));
     res.json({ entries });
   } catch (error) {
     console.error('Weekly schedule error:', error);

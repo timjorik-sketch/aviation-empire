@@ -1,5 +1,5 @@
 import express from 'express';
-import { getDatabase, saveDatabase } from '../database/db.js';
+import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 
 const router = express.Router();
@@ -50,47 +50,46 @@ function getTypeRating(manufacturer, model) {
 
 /**
  * Consume up to `needed` staff from orphaned records of the given type.
- * Returns how many were available (so caller knows how many are still needed).
+ * Returns how many were consumed.
  * For cockpit: pass typeRating to only consume matching pilots.
- * Deletes/reduces orphaned records in-place.
  */
-function consumeOrphanedStaff(db, airlineId, staffType, needed, typeRating = null) {
+async function consumeOrphanedStaff(airlineId, staffType, needed, typeRating = null) {
   let orphanedRows;
   if (staffType === 'ground') {
-    const s = db.prepare(`
+    const result = await pool.query(`
       SELECT id, count FROM personnel
-      WHERE airline_id = ? AND staff_type = 'ground'
-        AND airport_code NOT IN (SELECT airport_code FROM airline_destinations WHERE airline_id = ?)
+      WHERE airline_id = $1 AND staff_type = 'ground'
+        AND airport_code NOT IN (SELECT airport_code FROM airline_destinations WHERE airline_id = $1)
       ORDER BY count DESC
-    `);
-    s.bind([airlineId, airlineId]);
-    orphanedRows = [];
-    while (s.step()) { const r = s.get(); orphanedRows.push({ id: r[0], count: r[1] }); }
-    s.free();
+    `, [airlineId]);
+    orphanedRows = result.rows;
   } else {
-    const s = typeRating
-      ? db.prepare(`SELECT id, count FROM personnel WHERE airline_id = ? AND staff_type = ? AND type_rating = ? AND (aircraft_id IS NULL OR aircraft_id NOT IN (SELECT id FROM aircraft WHERE airline_id = ? AND is_active = 1)) ORDER BY count DESC`)
-      : db.prepare(`SELECT id, count FROM personnel WHERE airline_id = ? AND staff_type = ? AND (aircraft_id IS NULL OR aircraft_id NOT IN (SELECT id FROM aircraft WHERE airline_id = ? AND is_active = 1)) ORDER BY count DESC`);
-    typeRating ? s.bind([airlineId, staffType, typeRating, airlineId]) : s.bind([airlineId, staffType, airlineId]);
-    orphanedRows = [];
-    while (s.step()) { const r = s.get(); orphanedRows.push({ id: r[0], count: r[1] }); }
-    s.free();
+    let result;
+    if (typeRating) {
+      result = await pool.query(
+        `SELECT id, count FROM personnel WHERE airline_id = $1 AND staff_type = $2 AND type_rating = $3 AND (aircraft_id IS NULL OR aircraft_id NOT IN (SELECT id FROM aircraft WHERE airline_id = $1 AND is_active = 1)) ORDER BY count DESC`,
+        [airlineId, staffType, typeRating]
+      );
+    } else {
+      result = await pool.query(
+        `SELECT id, count FROM personnel WHERE airline_id = $1 AND staff_type = $2 AND (aircraft_id IS NULL OR aircraft_id NOT IN (SELECT id FROM aircraft WHERE airline_id = $1 AND is_active = 1)) ORDER BY count DESC`,
+        [airlineId, staffType]
+      );
+    }
+    orphanedRows = result.rows;
   }
 
   let remaining = needed;
   for (const row of orphanedRows) {
     if (remaining <= 0) break;
     if (row.count <= remaining) {
-      const d = db.prepare('DELETE FROM personnel WHERE id = ?');
-      d.bind([row.id]); d.step(); d.free();
+      await pool.query('DELETE FROM personnel WHERE id = $1', [row.id]);
       remaining -= row.count;
     } else {
-      const u = db.prepare('UPDATE personnel SET count = count - ? WHERE id = ?');
-      u.bind([remaining, row.id]); u.step(); u.free();
+      await pool.query('UPDATE personnel SET count = count - $1 WHERE id = $2', [remaining, row.id]);
       remaining = 0;
     }
   }
-  // Returns how many were consumed (needed - remaining)
   return needed - remaining;
 }
 
@@ -105,103 +104,82 @@ function calcCabinCrew(classes) {
 }
 
 // GET /api/personnel — summary
-router.get('/', authMiddleware, (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
   if (!req.airlineId) return res.json({ ground: [], cabin: [], cockpit: [] });
   try {
-    const db = getDatabase();
-
     // Ground staff
-    const gStmt = db.prepare(`
+    const gResult = await pool.query(`
       SELECT p.airport_code, ap.name as airport_name, p.count, p.weekly_wage_per_person
       FROM personnel p
       LEFT JOIN airports ap ON ap.iata_code = p.airport_code
-      WHERE p.airline_id = ? AND p.staff_type = 'ground'
+      WHERE p.airline_id = $1 AND p.staff_type = 'ground'
       ORDER BY ap.name
-    `);
-    gStmt.bind([req.airlineId]);
-    const ground = [];
-    while (gStmt.step()) {
-      const r = gStmt.get();
-      ground.push({ airport_code: r[0], airport_name: r[1], count: r[2], weekly_wage_per_person: r[3] });
-    }
-    gStmt.free();
+    `, [req.airlineId]);
+    const ground = gResult.rows.map(r => ({
+      airport_code: r.airport_code, airport_name: r.airport_name,
+      count: r.count, weekly_wage_per_person: r.weekly_wage_per_person
+    }));
 
-    // Undeployed ground staff: airport no longer in airline_destinations
-    const ugStmt = db.prepare(`
-      SELECT COALESCE(SUM(p.count), 0)
+    // Undeployed ground staff
+    const ugResult = await pool.query(`
+      SELECT COALESCE(SUM(p.count), 0) as total
       FROM personnel p
-      WHERE p.airline_id = ? AND p.staff_type = 'ground'
+      WHERE p.airline_id = $1 AND p.staff_type = 'ground'
         AND p.airport_code NOT IN (
-          SELECT airport_code FROM airline_destinations WHERE airline_id = ?
+          SELECT airport_code FROM airline_destinations WHERE airline_id = $1
         )
-    `);
-    ugStmt.bind([req.airlineId, req.airlineId]);
-    ugStmt.step();
-    const undeployed_ground = ugStmt.get()[0] || 0;
-    ugStmt.free();
+    `, [req.airlineId]);
+    const undeployed_ground = parseInt(ugResult.rows[0].total) || 0;
 
-    // Cabin crew (LEFT JOIN so aircraft_id = NULL undeployed pool is included)
-    const cStmt = db.prepare(`
+    // Cabin crew
+    const cResult = await pool.query(`
       SELECT p.aircraft_id, ac.registration, p.count, p.weekly_wage_per_person
       FROM personnel p
       LEFT JOIN aircraft ac ON ac.id = p.aircraft_id
-      WHERE p.airline_id = ? AND p.staff_type = 'cabin'
+      WHERE p.airline_id = $1 AND p.staff_type = 'cabin'
       ORDER BY ac.registration
-    `);
-    cStmt.bind([req.airlineId]);
-    const cabin = [];
-    while (cStmt.step()) {
-      const r = cStmt.get();
-      cabin.push({ aircraft_id: r[0], registration: r[1], count: r[2], weekly_wage_per_person: r[3] });
-    }
-    cStmt.free();
+    `, [req.airlineId]);
+    const cabin = cResult.rows.map(r => ({
+      aircraft_id: r.aircraft_id, registration: r.registration,
+      count: r.count, weekly_wage_per_person: r.weekly_wage_per_person
+    }));
 
-    // Undeployed cabin crew: aircraft not in fleet OR aircraft inactive (is_active = 0)
-    const ucStmt = db.prepare(`
-      SELECT COALESCE(SUM(p.count), 0)
+    // Undeployed cabin crew
+    const ucResult = await pool.query(`
+      SELECT COALESCE(SUM(p.count), 0) as total
       FROM personnel p
-      WHERE p.airline_id = ? AND p.staff_type = 'cabin'
+      WHERE p.airline_id = $1 AND p.staff_type = 'cabin'
         AND (p.aircraft_id IS NULL OR p.aircraft_id NOT IN (
-          SELECT id FROM aircraft WHERE airline_id = ? AND is_active = 1
+          SELECT id FROM aircraft WHERE airline_id = $1 AND is_active = 1
         ))
-    `);
-    ucStmt.bind([req.airlineId, req.airlineId]);
-    ucStmt.step();
-    const undeployed_cabin = ucStmt.get()[0] || 0;
-    ucStmt.free();
+    `, [req.airlineId]);
+    const undeployed_cabin = parseInt(ucResult.rows[0].total) || 0;
 
-    // Cockpit crew grouped by type rating (LEFT JOINs so aircraft_id = NULL pool is included)
-    const kStmt = db.prepare(`
+    // Cockpit crew grouped by type rating
+    const kResult = await pool.query(`
       SELECT p.aircraft_id, ac.registration, at.manufacturer, at.model, p.count, p.weekly_wage_per_person, p.type_rating
       FROM personnel p
       LEFT JOIN aircraft ac ON ac.id = p.aircraft_id
       LEFT JOIN aircraft_types at ON at.id = ac.aircraft_type_id
-      WHERE p.airline_id = ? AND p.staff_type = 'cockpit'
-    `);
-    kStmt.bind([req.airlineId]);
+      WHERE p.airline_id = $1 AND p.staff_type = 'cockpit'
+    `, [req.airlineId]);
     const cockpitByRating = {};
-    while (kStmt.step()) {
-      const r = kStmt.get();
-      // Use derived rating when aircraft exists, fall back to stored type_rating for unassigned pool
-      const rating = r[2] ? getTypeRating(r[2], r[3]) : (r[6] || 'Unassigned');
-      if (!cockpitByRating[rating]) cockpitByRating[rating] = { type_rating: rating, count: 0, weekly_wage_per_person: r[5] };
-      cockpitByRating[rating].count += r[4];
+    for (const r of kResult.rows) {
+      const rating = r.manufacturer ? getTypeRating(r.manufacturer, r.model) : (r.type_rating || 'Unassigned');
+      if (!cockpitByRating[rating]) cockpitByRating[rating] = { type_rating: rating, count: 0, weekly_wage_per_person: r.weekly_wage_per_person };
+      cockpitByRating[rating].count += r.count;
     }
-    kStmt.free();
 
-    // Undeployed cockpit crew: aircraft not in fleet OR aircraft inactive
-    const ukStmt = db.prepare(`
-      SELECT COALESCE(SUM(p.count), 0)
+    // Undeployed cockpit crew
+    const ukResult = await pool.query(`
+      SELECT COALESCE(SUM(p.count), 0) as total
       FROM personnel p
-      WHERE p.airline_id = ? AND p.staff_type = 'cockpit'
+      WHERE p.airline_id = $1 AND p.staff_type = 'cockpit'
         AND (p.aircraft_id IS NULL OR p.aircraft_id NOT IN (
-          SELECT id FROM aircraft WHERE airline_id = ? AND is_active = 1
+          SELECT id FROM aircraft WHERE airline_id = $1 AND is_active = 1
         ))
-    `);
-    ukStmt.bind([req.airlineId, req.airlineId]);
-    ukStmt.step();
-    const undeployed_cockpit = ukStmt.get()[0] || 0;
-    ukStmt.free();
+    `, [req.airlineId]);
+    const undeployed_cockpit = parseInt(ukResult.rows[0].total) || 0;
 
     res.json({
       ground,
@@ -222,64 +200,48 @@ router.post('/hire/:aircraft_id', authMiddleware, async (req, res) => {
   if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
   const aircraftId = parseInt(req.params.aircraft_id);
   try {
-    const db = getDatabase();
-
     // Verify aircraft belongs to airline
-    const acStmt = db.prepare(`
+    const acResult = await pool.query(`
       SELECT ac.id, ac.crew_assigned, ac.airline_cabin_profile_id,
              at.manufacturer, at.model
       FROM aircraft ac
       JOIN aircraft_types at ON at.id = ac.aircraft_type_id
-      WHERE ac.id = ? AND ac.airline_id = ?
-    `);
-    acStmt.bind([aircraftId, req.airlineId]);
-    if (!acStmt.step()) { acStmt.free(); return res.status(404).json({ error: 'Aircraft not found' }); }
-    const acRow = acStmt.get();
-    acStmt.free();
-    const [, crewAssigned, cabinProfileId, manufacturer, model] = acRow;
+      WHERE ac.id = $1 AND ac.airline_id = $2
+    `, [aircraftId, req.airlineId]);
+    if (!acResult.rows[0]) return res.status(404).json({ error: 'Aircraft not found' });
+    const acRow = acResult.rows[0];
+    const { crew_assigned: crewAssigned, airline_cabin_profile_id: cabinProfileId, manufacturer, model } = acRow;
 
     if (crewAssigned) return res.status(400).json({ error: 'Crew already assigned' });
     if (!cabinProfileId) return res.status(400).json({ error: 'Assign a cabin profile first' });
 
     // Get cabin classes to compute cabin crew count
-    const clsStmt = db.prepare(`
-      SELECT class_type, actual_capacity FROM airline_cabin_classes WHERE profile_id = ?
-    `);
-    clsStmt.bind([cabinProfileId]);
-    const classes = [];
-    while (clsStmt.step()) {
-      const r = clsStmt.get();
-      classes.push({ class_type: r[0], actual_capacity: r[1] });
-    }
-    clsStmt.free();
+    const clsResult = await pool.query(
+      'SELECT class_type, actual_capacity FROM airline_cabin_classes WHERE profile_id = $1',
+      [cabinProfileId]
+    );
+    const classes = clsResult.rows.map(r => ({ class_type: r.class_type, actual_capacity: r.actual_capacity }));
 
     const cabinCount = calcCabinCrew(classes);
     const typeRating = getTypeRating(manufacturer, model);
 
-    // Use orphaned cabin crew first (not type-specific), then hire the rest
-    consumeOrphanedStaff(db, req.airlineId, 'cabin', cabinCount);
-    const insC = db.prepare(`
-      INSERT OR REPLACE INTO personnel (airline_id, staff_type, aircraft_id, count, weekly_wage_per_person, type_rating)
-      VALUES (?, 'cabin', ?, ?, ?, ?)
-    `);
-    insC.bind([req.airlineId, aircraftId, cabinCount, CABIN_WAGE, typeRating]);
-    insC.step(); insC.free();
+    // Use orphaned cabin crew first, then assign new record
+    await consumeOrphanedStaff(req.airlineId, 'cabin', cabinCount);
+    await pool.query(
+      'INSERT INTO personnel (airline_id, staff_type, aircraft_id, count, weekly_wage_per_person, type_rating) VALUES ($1, $2, $3, $4, $5, $6)',
+      [req.airlineId, 'cabin', aircraftId, cabinCount, CABIN_WAGE, typeRating]
+    );
 
-    // Use orphaned cockpit crew of same type rating first, then hire the rest
-    consumeOrphanedStaff(db, req.airlineId, 'cockpit', COCKPIT_COUNT, typeRating);
-    const insK = db.prepare(`
-      INSERT OR REPLACE INTO personnel (airline_id, staff_type, aircraft_id, count, weekly_wage_per_person, type_rating)
-      VALUES (?, 'cockpit', ?, ?, ?, ?)
-    `);
-    insK.bind([req.airlineId, aircraftId, COCKPIT_COUNT, COCKPIT_WAGE, typeRating]);
-    insK.step(); insK.free();
+    // Use orphaned cockpit crew of same type rating first, then assign new record
+    await consumeOrphanedStaff(req.airlineId, 'cockpit', COCKPIT_COUNT, typeRating);
+    await pool.query(
+      'INSERT INTO personnel (airline_id, staff_type, aircraft_id, count, weekly_wage_per_person, type_rating) VALUES ($1, $2, $3, $4, $5, $6)',
+      [req.airlineId, 'cockpit', aircraftId, COCKPIT_COUNT, COCKPIT_WAGE, typeRating]
+    );
 
     // Mark aircraft as crew assigned
-    const upd = db.prepare('UPDATE aircraft SET crew_assigned = 1 WHERE id = ?');
-    upd.bind([aircraftId]);
-    upd.step(); upd.free();
+    await pool.query('UPDATE aircraft SET crew_assigned = 1 WHERE id = $1', [aircraftId]);
 
-    saveDatabase();
     res.json({ message: 'Crew hired and assigned', cabin_count: cabinCount, cockpit_count: COCKPIT_COUNT });
   } catch (err) {
     console.error('Personnel hire error:', err);
@@ -288,27 +250,27 @@ router.post('/hire/:aircraft_id', authMiddleware, async (req, res) => {
 });
 
 // DELETE /api/personnel/dismiss/:aircraft_id — dismiss crew
-router.delete('/dismiss/:aircraft_id', authMiddleware, (req, res) => {
+router.delete('/dismiss/:aircraft_id', authMiddleware, async (req, res) => {
   if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
   const aircraftId = parseInt(req.params.aircraft_id);
   try {
-    const db = getDatabase();
-
     // Verify ownership
-    const chk = db.prepare('SELECT id FROM aircraft WHERE id = ? AND airline_id = ?');
-    chk.bind([aircraftId, req.airlineId]);
-    if (!chk.step()) { chk.free(); return res.status(404).json({ error: 'Aircraft not found' }); }
-    chk.free();
+    const chkResult = await pool.query(
+      'SELECT id FROM aircraft WHERE id = $1 AND airline_id = $2',
+      [aircraftId, req.airlineId]
+    );
+    if (!chkResult.rows[0]) return res.status(404).json({ error: 'Aircraft not found' });
 
-    const del = db.prepare("DELETE FROM personnel WHERE airline_id = ? AND aircraft_id = ? AND staff_type IN ('cabin', 'cockpit')");
-    del.bind([req.airlineId, aircraftId]);
-    del.step(); del.free();
+    await pool.query(
+      "DELETE FROM personnel WHERE airline_id = $1 AND aircraft_id = $2 AND staff_type IN ('cabin', 'cockpit')",
+      [req.airlineId, aircraftId]
+    );
 
-    const upd = db.prepare('UPDATE aircraft SET crew_assigned = 0, is_active = 0 WHERE id = ?');
-    upd.bind([aircraftId]);
-    upd.step(); upd.free();
+    await pool.query(
+      'UPDATE aircraft SET crew_assigned = 0, is_active = 0 WHERE id = $1',
+      [aircraftId]
+    );
 
-    saveDatabase();
     res.json({ message: 'Crew dismissed', is_active: 0 });
   } catch (err) {
     console.error('Personnel dismiss error:', err);
@@ -317,35 +279,28 @@ router.delete('/dismiss/:aircraft_id', authMiddleware, (req, res) => {
 });
 
 // DELETE /api/personnel/dismiss-undeployed/:type — dismiss staff with no active deployment
-router.delete('/dismiss-undeployed/:type', authMiddleware, (req, res) => {
+router.delete('/dismiss-undeployed/:type', authMiddleware, async (req, res) => {
   if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
   const type = req.params.type;
   if (!['ground', 'cabin', 'cockpit'].includes(type)) return res.status(400).json({ error: 'Invalid type' });
   try {
-    const db = getDatabase();
-    let del;
     if (type === 'ground') {
-      del = db.prepare(`
+      await pool.query(`
         DELETE FROM personnel
-        WHERE airline_id = ? AND staff_type = 'ground'
+        WHERE airline_id = $1 AND staff_type = 'ground'
           AND airport_code NOT IN (
-            SELECT airport_code FROM airline_destinations WHERE airline_id = ?
+            SELECT airport_code FROM airline_destinations WHERE airline_id = $1
           )
-      `);
-      del.bind([req.airlineId, req.airlineId]);
+      `, [req.airlineId]);
     } else {
-      // Delete undeployed staff: aircraft_id IS NULL (pool) or aircraft is inactive
-      del = db.prepare(`
+      await pool.query(`
         DELETE FROM personnel
-        WHERE airline_id = ? AND staff_type = ?
+        WHERE airline_id = $1 AND staff_type = $2
           AND (aircraft_id IS NULL OR aircraft_id NOT IN (
-            SELECT id FROM aircraft WHERE airline_id = ? AND is_active = 1
+            SELECT id FROM aircraft WHERE airline_id = $1 AND is_active = 1
           ))
-      `);
-      del.bind([req.airlineId, type, req.airlineId]);
+      `, [req.airlineId, type]);
     }
-    del.step(); del.free();
-    saveDatabase();
     res.json({ message: 'Undeployed staff dismissed' });
   } catch (err) {
     console.error('dismiss-undeployed error:', err);
@@ -355,61 +310,45 @@ router.delete('/dismiss-undeployed/:type', authMiddleware, (req, res) => {
 
 // ── Payroll processor ────────────────────────────────────────────────────────
 
-function processPayroll() {
+async function processPayroll() {
   try {
-    const db = getDatabase();
-    if (!db) return;
-
     // Airlines where payroll is due: last_payroll_at IS NULL or >= 7 days ago
-    const dueStmt = db.prepare(`
+    const dueResult = await pool.query(`
       SELECT id, name, balance
       FROM airlines
       WHERE last_payroll_at IS NULL
-         OR datetime(last_payroll_at, '+7 days') <= datetime('now')
+         OR last_payroll_at + INTERVAL '7 days' <= NOW()
     `);
-    const dueAirlines = [];
-    while (dueStmt.step()) {
-      const r = dueStmt.get();
-      dueAirlines.push({ id: r[0], name: r[1], balance: r[2] });
-    }
-    dueStmt.free();
 
-    if (dueAirlines.length === 0) return;
+    if (dueResult.rows.length === 0) return;
 
     let processed = 0;
-    for (const airline of dueAirlines) {
+    for (const airline of dueResult.rows) {
       // Sum all weekly personnel costs for this airline
-      const costStmt = db.prepare(`
-        SELECT COALESCE(SUM(count * weekly_wage_per_person), 0)
+      const costResult = await pool.query(`
+        SELECT COALESCE(SUM(count * weekly_wage_per_person), 0) as total
         FROM personnel
-        WHERE airline_id = ?
-      `);
-      costStmt.bind([airline.id]);
-      costStmt.step();
-      const totalCost = Math.round(costStmt.get()[0] || 0);
-      costStmt.free();
+        WHERE airline_id = $1
+      `, [airline.id]);
+      const totalCost = Math.round(parseFloat(costResult.rows[0].total) || 0);
 
       // Always update last_payroll_at, even if cost is 0
-      const updStmt = db.prepare(
-        "UPDATE airlines SET last_payroll_at = datetime('now'), balance = balance - ? WHERE id = ?"
+      await pool.query(
+        'UPDATE airlines SET last_payroll_at = NOW(), balance = balance - $1 WHERE id = $2',
+        [totalCost, airline.id]
       );
-      updStmt.bind([totalCost, airline.id]);
-      updStmt.step();
-      updStmt.free();
 
       if (totalCost > 0) {
-        const txStmt = db.prepare(
-          "INSERT INTO transactions (airline_id, type, amount, description) VALUES (?, 'other', ?, ?)"
+        await pool.query(
+          "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
+          [airline.id, -totalCost, `Wöchentliche Personalkosten`]
         );
-        txStmt.bind([airline.id, -totalCost, `Wöchentliche Personalkosten`]);
-        txStmt.step();
-        txStmt.free();
         console.log(`[Payroll] ${airline.name}: -$${totalCost.toLocaleString()} weekly payroll`);
       }
       processed++;
     }
 
-    if (processed > 0) saveDatabase();
+    if (processed > 0) console.log(`[Payroll] Processed ${processed} airline(s)`);
   } catch (err) {
     console.error('processPayroll error:', err);
   }
@@ -424,30 +363,30 @@ export function startPayrollProcessor() {
 }
 
 // POST /api/personnel/ground — add/update ground staff for an airport (internal helper, called by destinations)
-export function addGroundStaff(db, airlineId, airportCode, category, isMegaHub = false) {
+export async function addGroundStaff(airlineId, airportCode, category, isMegaHub = false) {
   const baseCount = GROUND_STAFF_BY_CAT[category] || 10;
   const count = isMegaHub ? baseCount + HUB_BONUS : baseCount;
 
-  const existing = db.prepare('SELECT id, count FROM personnel WHERE airline_id = ? AND staff_type = ? AND airport_code = ?');
-  existing.bind([airlineId, 'ground', airportCode]);
-  if (existing.step()) {
-    const row = existing.get();
-    existing.free();
-    if (isMegaHub && row[1] < count) {
-      const extra = count - row[1];
+  const existing = await pool.query(
+    "SELECT id, count FROM personnel WHERE airline_id = $1 AND staff_type = 'ground' AND airport_code = $2",
+    [airlineId, airportCode]
+  );
+
+  if (existing.rows[0]) {
+    const row = existing.rows[0];
+    if (isMegaHub && row.count < count) {
+      const extra = count - row.count;
       // Use orphaned ground staff first before adding net-new headcount
-      consumeOrphanedStaff(db, airlineId, 'ground', extra);
-      const upd = db.prepare('UPDATE personnel SET count = ? WHERE id = ?');
-      upd.bind([count, row[0]]);
-      upd.step(); upd.free();
+      await consumeOrphanedStaff(airlineId, 'ground', extra);
+      await pool.query('UPDATE personnel SET count = $1 WHERE id = $2', [count, row.id]);
     }
   } else {
-    existing.free();
     // Use orphaned ground staff first
-    consumeOrphanedStaff(db, airlineId, 'ground', count);
-    const ins = db.prepare('INSERT INTO personnel (airline_id, staff_type, airport_code, count, weekly_wage_per_person) VALUES (?, ?, ?, ?, ?)');
-    ins.bind([airlineId, 'ground', airportCode, count, GROUND_WAGE]);
-    ins.step(); ins.free();
+    await consumeOrphanedStaff(airlineId, 'ground', count);
+    await pool.query(
+      'INSERT INTO personnel (airline_id, staff_type, airport_code, count, weekly_wage_per_person) VALUES ($1, $2, $3, $4, $5)',
+      [airlineId, 'ground', airportCode, count, GROUND_WAGE]
+    );
   }
 }
 

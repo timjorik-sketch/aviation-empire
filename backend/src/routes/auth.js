@@ -2,7 +2,7 @@ import express from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { body, validationResult } from 'express-validator';
-import { getDatabase, saveDatabase } from '../database/db.js';
+import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 
 const router = express.Router();
@@ -20,34 +20,25 @@ router.post('/register',
       }
 
       const { email, username, password } = req.body;
-      const db = getDatabase();
 
       // Check if user exists
-      const checkStmt = db.prepare('SELECT * FROM users WHERE email = ? OR username = ?');
-      checkStmt.bind([email, username]);
-      const userExists = checkStmt.step();
-      checkStmt.free();
-
-      if (userExists) {
+      const checkResult = await pool.query(
+        'SELECT id FROM users WHERE email = $1 OR username = $2',
+        [email, username]
+      );
+      if (checkResult.rows[0]) {
         return res.status(400).json({ error: 'User already exists' });
       }
 
       // Hash password
       const passwordHash = await bcrypt.hash(password, 10);
 
-      // Insert user
-      const insertStmt = db.prepare('INSERT INTO users (email, username, password_hash) VALUES (?, ?, ?)');
-      insertStmt.bind([email, username, passwordHash]);
-      insertStmt.step();
-      insertStmt.free();
-
-      // Get the created user's ID
-      const getUserStmt = db.prepare('SELECT id FROM users WHERE email = ?');
-      getUserStmt.bind([email]);
-      getUserStmt.step();
-      const userId = getUserStmt.get()[0];
-      getUserStmt.free();
-      saveDatabase();
+      // Insert user with RETURNING
+      const insertResult = await pool.query(
+        'INSERT INTO users (email, username, password_hash) VALUES ($1, $2, $3) RETURNING id',
+        [email, username, passwordHash]
+      );
+      const userId = insertResult.rows[0].id;
 
       // Generate token
       const token = jwt.sign(
@@ -80,26 +71,18 @@ router.post('/login',
       }
 
       const { username, password } = req.body;
-      const db = getDatabase();
 
       // Find user
-      const findStmt = db.prepare('SELECT * FROM users WHERE username = ? OR email = ?');
-      findStmt.bind([username, username]);
+      const findResult = await pool.query(
+        'SELECT id, email, username, password_hash FROM users WHERE username = $1 OR email = $1',
+        [username]
+      );
 
-      if (!findStmt.step()) {
-        findStmt.free();
+      if (!findResult.rows[0]) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      const userRow = findStmt.get();
-      findStmt.free();
-
-      const user = {
-        id: userRow[0],
-        email: userRow[1],
-        username: userRow[2],
-        password_hash: userRow[3]
-      };
+      const user = findResult.rows[0];
 
       // Check password
       const validPassword = await bcrypt.compare(password, user.password_hash);
@@ -108,14 +91,8 @@ router.post('/login',
       }
 
       // Update last login
-      const updateStmt = db.prepare('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?');
-      updateStmt.bind([user.id]);
-      updateStmt.step();
-      updateStmt.free();
-      saveDatabase();
+      await pool.query('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1', [user.id]);
 
-
-      
       // Generate token
       const token = jwt.sign(
         { userId: user.id, username: user.username },
@@ -136,15 +113,15 @@ router.post('/login',
 );
 
 // Get current user profile
-router.get('/profile', authMiddleware, (req, res) => {
+router.get('/profile', authMiddleware, async (req, res) => {
   try {
-    const db = getDatabase();
-    const stmt = db.prepare('SELECT id, username, email, created_at FROM users WHERE id = ?');
-    stmt.bind([req.userId]);
-    if (!stmt.step()) { stmt.free(); return res.status(404).json({ error: 'User not found' }); }
-    const row = stmt.get();
-    stmt.free();
-    res.json({ user: { id: row[0], username: row[1], email: row[2], created_at: row[3] } });
+    const result = await pool.query(
+      'SELECT id, username, email, created_at FROM users WHERE id = $1',
+      [req.userId]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'User not found' });
+    const row = result.rows[0];
+    res.json({ user: { id: row.id, username: row.username, email: row.email, created_at: row.created_at } });
   } catch (error) {
     console.error('Profile error:', error);
     res.status(500).json({ error: 'Server error' });
@@ -158,22 +135,15 @@ router.patch('/change-password', authMiddleware, async (req, res) => {
     if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Both passwords required' });
     if (newPassword.length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters' });
 
-    const db = getDatabase();
-    const stmt = db.prepare('SELECT password_hash FROM users WHERE id = ?');
-    stmt.bind([req.userId]);
-    if (!stmt.step()) { stmt.free(); return res.status(404).json({ error: 'User not found' }); }
-    const hash = stmt.get()[0];
-    stmt.free();
+    const result = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.userId]);
+    if (!result.rows[0]) return res.status(404).json({ error: 'User not found' });
+    const hash = result.rows[0].password_hash;
 
     const valid = await bcrypt.compare(currentPassword, hash);
     if (!valid) return res.status(401).json({ error: 'Current password is incorrect' });
 
     const newHash = await bcrypt.hash(newPassword, 10);
-    const upStmt = db.prepare('UPDATE users SET password_hash = ? WHERE id = ?');
-    upStmt.bind([newHash, req.userId]);
-    upStmt.step();
-    upStmt.free();
-    saveDatabase();
+    await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [newHash, req.userId]);
 
     res.json({ message: 'Password changed successfully' });
   } catch (error) {
@@ -189,26 +159,20 @@ router.patch('/change-email', authMiddleware, async (req, res) => {
     if (!currentPassword || !newEmail) return res.status(400).json({ error: 'Password and new email required' });
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) return res.status(400).json({ error: 'Invalid email address' });
 
-    const db = getDatabase();
-    const stmt = db.prepare('SELECT password_hash FROM users WHERE id = ?');
-    stmt.bind([req.userId]);
-    if (!stmt.step()) { stmt.free(); return res.status(404).json({ error: 'User not found' }); }
-    const hash = stmt.get()[0];
-    stmt.free();
+    const result = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.userId]);
+    if (!result.rows[0]) return res.status(404).json({ error: 'User not found' });
+    const hash = result.rows[0].password_hash;
 
     const valid = await bcrypt.compare(currentPassword, hash);
     if (!valid) return res.status(401).json({ error: 'Current password is incorrect' });
 
-    const checkStmt = db.prepare('SELECT id FROM users WHERE email = ? AND id != ?');
-    checkStmt.bind([newEmail, req.userId]);
-    if (checkStmt.step()) { checkStmt.free(); return res.status(400).json({ error: 'Email already in use' }); }
-    checkStmt.free();
+    const checkResult = await pool.query(
+      'SELECT id FROM users WHERE email = $1 AND id != $2',
+      [newEmail, req.userId]
+    );
+    if (checkResult.rows[0]) return res.status(400).json({ error: 'Email already in use' });
 
-    const upStmt = db.prepare('UPDATE users SET email = ? WHERE id = ?');
-    upStmt.bind([newEmail, req.userId]);
-    upStmt.step();
-    upStmt.free();
-    saveDatabase();
+    await pool.query('UPDATE users SET email = $1 WHERE id = $2', [newEmail, req.userId]);
 
     res.json({ message: 'Email changed successfully', newEmail });
   } catch (error) {
@@ -223,24 +187,16 @@ router.delete('/account', authMiddleware, async (req, res) => {
     const { password } = req.body;
     if (!password) return res.status(400).json({ error: 'Password required' });
 
-    const db = getDatabase();
-
     // Verify password
-    const stmt = db.prepare('SELECT password_hash FROM users WHERE id = ?');
-    stmt.bind([req.userId]);
-    if (!stmt.step()) { stmt.free(); return res.status(404).json({ error: 'User not found' }); }
-    const hash = stmt.get()[0];
-    stmt.free();
+    const result = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.userId]);
+    if (!result.rows[0]) return res.status(404).json({ error: 'User not found' });
+    const hash = result.rows[0].password_hash;
 
     const valid = await bcrypt.compare(password, hash);
     if (!valid) return res.status(401).json({ error: 'Incorrect password' });
 
     // Delete user — cascades to airlines → aircraft, routes, flights, transactions, etc.
-    const delStmt = db.prepare('DELETE FROM users WHERE id = ?');
-    delStmt.bind([req.userId]);
-    delStmt.step();
-    delStmt.free();
-    saveDatabase();
+    await pool.query('DELETE FROM users WHERE id = $1', [req.userId]);
 
     res.json({ message: 'Account deleted successfully' });
   } catch (error) {

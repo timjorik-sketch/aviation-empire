@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
-import { getDatabase } from '../database/db.js';
+import pool from '../database/postgres.js';
 
-export const authMiddleware = (req, res, next) => {
+export const authMiddleware = async (req, res, next) => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -16,29 +16,26 @@ export const authMiddleware = (req, res, next) => {
     req.username = decoded.username;
 
     // Inject active airline context so route handlers don't need to look it up
-    const db = getDatabase();
-    if (db) {
-      const userStmt = db.prepare('SELECT active_airline_id FROM users WHERE id = ?');
-      userStmt.bind([req.userId]);
-      if (userStmt.step()) {
-        const activeAirlineId = userStmt.get()[0];
-        userStmt.free();
-        if (activeAirlineId) {
-          const airlineStmt = db.prepare(
-            'SELECT id, airline_code, level FROM airlines WHERE id = ? AND user_id = ?'
-          );
-          airlineStmt.bind([activeAirlineId, req.userId]);
-          if (airlineStmt.step()) {
-            const row = airlineStmt.get();
-            req.airlineId = row[0];
-            req.airlineCode = row[1];
-            req.airlineLevel = row[2];
-          }
-          airlineStmt.free();
+    try {
+      const userResult = await pool.query(
+        'SELECT active_airline_id FROM users WHERE id = $1',
+        [req.userId]
+      );
+      const activeAirlineId = userResult.rows[0]?.active_airline_id;
+      if (activeAirlineId) {
+        const airlineResult = await pool.query(
+          'SELECT id, airline_code, level FROM airlines WHERE id = $1 AND user_id = $2',
+          [activeAirlineId, req.userId]
+        );
+        if (airlineResult.rows[0]) {
+          const row = airlineResult.rows[0];
+          req.airlineId = row.id;
+          req.airlineCode = row.airline_code;
+          req.airlineLevel = row.level;
         }
-      } else {
-        userStmt.free();
       }
+    } catch (e) {
+      // DB error in middleware — still allow request through (auth succeeded)
     }
 
     next();

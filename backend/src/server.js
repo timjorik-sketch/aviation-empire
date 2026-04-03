@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { initDatabase, saveDatabase } from './database/db.js';
+import { initDatabase } from './database/db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import authRoutes from './routes/auth.js';
@@ -104,14 +104,7 @@ initDatabase().then(() => {
   process.exit(1);
 });
 
-// Save database before process exits (nodemon SIGTERM, Ctrl+C, etc.)
-function shutdown() {
-  console.log('[DB] Saving database before shutdown…');
-  saveDatabase();
-  console.log('[DB] Database saved.');
-  process.exit(0);
-}
-process.on('SIGTERM', shutdown);
-process.on('SIGINT',  shutdown);
+process.on('SIGTERM', () => process.exit(0));
+process.on('SIGINT',  () => process.exit(0));
 
 export default app;

@@ -1,5 +1,5 @@
 import express from 'express';
-import { getDatabase, saveDatabase } from '../database/db.js';
+import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 import { addGroundStaff } from './personnel.js';
 
@@ -10,22 +10,20 @@ const HUB_COST   = 10_000_000;
 const HUB_THRESHOLD = 600; // weekly schedule entries
 
 // Ensure home base destination exists (lazy init)
-function ensureHomeBase(db, airlineId) {
-  const s = db.prepare('SELECT home_airport_code FROM airlines WHERE id = ?');
-  s.bind([airlineId]);
-  if (!s.step()) { s.free(); return; }
-  const homeCode = s.get()[0];
-  s.free();
+async function ensureHomeBase(airlineId) {
+  const s = await pool.query('SELECT home_airport_code FROM airlines WHERE id = $1', [airlineId]);
+  if (!s.rows[0]) return;
+  const homeCode = s.rows[0].home_airport_code;
 
-  const c = db.prepare('SELECT id FROM airline_destinations WHERE airline_id = ? AND airport_code = ?');
-  c.bind([airlineId, homeCode]);
-  const exists = c.step();
-  c.free();
-  if (!exists) {
-    const i = db.prepare('INSERT INTO airline_destinations (airline_id, airport_code, destination_type) VALUES (?, ?, ?)');
-    i.bind([airlineId, homeCode, 'home_base']);
-    i.step(); i.free();
-    saveDatabase();
+  const c = await pool.query(
+    'SELECT id FROM airline_destinations WHERE airline_id = $1 AND airport_code = $2',
+    [airlineId, homeCode]
+  );
+  if (!c.rows[0]) {
+    await pool.query(
+      'INSERT INTO airline_destinations (airline_id, airport_code, destination_type) VALUES ($1, $2, $3)',
+      [airlineId, homeCode, 'home_base']
+    );
   }
 }
 
@@ -35,13 +33,12 @@ function effectiveType(destType, weeklyFlights) {
 }
 
 // GET /api/destinations
-router.get('/', authMiddleware, (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
   if (!req.airlineId) return res.json({ destinations: [] });
   try {
-    const db = getDatabase();
-    ensureHomeBase(db, req.airlineId);
+    await ensureHomeBase(req.airlineId);
 
-    const stmt = db.prepare(`
+    const result = await pool.query(`
       SELECT d.id, d.airport_code, d.destination_type, d.opened_at,
              ap.name, ap.country, ap.continent, ap.category,
              (SELECT COUNT(*) FROM weekly_schedule ws
@@ -58,7 +55,7 @@ router.get('/', authMiddleware, (req, res) => {
              ) THEN 1 ELSE 0 END AS has_expansion
       FROM airline_destinations d
       JOIN airports ap ON d.airport_code = ap.iata_code
-      WHERE d.airline_id = ?
+      WHERE d.airline_id = $1
       ORDER BY
         CASE d.destination_type
           WHEN 'home_base'      THEN 0
@@ -66,29 +63,25 @@ router.get('/', authMiddleware, (req, res) => {
           WHEN 'hub_restricted' THEN 2
           ELSE 3
         END, ap.name ASC
-    `);
-    stmt.bind([req.airlineId]);
+    `, [req.airlineId]);
 
-    const destinations = [];
-    while (stmt.step()) {
-      const r = stmt.get();
-      const wf = r[8];
-      const dtype = r[2];
-      const hasExpansion = r[10] === 1;
-      const groundStaff = dtype === 'home_base' ? 30 : r[9];
+    const destinations = result.rows.map(r => {
+      const wf = parseInt(r.weekly_flights) || 0;
+      const dtype = r.destination_type;
+      const hasExpansion = r.has_expansion === 1 || r.has_expansion === true;
+      const groundStaff = dtype === 'home_base' ? 30 : parseInt(r.ground_staff) || 0;
       const displayType = dtype === 'home_base' ? 'home_base'
         : hasExpansion ? 'hub_restricted'
         : dtype;
-      destinations.push({
-        id: r[0], airport_code: r[1], destination_type: dtype,
+      return {
+        id: r.id, airport_code: r.airport_code, destination_type: dtype,
         display_type: displayType,
         effective_type: effectiveType(displayType, wf),
-        opened_at: r[3], airport_name: r[4], country: r[5],
-        continent: r[6], category: r[7], weekly_flights: wf,
+        opened_at: r.opened_at, airport_name: r.name, country: r.country,
+        continent: r.continent, category: r.category, weekly_flights: wf,
         ground_staff: groundStaff, has_expansion: hasExpansion
-      });
-    }
-    stmt.free();
+      };
+    });
     res.json({ destinations });
   } catch (error) {
     console.error('Get destinations error:', error);
@@ -97,27 +90,22 @@ router.get('/', authMiddleware, (req, res) => {
 });
 
 // GET /api/destinations/opened — all opened airports (for home base selection dropdowns)
-router.get('/opened', authMiddleware, (req, res) => {
+router.get('/opened', authMiddleware, async (req, res) => {
   if (!req.airlineId) return res.json({ airports: [] });
   try {
-    const db = getDatabase();
-    ensureHomeBase(db, req.airlineId);
+    await ensureHomeBase(req.airlineId);
 
-    const stmt = db.prepare(`
+    const result = await pool.query(`
       SELECT ap.iata_code, ap.name, ap.country, d.destination_type
       FROM airline_destinations d
       JOIN airports ap ON d.airport_code = ap.iata_code
-      WHERE d.airline_id = ?
+      WHERE d.airline_id = $1
       ORDER BY ap.country, ap.name
-    `);
-    stmt.bind([req.airlineId]);
+    `, [req.airlineId]);
 
-    const airports = [];
-    while (stmt.step()) {
-      const r = stmt.get();
-      airports.push({ iata_code: r[0], name: r[1], country: r[2], destination_type: r[3] });
-    }
-    stmt.free();
+    const airports = result.rows.map(r => ({
+      iata_code: r.iata_code, name: r.name, country: r.country, destination_type: r.destination_type
+    }));
     res.json({ airports });
   } catch (error) {
     console.error('Get opened destinations error:', error);
@@ -126,25 +114,21 @@ router.get('/opened', authMiddleware, (req, res) => {
 });
 
 // GET /api/destinations/available
-router.get('/available', authMiddleware, (req, res) => {
+router.get('/available', authMiddleware, async (req, res) => {
   if (!req.airlineId) return res.json({ airports: [] });
   try {
-    const db = getDatabase();
-    const stmt = db.prepare(`
+    const result = await pool.query(`
       SELECT ap.iata_code, ap.name, ap.country, ap.continent, ap.category
       FROM airports ap
       WHERE ap.iata_code NOT IN (
-        SELECT airport_code FROM airline_destinations WHERE airline_id = ?
+        SELECT airport_code FROM airline_destinations WHERE airline_id = $1
       )
       ORDER BY ap.continent, ap.country, ap.name
-    `);
-    stmt.bind([req.airlineId]);
-    const airports = [];
-    while (stmt.step()) {
-      const r = stmt.get();
-      airports.push({ iata_code: r[0], name: r[1], country: r[2], continent: r[3], category: r[4] });
-    }
-    stmt.free();
+    `, [req.airlineId]);
+    const airports = result.rows.map(r => ({
+      iata_code: r.iata_code, name: r.name, country: r.country,
+      continent: r.continent, category: r.category
+    }));
     res.json({ airports });
   } catch (error) {
     console.error('Get available destinations error:', error);
@@ -153,7 +137,7 @@ router.get('/available', authMiddleware, (req, res) => {
 });
 
 // POST /api/destinations/open — open a destination for $50,000
-router.post('/open', authMiddleware, (req, res) => {
+router.post('/open', authMiddleware, async (req, res) => {
   if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
   try {
     const { airport_code, destination_type = 'destination' } = req.body;
@@ -162,65 +146,53 @@ router.post('/open', authMiddleware, (req, res) => {
     const validTypes = ['home_base', 'hub', 'base', 'destination'];
     const type = validTypes.includes(destination_type) ? destination_type : 'destination';
 
-    const db = getDatabase();
-
     // Verify airport
-    const apStmt = db.prepare('SELECT iata_code FROM airports WHERE iata_code = ?');
-    apStmt.bind([code]);
-    if (!apStmt.step()) { apStmt.free(); return res.status(404).json({ error: 'Airport not found' }); }
-    apStmt.free();
+    const apResult = await pool.query('SELECT iata_code FROM airports WHERE iata_code = $1', [code]);
+    if (!apResult.rows[0]) return res.status(404).json({ error: 'Airport not found' });
 
     // Check not already opened
-    const chk = db.prepare('SELECT id FROM airline_destinations WHERE airline_id = ? AND airport_code = ?');
-    chk.bind([req.airlineId, code]);
-    if (chk.step()) { chk.free(); return res.status(400).json({ error: 'Destination already opened' }); }
-    chk.free();
+    const chkResult = await pool.query(
+      'SELECT id FROM airline_destinations WHERE airline_id = $1 AND airport_code = $2',
+      [req.airlineId, code]
+    );
+    if (chkResult.rows[0]) return res.status(400).json({ error: 'Destination already opened' });
 
     // Check balance
-    const balStmt = db.prepare('SELECT balance FROM airlines WHERE id = ?');
-    balStmt.bind([req.airlineId]);
-    balStmt.step();
-    const balance = balStmt.get()[0];
-    balStmt.free();
+    const balResult = await pool.query('SELECT balance FROM airlines WHERE id = $1', [req.airlineId]);
+    const balance = balResult.rows[0].balance;
 
     if (balance < OPEN_COST) {
       return res.status(400).json({ error: `Insufficient balance. Opening a destination costs $${OPEN_COST.toLocaleString()}.` });
     }
 
     // Deduct cost
-    const deduct = db.prepare('UPDATE airlines SET balance = balance - ? WHERE id = ?');
-    deduct.bind([OPEN_COST, req.airlineId]);
-    deduct.step(); deduct.free();
+    await pool.query('UPDATE airlines SET balance = balance - $1 WHERE id = $2', [OPEN_COST, req.airlineId]);
 
     // Record transaction
-    const tx = db.prepare("INSERT INTO transactions (airline_id, type, amount, description) VALUES (?, 'other', ?, ?)");
-    tx.bind([req.airlineId, -OPEN_COST, `Opened destination: ${code}`]);
-    tx.step(); tx.free();
+    await pool.query(
+      "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
+      [req.airlineId, -OPEN_COST, `Opened destination: ${code}`]
+    );
 
     // Insert destination
-    const ins = db.prepare('INSERT INTO airline_destinations (airline_id, airport_code, destination_type) VALUES (?, ?, ?)');
-    ins.bind([req.airlineId, code, type]);
-    ins.step(); ins.free();
+    await pool.query(
+      'INSERT INTO airline_destinations (airline_id, airport_code, destination_type) VALUES ($1, $2, $3)',
+      [req.airlineId, code, type]
+    );
 
     // Auto-hire ground staff
     try {
-      const apCatStmt = db.prepare('SELECT category FROM airports WHERE iata_code = ?');
-      apCatStmt.bind([code]);
-      if (apCatStmt.step()) {
-        const category = apCatStmt.get()[0];
-        apCatStmt.free();
-        addGroundStaff(db, req.airlineId, code, category || 4, false);
-      } else { apCatStmt.free(); }
+      const apCatResult = await pool.query('SELECT category FROM airports WHERE iata_code = $1', [code]);
+      if (apCatResult.rows[0]) {
+        const category = apCatResult.rows[0].category;
+        await addGroundStaff(req.airlineId, code, category || 4, false);
+      }
     } catch (e) { console.error('Ground staff auto-hire error:', e); }
 
     // Get new balance
-    const newBalStmt = db.prepare('SELECT balance FROM airlines WHERE id = ?');
-    newBalStmt.bind([req.airlineId]);
-    newBalStmt.step();
-    const newBalance = newBalStmt.get()[0];
-    newBalStmt.free();
+    const newBalResult = await pool.query('SELECT balance FROM airlines WHERE id = $1', [req.airlineId]);
+    const newBalance = newBalResult.rows[0].balance;
 
-    saveDatabase();
     res.status(201).json({ message: 'Destination opened successfully', new_balance: newBalance });
   } catch (error) {
     console.error('Open destination error:', error);
@@ -229,23 +201,23 @@ router.post('/open', authMiddleware, (req, res) => {
 });
 
 // POST /api/destinations/upgrade-hub — upgrade destination to Hub for $10,000,000
-router.post('/upgrade-hub', authMiddleware, (req, res) => {
+router.post('/upgrade-hub', authMiddleware, async (req, res) => {
   if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
   try {
     const { airport_code } = req.body;
     if (!airport_code) return res.status(400).json({ error: 'airport_code required' });
     const code = airport_code.toUpperCase();
-    const db = getDatabase();
 
     // Find current destination entry
-    const destStmt = db.prepare('SELECT id, destination_type FROM airline_destinations WHERE airline_id = ? AND airport_code = ?');
-    destStmt.bind([req.airlineId, code]);
-    if (!destStmt.step()) {
-      destStmt.free();
+    const destResult = await pool.query(
+      'SELECT id, destination_type FROM airline_destinations WHERE airline_id = $1 AND airport_code = $2',
+      [req.airlineId, code]
+    );
+    if (!destResult.rows[0]) {
       return res.status(404).json({ error: 'Destination not found. Open it first.' });
     }
-    const [destId, currentType] = destStmt.get();
-    destStmt.free();
+    const destId = destResult.rows[0].id;
+    const currentType = destResult.rows[0].destination_type;
 
     if (currentType === 'home_base') {
       return res.status(400).json({ error: 'Home Base already has Hub privileges.' });
@@ -255,50 +227,38 @@ router.post('/upgrade-hub', authMiddleware, (req, res) => {
     }
 
     // Check balance
-    const balStmt = db.prepare('SELECT balance FROM airlines WHERE id = ?');
-    balStmt.bind([req.airlineId]);
-    balStmt.step();
-    const balance = balStmt.get()[0];
-    balStmt.free();
+    const balResult = await pool.query('SELECT balance FROM airlines WHERE id = $1', [req.airlineId]);
+    const balance = balResult.rows[0].balance;
 
     if (balance < HUB_COST) {
       return res.status(400).json({ error: `Insufficient balance. Hub upgrade costs $${HUB_COST.toLocaleString()}.` });
     }
 
     // Deduct cost
-    const deduct = db.prepare('UPDATE airlines SET balance = balance - ? WHERE id = ?');
-    deduct.bind([HUB_COST, req.airlineId]);
-    deduct.step(); deduct.free();
+    await pool.query('UPDATE airlines SET balance = balance - $1 WHERE id = $2', [HUB_COST, req.airlineId]);
 
     // Record transaction
-    const tx = db.prepare("INSERT INTO transactions (airline_id, type, amount, description) VALUES (?, 'other', ?, ?)");
-    tx.bind([req.airlineId, -HUB_COST, `Upgraded to Hub: ${code}`]);
-    tx.step(); tx.free();
+    await pool.query(
+      "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
+      [req.airlineId, -HUB_COST, `Upgraded to Hub: ${code}`]
+    );
 
     // Upgrade
-    const upd = db.prepare('UPDATE airline_destinations SET destination_type = ? WHERE id = ?');
-    upd.bind(['hub', destId]);
-    upd.step(); upd.free();
+    await pool.query('UPDATE airline_destinations SET destination_type = $1 WHERE id = $2', ['hub', destId]);
 
     // Add hub bonus ground staff
     try {
-      const apCatStmt2 = db.prepare('SELECT category FROM airports WHERE iata_code = ?');
-      apCatStmt2.bind([code]);
-      if (apCatStmt2.step()) {
-        const category = apCatStmt2.get()[0];
-        apCatStmt2.free();
-        addGroundStaff(db, req.airlineId, code, category || 4, true);
-      } else { apCatStmt2.free(); }
+      const apCatResult = await pool.query('SELECT category FROM airports WHERE iata_code = $1', [code]);
+      if (apCatResult.rows[0]) {
+        const category = apCatResult.rows[0].category;
+        await addGroundStaff(req.airlineId, code, category || 4, true);
+      }
     } catch (e) { console.error('Hub ground staff error:', e); }
 
     // Get new balance
-    const newBalStmt = db.prepare('SELECT balance FROM airlines WHERE id = ?');
-    newBalStmt.bind([req.airlineId]);
-    newBalStmt.step();
-    const newBalance = newBalStmt.get()[0];
-    newBalStmt.free();
+    const newBalResult = await pool.query('SELECT balance FROM airlines WHERE id = $1', [req.airlineId]);
+    const newBalance = newBalResult.rows[0].balance;
 
-    saveDatabase();
     res.json({ message: `${code} upgraded to Hub`, new_balance: newBalance });
   } catch (error) {
     console.error('Upgrade hub error:', error);
@@ -307,36 +267,34 @@ router.post('/upgrade-hub', authMiddleware, (req, res) => {
 });
 
 // DELETE /api/destinations/:code — close/remove a destination
-router.delete('/:code', authMiddleware, (req, res) => {
+router.delete('/:code', authMiddleware, async (req, res) => {
   if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
   try {
     const code = req.params.code.toUpperCase();
-    const db = getDatabase();
 
     // Find destination
-    const destStmt = db.prepare('SELECT id, destination_type FROM airline_destinations WHERE airline_id = ? AND airport_code = ?');
-    destStmt.bind([req.airlineId, code]);
-    if (!destStmt.step()) {
-      destStmt.free();
+    const destResult = await pool.query(
+      'SELECT id, destination_type FROM airline_destinations WHERE airline_id = $1 AND airport_code = $2',
+      [req.airlineId, code]
+    );
+    if (!destResult.rows[0]) {
       return res.status(404).json({ error: 'Destination not found' });
     }
-    const [destId, destType] = destStmt.get();
-    destStmt.free();
+    const destId = destResult.rows[0].id;
+    const destType = destResult.rows[0].destination_type;
 
     if (destType === 'home_base') {
       return res.status(400).json({ error: 'Cannot close your Home Base.' });
     }
 
     // Block deletion if any routes use this airport
-    const routeStmt = db.prepare(`
+    const routeResult = await pool.query(`
       SELECT flight_number FROM routes
-      WHERE airline_id = ? AND (departure_airport = ? OR arrival_airport = ?)
+      WHERE airline_id = $1 AND (departure_airport = $2 OR arrival_airport = $2)
       ORDER BY flight_number
-    `);
-    routeStmt.bind([req.airlineId, code, code]);
-    const activeRoutes = [];
-    while (routeStmt.step()) activeRoutes.push(routeStmt.get()[0]);
-    routeStmt.free();
+    `, [req.airlineId, code]);
+
+    const activeRoutes = routeResult.rows.map(r => r.flight_number);
 
     if (activeRoutes.length > 0) {
       return res.status(400).json({
@@ -345,11 +303,8 @@ router.delete('/:code', authMiddleware, (req, res) => {
     }
 
     // Delete
-    const del = db.prepare('DELETE FROM airline_destinations WHERE id = ?');
-    del.bind([destId]);
-    del.step(); del.free();
+    await pool.query('DELETE FROM airline_destinations WHERE id = $1', [destId]);
 
-    saveDatabase();
     res.json({ message: `Destination ${code} closed` });
   } catch (error) {
     console.error('Delete destination error:', error);

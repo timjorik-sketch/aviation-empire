@@ -1,54 +1,49 @@
 import express from 'express';
-import { getDatabase, saveDatabase } from '../database/db.js';
+import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 
 const router = express.Router();
 
 const CLASS_ORDER = `CASE class_type WHEN 'economy' THEN 1 WHEN 'business' THEN 2 WHEN 'first' THEN 3 ELSE 4 END`;
 
-function fetchClasses(db, profileId) {
-  const stmt = db.prepare(
+async function fetchClasses(profileId) {
+  const result = await pool.query(
     `SELECT class_type, seat_type, seat_ratio, percentage, actual_capacity
-     FROM airline_cabin_classes WHERE profile_id = ? ORDER BY ${CLASS_ORDER}`
+     FROM airline_cabin_classes WHERE profile_id = $1 ORDER BY ${CLASS_ORDER}`,
+    [profileId]
   );
-  stmt.bind([profileId]);
-  const classes = [];
-  while (stmt.step()) {
-    const r = stmt.get();
-    classes.push({ class_type: r[0], seat_type: r[1], seat_ratio: r[2], percentage: r[3], actual_capacity: r[4] });
-  }
-  stmt.free();
-  return classes;
+  return result.rows.map(r => ({
+    class_type: r.class_type,
+    seat_type: r.seat_type,
+    seat_ratio: r.seat_ratio,
+    percentage: r.percentage,
+    actual_capacity: r.actual_capacity
+  }));
 }
 
 // ── GET /api/cabin-profiles ───────────────────────────────────────────────────
-router.get('/', authMiddleware, (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
   try {
     if (!req.airlineId) return res.json({ profiles: [] });
-    const db = getDatabase();
 
-    const stmt = db.prepare(`
+    const result = await pool.query(`
       SELECT p.id, p.name, p.aircraft_type_id, p.created_at,
              t.full_name AS aircraft_type_name, t.manufacturer, t.model, t.max_passengers
       FROM airline_cabin_profiles p
       JOIN aircraft_types t ON p.aircraft_type_id = t.id
-      WHERE p.airline_id = ?
+      WHERE p.airline_id = $1
       ORDER BY t.manufacturer, t.model, p.created_at
-    `);
-    stmt.bind([req.airlineId]);
-    const profiles = [];
-    while (stmt.step()) {
-      const r = stmt.get();
-      profiles.push({
-        id: r[0], name: r[1], aircraft_type_id: r[2], created_at: r[3],
-        aircraft_type_name: r[4], manufacturer: r[5], model: r[6], max_passengers: r[7],
-        classes: []
-      });
-    }
-    stmt.free();
+    `, [req.airlineId]);
+
+    const profiles = result.rows.map(r => ({
+      id: r.id, name: r.name, aircraft_type_id: r.aircraft_type_id, created_at: r.created_at,
+      aircraft_type_name: r.aircraft_type_name, manufacturer: r.manufacturer,
+      model: r.model, max_passengers: r.max_passengers,
+      classes: []
+    }));
 
     for (const p of profiles) {
-      p.classes = fetchClasses(db, p.id);
+      p.classes = await fetchClasses(p.id);
       p.total_capacity = p.classes.reduce((s, c) => s + c.actual_capacity, 0);
     }
 
@@ -60,29 +55,25 @@ router.get('/', authMiddleware, (req, res) => {
 });
 
 // ── GET /api/cabin-profiles/for-type/:type_id ─────────────────────────────────
-router.get('/for-type/:type_id', authMiddleware, (req, res) => {
+router.get('/for-type/:type_id', authMiddleware, async (req, res) => {
   try {
     const typeId = parseInt(req.params.type_id);
     if (!req.airlineId) return res.json({ profiles: [] });
-    const db = getDatabase();
 
-    const stmt = db.prepare(`
+    const result = await pool.query(`
       SELECT p.id, p.name, t.max_passengers
       FROM airline_cabin_profiles p
       JOIN aircraft_types t ON p.aircraft_type_id = t.id
-      WHERE p.airline_id = ? AND p.aircraft_type_id = ?
+      WHERE p.airline_id = $1 AND p.aircraft_type_id = $2
       ORDER BY p.created_at
-    `);
-    stmt.bind([req.airlineId, typeId]);
-    const profiles = [];
-    while (stmt.step()) {
-      const r = stmt.get();
-      profiles.push({ id: r[0], name: r[1], max_passengers: r[2], classes: [] });
-    }
-    stmt.free();
+    `, [req.airlineId, typeId]);
+
+    const profiles = result.rows.map(r => ({
+      id: r.id, name: r.name, max_passengers: r.max_passengers, classes: []
+    }));
 
     for (const p of profiles) {
-      p.classes = fetchClasses(db, p.id);
+      p.classes = await fetchClasses(p.id);
       p.total_capacity = p.classes.reduce((s, c) => s + c.actual_capacity, 0);
     }
 
@@ -94,31 +85,29 @@ router.get('/for-type/:type_id', authMiddleware, (req, res) => {
 });
 
 // ── GET /api/cabin-profiles/:id ───────────────────────────────────────────────
-router.get('/:id', authMiddleware, (req, res) => {
+router.get('/:id', authMiddleware, async (req, res) => {
   try {
     const profileId = parseInt(req.params.id);
-    const db = getDatabase();
 
-    const stmt = db.prepare(`
+    const result = await pool.query(`
       SELECT p.id, p.name, p.aircraft_type_id, p.created_at,
              t.full_name, t.max_passengers
       FROM airline_cabin_profiles p
       JOIN aircraft_types t ON p.aircraft_type_id = t.id
-      WHERE p.id = ? AND p.airline_id = ?
-    `);
-    stmt.bind([profileId, req.airlineId]);
-    if (!stmt.step()) {
-      stmt.free();
+      WHERE p.id = $1 AND p.airline_id = $2
+    `, [profileId, req.airlineId]);
+
+    if (!result.rows[0]) {
       return res.status(404).json({ error: 'Profile not found' });
     }
-    const r = stmt.get();
-    stmt.free();
+    const r = result.rows[0];
 
     const profile = {
-      id: r[0], name: r[1], aircraft_type_id: r[2], created_at: r[3],
-      aircraft_type_name: r[4], max_passengers: r[5], classes: []
+      id: r.id, name: r.name, aircraft_type_id: r.aircraft_type_id,
+      created_at: r.created_at, aircraft_type_name: r.full_name,
+      max_passengers: r.max_passengers, classes: []
     };
-    profile.classes = fetchClasses(db, profileId);
+    profile.classes = await fetchClasses(profileId);
     profile.total_capacity = profile.classes.reduce((s, c) => s + c.actual_capacity, 0);
 
     res.json({ profile });
@@ -129,7 +118,7 @@ router.get('/:id', authMiddleware, (req, res) => {
 });
 
 // ── POST /api/cabin-profiles ──────────────────────────────────────────────────
-router.post('/', authMiddleware, (req, res) => {
+router.post('/', authMiddleware, async (req, res) => {
   try {
     if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
     const { name, aircraft_type_id, classes } = req.body;
@@ -140,45 +129,30 @@ router.post('/', authMiddleware, (req, res) => {
       return res.status(400).json({ error: 'At least one cabin class is required' });
     }
 
-    const db = getDatabase();
-
-    const typeStmt = db.prepare('SELECT max_passengers FROM aircraft_types WHERE id = ?');
-    typeStmt.bind([aircraft_type_id]);
-    if (!typeStmt.step()) {
-      typeStmt.free();
+    const typeResult = await pool.query('SELECT max_passengers FROM aircraft_types WHERE id = $1', [aircraft_type_id]);
+    if (!typeResult.rows[0]) {
       return res.status(400).json({ error: 'Aircraft type not found' });
     }
-    const maxPax = typeStmt.get()[0];
-    typeStmt.free();
+    const maxPax = typeResult.rows[0].max_passengers;
 
-    const insertStmt = db.prepare(
-      'INSERT INTO airline_cabin_profiles (airline_id, aircraft_type_id, name) VALUES (?, ?, ?)'
+    const insertResult = await pool.query(
+      'INSERT INTO airline_cabin_profiles (airline_id, aircraft_type_id, name) VALUES ($1, $2, $3) RETURNING id',
+      [req.airlineId, aircraft_type_id, name.trim()]
     );
-    insertStmt.bind([req.airlineId, aircraft_type_id, name.trim()]);
-    insertStmt.step();
-    insertStmt.free();
-
-    const idStmt = db.prepare('SELECT last_insert_rowid()');
-    idStmt.step();
-    const profileId = idStmt.get()[0];
-    idStmt.free();
+    const profileId = insertResult.rows[0].id;
 
     const valid = ['economy', 'business', 'first'];
-    const clsStmt = db.prepare(
-      'INSERT INTO airline_cabin_classes (profile_id, class_type, seat_type, seat_ratio, percentage, actual_capacity) VALUES (?, ?, ?, ?, ?, ?)'
-    );
     for (const cls of classes) {
       if (!valid.includes(cls.class_type)) continue;
       const pct = Math.max(0, Math.min(100, parseFloat(cls.percentage) || 0));
       const ratio = parseFloat(cls.seat_ratio) || 1.0;
       const actual = Math.floor((pct / 100) * maxPax / ratio);
-      clsStmt.bind([profileId, cls.class_type, cls.seat_type || cls.class_type, ratio, pct, actual]);
-      clsStmt.step();
-      clsStmt.reset();
+      await pool.query(
+        'INSERT INTO airline_cabin_classes (profile_id, class_type, seat_type, seat_ratio, percentage, actual_capacity) VALUES ($1, $2, $3, $4, $5, $6)',
+        [profileId, cls.class_type, cls.seat_type || cls.class_type, ratio, pct, actual]
+      );
     }
-    clsStmt.free();
 
-    saveDatabase();
     res.status(201).json({ message: 'Profile created', id: profileId });
   } catch (error) {
     console.error('Create cabin profile error:', error);
@@ -187,56 +161,41 @@ router.post('/', authMiddleware, (req, res) => {
 });
 
 // ── PUT /api/cabin-profiles/:id ───────────────────────────────────────────────
-router.put('/:id', authMiddleware, (req, res) => {
+router.put('/:id', authMiddleware, async (req, res) => {
   try {
     const profileId = parseInt(req.params.id);
     const { name, classes } = req.body;
 
     if (!name || !name.trim()) return res.status(400).json({ error: 'Profile name is required' });
-    const db = getDatabase();
 
-    const checkStmt = db.prepare(`
+    const checkResult = await pool.query(`
       SELECT p.id, t.max_passengers
       FROM airline_cabin_profiles p
       JOIN aircraft_types t ON p.aircraft_type_id = t.id
-      WHERE p.id = ? AND p.airline_id = ?
-    `);
-    checkStmt.bind([profileId, req.airlineId]);
-    if (!checkStmt.step()) {
-      checkStmt.free();
+      WHERE p.id = $1 AND p.airline_id = $2
+    `, [profileId, req.airlineId]);
+    if (!checkResult.rows[0]) {
       return res.status(404).json({ error: 'Profile not found' });
     }
-    const maxPax = checkStmt.get()[1];
-    checkStmt.free();
+    const maxPax = checkResult.rows[0].max_passengers;
 
-    const updateStmt = db.prepare('UPDATE airline_cabin_profiles SET name = ? WHERE id = ?');
-    updateStmt.bind([name.trim(), profileId]);
-    updateStmt.step();
-    updateStmt.free();
-
-    const delStmt = db.prepare('DELETE FROM airline_cabin_classes WHERE profile_id = ?');
-    delStmt.bind([profileId]);
-    delStmt.step();
-    delStmt.free();
+    await pool.query('UPDATE airline_cabin_profiles SET name = $1 WHERE id = $2', [name.trim(), profileId]);
+    await pool.query('DELETE FROM airline_cabin_classes WHERE profile_id = $1', [profileId]);
 
     if (Array.isArray(classes) && classes.length > 0) {
       const valid = ['economy', 'business', 'first'];
-      const clsStmt = db.prepare(
-        'INSERT INTO airline_cabin_classes (profile_id, class_type, seat_type, seat_ratio, percentage, actual_capacity) VALUES (?, ?, ?, ?, ?, ?)'
-      );
       for (const cls of classes) {
         if (!valid.includes(cls.class_type)) continue;
         const pct = Math.max(0, Math.min(100, parseFloat(cls.percentage) || 0));
         const ratio = parseFloat(cls.seat_ratio) || 1.0;
         const actual = Math.floor((pct / 100) * maxPax / ratio);
-        clsStmt.bind([profileId, cls.class_type, cls.seat_type || cls.class_type, ratio, pct, actual]);
-        clsStmt.step();
-        clsStmt.reset();
+        await pool.query(
+          'INSERT INTO airline_cabin_classes (profile_id, class_type, seat_type, seat_ratio, percentage, actual_capacity) VALUES ($1, $2, $3, $4, $5, $6)',
+          [profileId, cls.class_type, cls.seat_type || cls.class_type, ratio, pct, actual]
+        );
       }
-      clsStmt.free();
     }
 
-    saveDatabase();
     res.json({ message: 'Profile updated' });
   } catch (error) {
     console.error('Update cabin profile error:', error);
@@ -245,35 +204,30 @@ router.put('/:id', authMiddleware, (req, res) => {
 });
 
 // ── DELETE /api/cabin-profiles/:id ───────────────────────────────────────────
-router.delete('/:id', authMiddleware, (req, res) => {
+router.delete('/:id', authMiddleware, async (req, res) => {
   try {
     const profileId = parseInt(req.params.id);
-    const db = getDatabase();
 
-    const checkStmt = db.prepare('SELECT id FROM airline_cabin_profiles WHERE id = ? AND airline_id = ?');
-    checkStmt.bind([profileId, req.airlineId]);
-    if (!checkStmt.step()) {
-      checkStmt.free();
+    const checkResult = await pool.query(
+      'SELECT id FROM airline_cabin_profiles WHERE id = $1 AND airline_id = $2',
+      [profileId, req.airlineId]
+    );
+    if (!checkResult.rows[0]) {
       return res.status(404).json({ error: 'Profile not found' });
     }
-    checkStmt.free();
 
     // Block deletion if any aircraft still use this profile
-    const inUseStmt = db.prepare('SELECT COUNT(*) FROM aircraft WHERE airline_cabin_profile_id = ?');
-    inUseStmt.bind([profileId]);
-    inUseStmt.step();
-    const inUseCount = inUseStmt.get()[0];
-    inUseStmt.free();
+    const inUseResult = await pool.query(
+      'SELECT COUNT(*) FROM aircraft WHERE airline_cabin_profile_id = $1',
+      [profileId]
+    );
+    const inUseCount = parseInt(inUseResult.rows[0].count);
     if (inUseCount > 0) {
       return res.status(409).json({ error: `Cannot delete: ${inUseCount} aircraft still use this cabin profile. Reassign them first.` });
     }
 
-    const delStmt = db.prepare('DELETE FROM airline_cabin_profiles WHERE id = ?');
-    delStmt.bind([profileId]);
-    delStmt.step();
-    delStmt.free();
+    await pool.query('DELETE FROM airline_cabin_profiles WHERE id = $1', [profileId]);
 
-    saveDatabase();
     res.json({ message: 'Profile deleted' });
   } catch (error) {
     console.error('Delete cabin profile error:', error);

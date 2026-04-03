@@ -1,5 +1,5 @@
 import express from 'express';
-import { getDatabase, saveDatabase } from '../database/db.js';
+import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 
 const router = express.Router();
@@ -14,10 +14,9 @@ function getMaintenanceDuration(seats) {
 const MAINT_BASE_COST = { L: 2000, M: 8000, H: 15000 };
 
 // POST / - Schedule maintenance (weekly template: day_of_week + start_time HH:MM)
-router.post('/', authMiddleware, (req, res) => {
+router.post('/', authMiddleware, async (req, res) => {
   try {
     const { aircraft_id, day_of_week, start_time, type } = req.body;
-    const db = getDatabase();
 
     if (!aircraft_id || day_of_week === undefined || !start_time) {
       return res.status(400).json({ error: 'aircraft_id, day_of_week (0=Mon..6=Sun) and start_time (HH:MM) are required' });
@@ -33,19 +32,18 @@ router.post('/', authMiddleware, (req, res) => {
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
-    const acStmt = db.prepare(`
+    const acResult = await pool.query(`
       SELECT a.id, t.max_passengers, a.is_active, t.wake_turbulence_category, a.condition FROM aircraft a
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
-      WHERE a.id = ? AND a.airline_id = ?
-    `);
-    acStmt.bind([aircraft_id, airlineId]);
-    if (!acStmt.step()) { acStmt.free(); return res.status(404).json({ error: 'Aircraft not found' }); }
-    const acMaintRow = acStmt.get();
-    const maxSeats = acMaintRow[1];
-    const isOpForMaint = acMaintRow[2];
-    const wakeCategory = acMaintRow[3] || 'M';
-    const condition = acMaintRow[4] ?? 100;
-    acStmt.free();
+      WHERE a.id = $1 AND a.airline_id = $2
+    `, [aircraft_id, airlineId]);
+
+    if (!acResult.rows[0]) return res.status(404).json({ error: 'Aircraft not found' });
+    const acRow = acResult.rows[0];
+    const maxSeats = acRow.max_passengers;
+    const isOpForMaint = acRow.is_active;
+    const wakeCategory = acRow.wake_turbulence_category || 'M';
+    const condition = acRow.condition ?? 100;
 
     const baseCost = MAINT_BASE_COST[wakeCategory] ?? MAINT_BASE_COST.M;
     const estimatedCost = Math.round(baseCost * (2 - condition / 100));
@@ -58,60 +56,48 @@ router.post('/', authMiddleware, (req, res) => {
     const endMinutes = startMinutes + durationMin;
 
     // Check overlap with weekly_schedule on same day
-    const schedStmt = db.prepare(`
+    const schedResult = await pool.query(`
       SELECT departure_time, arrival_time FROM weekly_schedule
-      WHERE aircraft_id = ? AND day_of_week = ?
-    `);
-    schedStmt.bind([aircraft_id, dow]);
-    while (schedStmt.step()) {
-      const row = schedStmt.get();
-      const [fDepH, fDepM] = row[0].split(':').map(Number);
-      const [fArrH, fArrM] = row[1].split(':').map(Number);
+      WHERE aircraft_id = $1 AND day_of_week = $2
+    `, [aircraft_id, dow]);
+
+    for (const row of schedResult.rows) {
+      const [fDepH, fDepM] = row.departure_time.split(':').map(Number);
+      const [fArrH, fArrM] = row.arrival_time.split(':').map(Number);
       const fDepMin = fDepH * 60 + fDepM;
       const fArrMin = fArrH * 60 + fArrM;
       if (startMinutes < fArrMin && fDepMin < endMinutes) {
-        schedStmt.free();
         return res.status(400).json({ error: 'Maintenance overlaps with a scheduled flight' });
       }
     }
-    schedStmt.free();
 
     // Check overlap with existing maintenance on same day
-    const maintStmt = db.prepare(`
+    const maintResult = await pool.query(`
       SELECT start_minutes, duration_minutes FROM maintenance_schedule
-      WHERE aircraft_id = ? AND airline_id = ? AND day_of_week = ?
-    `);
-    maintStmt.bind([aircraft_id, airlineId, dow]);
-    while (maintStmt.step()) {
-      const row = maintStmt.get();
-      const mStart = row[0], mEnd = row[0] + row[1];
+      WHERE aircraft_id = $1 AND airline_id = $2 AND day_of_week = $3
+    `, [aircraft_id, airlineId, dow]);
+
+    for (const row of maintResult.rows) {
+      const mStart = row.start_minutes;
+      const mEnd = row.start_minutes + row.duration_minutes;
       if (startMinutes < mEnd && mStart < endMinutes) {
-        maintStmt.free();
         return res.status(400).json({ error: 'Maintenance overlaps with existing maintenance' });
       }
     }
-    maintStmt.free();
 
     // Build HH:MM strings for storage
     const endH = Math.floor(endMinutes % 1440 / 60);
     const endMM = endMinutes % 60;
     const endTimeStr = `${String(endH).padStart(2, '0')}:${String(endMM).padStart(2, '0')}`;
 
-    const insertStmt = db.prepare(`
+    const insertResult = await pool.query(`
       INSERT INTO maintenance_schedule
         (aircraft_id, airline_id, start_time, end_time, day_of_week, start_minutes, duration_minutes, type, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scheduled')
-    `);
-    insertStmt.bind([aircraft_id, airlineId, start_time, endTimeStr, dow, startMinutes, durationMin, type || 'routine']);
-    insertStmt.step();
-    insertStmt.free();
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'scheduled')
+      RETURNING id
+    `, [aircraft_id, airlineId, start_time, endTimeStr, dow, startMinutes, durationMin, type || 'routine']);
 
-    const idStmt = db.prepare('SELECT last_insert_rowid()');
-    idStmt.step();
-    const maintId = idStmt.get()[0];
-    idStmt.free();
-
-    saveDatabase();
+    const maintId = insertResult.rows[0].id;
 
     res.status(201).json({
       message: 'Maintenance scheduled successfully',
@@ -131,30 +117,22 @@ router.post('/', authMiddleware, (req, res) => {
 });
 
 // DELETE /:id - Cancel maintenance
-router.delete('/:id', authMiddleware, (req, res) => {
+router.delete('/:id', authMiddleware, async (req, res) => {
   try {
     const maintId = parseInt(req.params.id);
-    const db = getDatabase();
-
-    // Get airline ID
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
     // Verify ownership
-    const maintStmt = db.prepare('SELECT id FROM maintenance_schedule WHERE id = ? AND airline_id = ?');
-    maintStmt.bind([maintId, airlineId]);
-    if (!maintStmt.step()) {
-      maintStmt.free();
+    const maintResult = await pool.query(
+      'SELECT id FROM maintenance_schedule WHERE id = $1 AND airline_id = $2',
+      [maintId, airlineId]
+    );
+    if (!maintResult.rows[0]) {
       return res.status(404).json({ error: 'Maintenance entry not found' });
     }
-    maintStmt.free();
 
-    const deleteStmt = db.prepare('DELETE FROM maintenance_schedule WHERE id = ?');
-    deleteStmt.bind([maintId]);
-    deleteStmt.step();
-    deleteStmt.free();
-
-    saveDatabase();
+    await pool.query('DELETE FROM maintenance_schedule WHERE id = $1', [maintId]);
 
     res.json({ message: 'Maintenance cancelled successfully' });
   } catch (error) {

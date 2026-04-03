@@ -212,10 +212,10 @@ router.post('/',
       // Set as active airline
       await pool.query('UPDATE users SET active_airline_id = $1 WHERE id = $2', [newId, req.userId]);
 
-      // Seed ground staff for the home base based on airport category
+      // Seed ground staff for the home base based on airport category (0 weekly flights at creation)
       const apCatResult = await pool.query('SELECT category FROM airports WHERE iata_code = $1', [home_airport_code]);
       const homeCategory = apCatResult.rows[0]?.category || 4;
-      await addGroundStaff(newId, home_airport_code, homeCategory, false);
+      await addGroundStaff(newId, home_airport_code, homeCategory, 'home_base', 0, 0);
 
       const airline = await fetchAirlineById(newId);
 

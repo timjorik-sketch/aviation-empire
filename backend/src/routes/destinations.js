@@ -1,7 +1,7 @@
 import express from 'express';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
-import { addGroundStaff } from './personnel.js';
+import { addGroundStaff, calcGroundStaff } from './personnel.js';
 
 const router = express.Router();
 
@@ -46,13 +46,9 @@ router.get('/', authMiddleware, async (req, res) => {
               WHERE ac.airline_id = d.airline_id
               AND (ws.departure_airport = d.airport_code OR ws.arrival_airport = d.airport_code)
              ) AS weekly_flights,
-             COALESCE((SELECT p.count FROM personnel p
-              WHERE p.airline_id = d.airline_id AND p.staff_type = 'ground' AND p.airport_code = d.airport_code
-             ), 0) AS ground_staff,
-             CASE WHEN EXISTS (
-               SELECT 1 FROM airport_expansions ae
-               WHERE ae.airline_id = d.airline_id AND ae.airport_code = d.airport_code AND ae.expansion_level > 0
-             ) THEN 1 ELSE 0 END AS has_expansion
+             COALESCE((SELECT ae.expansion_level FROM airport_expansions ae
+              WHERE ae.airline_id = d.airline_id AND ae.airport_code = d.airport_code
+             ), 0) AS expansion_level
       FROM airline_destinations d
       JOIN airports ap ON d.airport_code = ap.iata_code
       WHERE d.airline_id = $1
@@ -68,8 +64,9 @@ router.get('/', authMiddleware, async (req, res) => {
     const destinations = result.rows.map(r => {
       const wf = parseInt(r.weekly_flights) || 0;
       const dtype = r.destination_type;
-      const hasExpansion = r.has_expansion === 1 || r.has_expansion === true;
-      const groundStaff = parseInt(r.ground_staff) || 0;
+      const expansionLevel = parseInt(r.expansion_level) || 0;
+      const hasExpansion = expansionLevel > 0;
+      const groundStaff = calcGroundStaff(r.category, dtype, wf, expansionLevel);
       const displayType = dtype === 'home_base' ? 'home_base'
         : hasExpansion ? 'hub_restricted'
         : dtype;
@@ -79,9 +76,13 @@ router.get('/', authMiddleware, async (req, res) => {
         effective_type: effectiveType(displayType, wf),
         opened_at: r.opened_at, airport_name: r.name, country: r.country,
         continent: r.continent, category: r.category, weekly_flights: wf,
-        ground_staff: groundStaff, has_expansion: hasExpansion
+        ground_staff: groundStaff, has_expansion: hasExpansion, expansion_level: expansionLevel
       };
     });
+    // Sync personnel table so payroll reflects the current calculated counts
+    for (const d of destinations) {
+      addGroundStaff(req.airlineId, d.airport_code, d.category, d.destination_type, d.weekly_flights, d.expansion_level).catch(() => {});
+    }
     res.json({ destinations });
   } catch (error) {
     console.error('Get destinations error:', error);
@@ -185,7 +186,7 @@ router.post('/open', authMiddleware, async (req, res) => {
       const apCatResult = await pool.query('SELECT category FROM airports WHERE iata_code = $1', [code]);
       if (apCatResult.rows[0]) {
         const category = apCatResult.rows[0].category;
-        await addGroundStaff(req.airlineId, code, category || 4, false);
+        await addGroundStaff(req.airlineId, code, category || 4, type, 0, 0);
       }
     } catch (e) { console.error('Ground staff auto-hire error:', e); }
 
@@ -251,7 +252,7 @@ router.post('/upgrade-hub', authMiddleware, async (req, res) => {
       const apCatResult = await pool.query('SELECT category FROM airports WHERE iata_code = $1', [code]);
       if (apCatResult.rows[0]) {
         const category = apCatResult.rows[0].category;
-        await addGroundStaff(req.airlineId, code, category || 4, true);
+        await addGroundStaff(req.airlineId, code, category || 4, 'hub', 0, 0);
       }
     } catch (e) { console.error('Hub ground staff error:', e); }
 

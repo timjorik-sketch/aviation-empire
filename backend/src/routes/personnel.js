@@ -8,9 +8,20 @@ const COCKPIT_COUNT = 4;
 const COCKPIT_WAGE  = 3500;
 const CABIN_WAGE    = 1200;
 const GROUND_WAGE   = 950;
-const HUB_BONUS = 20;
 
 const GROUND_STAFF_BY_CAT = { 1: 2, 2: 4, 3: 7, 4: 10, 5: 14, 6: 18, 7: 22, 8: 25 };
+
+// Calculate ground staff count based on destination type and context
+export function calcGroundStaff(category, destType, weeklyFlights = 0, expansionLevel = 0) {
+  const base = GROUND_STAFF_BY_CAT[category] || 10;
+  if (destType === 'home_base') {
+    return base + 10 + Math.floor(weeklyFlights / 2500) * 15;
+  }
+  if (expansionLevel > 0) {
+    return base + expansionLevel * 2;
+  }
+  return base;
+}
 
 const CABIN_CREW_RATIOS = {
   economy: 30,
@@ -362,10 +373,9 @@ export function startPayrollProcessor() {
   console.log('[Payroll] Payroll processor started (weekly, check interval: 1h)');
 }
 
-// POST /api/personnel/ground — add/update ground staff for an airport (internal helper, called by destinations)
-export async function addGroundStaff(airlineId, airportCode, category, isMegaHub = false) {
-  const baseCount = GROUND_STAFF_BY_CAT[category] || 10;
-  const count = isMegaHub ? baseCount + HUB_BONUS : baseCount;
+// Upsert ground staff for an airport with a specific count
+export async function addGroundStaff(airlineId, airportCode, category, destType = 'destination', weeklyFlights = 0, expansionLevel = 0) {
+  const count = calcGroundStaff(category, destType, weeklyFlights, expansionLevel);
 
   const existing = await pool.query(
     "SELECT id, count FROM personnel WHERE airline_id = $1 AND staff_type = 'ground' AND airport_code = $2",
@@ -373,15 +383,8 @@ export async function addGroundStaff(airlineId, airportCode, category, isMegaHub
   );
 
   if (existing.rows[0]) {
-    const row = existing.rows[0];
-    if (isMegaHub && row.count < count) {
-      const extra = count - row.count;
-      // Use orphaned ground staff first before adding net-new headcount
-      await consumeOrphanedStaff(airlineId, 'ground', extra);
-      await pool.query('UPDATE personnel SET count = $1 WHERE id = $2', [count, row.id]);
-    }
+    await pool.query('UPDATE personnel SET count = $1 WHERE id = $2', [count, existing.rows[0].id]);
   } else {
-    // Use orphaned ground staff first
     await consumeOrphanedStaff(airlineId, 'ground', count);
     await pool.query(
       'INSERT INTO personnel (airline_id, staff_type, airport_code, count, weekly_wage_per_person) VALUES ($1, $2, $3, $4, $5)',

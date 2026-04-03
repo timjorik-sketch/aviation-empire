@@ -69,7 +69,7 @@ router.get('/', authMiddleware, async (req, res) => {
       const wf = parseInt(r.weekly_flights) || 0;
       const dtype = r.destination_type;
       const hasExpansion = r.has_expansion === 1 || r.has_expansion === true;
-      const groundStaff = dtype === 'home_base' ? 30 : parseInt(r.ground_staff) || 0;
+      const groundStaff = parseInt(r.ground_staff) || 0;
       const displayType = dtype === 'home_base' ? 'home_base'
         : hasExpansion ? 'hub_restricted'
         : dtype;

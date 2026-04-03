@@ -1514,13 +1514,15 @@ router.get('/dev/route-calc', authMiddleware, async (req, res) => {
 let flightProcessorInterval = null;
 
 // Schedule fn to run at the next top-of-hour (:00:00), then every 60 min
-function scheduleAtTopOfHour(fn, label) {
+function scheduleAtMinute13(fn, label) {
   const now = new Date();
-  const msUntil = (60 - now.getMinutes()) * 60000
+  let minsUntil = (13 - now.getMinutes() + 60) % 60;
+  if (minsUntil === 0) minsUntil = 60; // already past :13 this hour, wait for next
+  const msUntil = minsUntil * 60000
                 - now.getSeconds() * 1000
                 - now.getMilliseconds();
   const minUntil = Math.round(msUntil / 60000);
-  console.log(`[${label}] Next run in ${minUntil} min (top of hour)`);
+  console.log(`[${label}] Next run in ${minUntil} min (at :13)`);
   setTimeout(() => {
     fn();
     setInterval(fn, 60 * 60 * 1000);
@@ -1531,12 +1533,12 @@ function startFlightProcessor() {
   if (flightProcessorInterval) return;
 
   console.log('Starting flight processor...');
-  // Generate flights, bookings, fuel price — all synced to top of hour (:00)
-  scheduleAtTopOfHour(generateFlights, 'FlightGen');
-  scheduleAtTopOfHour(processBookings, 'Bookings');
-  // Fuel price: backfill history on start, then sync to top of hour
+  // Generate flights, bookings, fuel price — all synced to :13 each hour
+  scheduleAtMinute13(generateFlights, 'FlightGen');
+  scheduleAtMinute13(processBookings, 'Bookings');
+  // Fuel price: backfill history on start, then sync to :13
   backfillFuelPrices();
-  scheduleAtTopOfHour(generateFuelPrice, 'FuelPrice');
+  scheduleAtMinute13(generateFuelPrice, 'FuelPrice');
   // Process flight statuses every 10 seconds (status changes need to be fast)
   flightProcessorInterval = setInterval(processFlights, 10000);
   setTimeout(processFlights, 1000);

@@ -368,9 +368,16 @@ async function processPayroll() {
 export function startPayrollProcessor() {
   // Run immediately on start (triggers for airlines with last_payroll_at = NULL)
   processPayroll();
-  // Re-check every hour; only deducts when >= 7 days have passed
-  setInterval(processPayroll, 60 * 60 * 1000);
-  console.log('[Payroll] Payroll processor started (weekly, check interval: 1h)');
+  // Schedule re-checks at :13 each hour; only deducts when >= 7 days have passed
+  const now = new Date();
+  let minsUntil = (13 - now.getMinutes() + 60) % 60;
+  if (minsUntil === 0) minsUntil = 60;
+  const msUntil = minsUntil * 60000 - now.getSeconds() * 1000 - now.getMilliseconds();
+  setTimeout(() => {
+    processPayroll();
+    setInterval(processPayroll, 60 * 60 * 1000);
+  }, msUntil);
+  console.log(`[Payroll] Payroll processor started — next check in ${Math.round(msUntil / 60000)} min (at :13)`);
 }
 
 // Upsert ground staff for an airport with a specific count

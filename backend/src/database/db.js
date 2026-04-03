@@ -336,7 +336,9 @@ async function initDatabase() {
     `ALTER TABLE weekly_schedule ADD COLUMN IF NOT EXISTS first_price REAL`,
     `ALTER TABLE weekly_schedule ADD COLUMN IF NOT EXISTS route_id INTEGER REFERENCES routes(id)`,
     `ALTER TABLE weekly_schedule ADD COLUMN IF NOT EXISTS service_profile_id INTEGER REFERENCES airline_service_profiles(id)`,
-    // maintenance_schedule table
+    // maintenance_schedule table — drop NOT NULL on time columns (stored as HH:MM strings, incompatible with TIMESTAMPTZ)
+    `ALTER TABLE maintenance_schedule ALTER COLUMN start_time DROP NOT NULL`,
+    `ALTER TABLE maintenance_schedule ALTER COLUMN end_time DROP NOT NULL`,
     `ALTER TABLE maintenance_schedule ADD COLUMN IF NOT EXISTS day_of_week INTEGER`,
     `ALTER TABLE maintenance_schedule ADD COLUMN IF NOT EXISTS start_minutes INTEGER`,
     `ALTER TABLE maintenance_schedule ADD COLUMN IF NOT EXISTS duration_minutes INTEGER`,

@@ -797,7 +797,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
           body: JSON.stringify({ aircraft_id: aircraftId, day_of_week: d, start_time: startTime, type: 'routine' })
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
+        if (!res.ok) throw new Error(data.detail || data.error);
       }
       setSuccess('Maintenance scheduled'); fetchSchedule();
     } catch (err) { setError(err.message); }

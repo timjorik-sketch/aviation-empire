@@ -245,8 +245,8 @@ router.post('/hire/:aircraft_id', authMiddleware, async (req, res) => {
       [req.airlineId, 'cabin', aircraftId, cabinCount, CABIN_WAGE, typeRating]
     );
 
-    // Use orphaned cockpit crew of same type rating first, then assign new record
-    await consumeOrphanedStaff(req.airlineId, 'cockpit', COCKPIT_COUNT, typeRating);
+    // Use any undeployed cockpit crew (any type rating) first, then assign new record
+    await consumeOrphanedStaff(req.airlineId, 'cockpit', COCKPIT_COUNT);
     await pool.query(
       'INSERT INTO personnel (airline_id, staff_type, aircraft_id, count, weekly_wage_per_person, type_rating) VALUES ($1, $2, $3, $4, $5, $6)',
       [req.airlineId, 'cockpit', aircraftId, COCKPIT_COUNT, COCKPIT_WAGE, typeRating]

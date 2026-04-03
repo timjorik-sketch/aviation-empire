@@ -77,31 +77,30 @@ app.use((err, req, res, next) => {
   });
 });
 
-initDatabase().then(() => {
-  app.listen(PORT, () => {
-    console.log(`🚀 Aviation Empire Backend running on port ${PORT}`);
-    console.log(`📊 Environment: ${process.env.NODE_ENV}`);
-    console.log(`🔗 API: http://localhost:${PORT}`);
+// Bind to PORT immediately so Railway health checks pass
+app.listen(PORT, () => {
+  console.log(`🚀 Aviation Empire Backend running on port ${PORT}`);
+  console.log(`📊 Environment: ${process.env.NODE_ENV}`);
+  console.log(`🔗 API: http://localhost:${PORT}`);
 
-    // Start flight processor for auto-completing flights
+  // Init DB in background — don't block startup
+  initDatabase().then(() => {
+    console.log('✅ Database initialized');
+
     startFlightProcessor();
     console.log('✈️ Flight processor started');
 
-    // Start used aircraft market refresh scheduler
     startMarketRefreshScheduler();
     console.log('🛒 Used aircraft market scheduler started');
 
-    // Start weekly payroll processor
     startPayrollProcessor();
     console.log('💰 Payroll processor started');
 
-    // Start market analyses processor
     startMarketAnalysesProcessor();
     console.log('📊 Market analyses processor started');
+  }).catch(err => {
+    console.error('DB init failed (server still running):', err);
   });
-}).catch(err => {
-  console.error('Failed to initialize database:', err);
-  process.exit(1);
 });
 
 process.on('SIGTERM', () => process.exit(0));

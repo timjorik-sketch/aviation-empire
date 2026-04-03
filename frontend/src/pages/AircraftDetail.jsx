@@ -1689,11 +1689,11 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                   <label>Turnaround Gap</label>
                   <select value={turnaroundGap} onChange={e => setTurnaroundGap(parseInt(e.target.value))}>
                     <option value="0">Immediate</option>
-                    <option value="5">+5 min</option>
-                    <option value="10">+10 min</option>
-                    <option value="15">+15 min</option>
-                    <option value="30">+30 min</option>
-                    <option value="60">+1 h</option>
+                    <option value="5">Round to 5 Min</option>
+                    <option value="10">Round to 10 Min</option>
+                    <option value="15">Round to 15 Min</option>
+                    <option value="30">Round to 30 Min</option>
+                    <option value="60">Round to 1h</option>
                   </select>
                 </div>
                 <div className="sched-form-row">

@@ -1,6 +1,7 @@
 import express from 'express';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
+import { calcGroundStaff } from './personnel.js';
 
 const router = express.Router();
 
@@ -60,6 +61,10 @@ router.get('/:code/airline-status', authMiddleware, async (req, res) => {
     const homeResult = await pool.query('SELECT home_airport_code FROM airlines WHERE id = $1', [airlineId]);
     const isHomeBase = homeResult.rows[0] ? homeResult.rows[0].home_airport_code === code : false;
 
+    // Airport category
+    const apResult = await pool.query('SELECT category FROM airports WHERE iata_code = $1', [code]);
+    const apCategory = apResult.rows[0] ? (parseInt(apResult.rows[0].category) || 4) : 4;
+
     // Aircraft based at this airport
     const aircraftResult = await pool.query(
       'SELECT COUNT(*) FROM aircraft WHERE airline_id = $1 AND home_airport = $2',
@@ -67,12 +72,12 @@ router.get('/:code/airline-status', authMiddleware, async (req, res) => {
     );
     const aircraftBased = parseInt(aircraftResult.rows[0].count) || 0;
 
-    // Ground staff
-    const staffResult = await pool.query(
-      "SELECT count FROM personnel WHERE airline_id = $1 AND staff_type = 'ground' AND airport_code = $2",
+    // Expansion level
+    const expResult = await pool.query(
+      'SELECT expansion_level FROM airport_expansions WHERE airline_id = $1 AND airport_code = $2',
       [airlineId, code]
     );
-    const groundStaff = staffResult.rows[0] ? (parseInt(staffResult.rows[0].count) || 0) : 0;
+    const expansionLevel = expResult.rows[0] ? (parseInt(expResult.rows[0].expansion_level) || 0) : 0;
 
     // Completed flights
     const completedResult = await pool.query(`
@@ -89,6 +94,7 @@ router.get('/:code/airline-status', authMiddleware, async (req, res) => {
         WHERE ac.airline_id = $1 AND (ws.departure_airport = $2 OR ws.arrival_airport = $2)
       `, [airlineId, code]);
       const weeklyFlightsHome = parseInt(wfHomeResult.rows[0].count) || 0;
+      const groundStaff = calcGroundStaff(apCategory, 'home_base', weeklyFlightsHome, expansionLevel);
 
       return res.json({
         is_opened: true, destination_type: 'home_base', effective_type: 'home_base',
@@ -119,6 +125,7 @@ router.get('/:code/airline-status', authMiddleware, async (req, res) => {
       const wfCount = parseInt(wfCheckResult.rows[0].count) || 0;
       if (wfCount > 0) {
         const etype2 = wfCount >= 600 ? 'base' : 'destination';
+        const groundStaff = calcGroundStaff(apCategory, 'destination', wfCount, expansionLevel);
         return res.json({
           is_opened: true, destination_type: 'destination', effective_type: etype2,
           weekly_flights: wfCount, aircraft_based: aircraftBased,
@@ -132,6 +139,7 @@ router.get('/:code/airline-status', authMiddleware, async (req, res) => {
     const dtype = r.destination_type;
     const wf = parseInt(r.weekly_flights) || 0;
     const etype = (dtype === 'destination' && wf >= 600) ? 'base' : dtype;
+    const groundStaff = calcGroundStaff(apCategory, dtype, wf, expansionLevel);
     res.json({
       is_opened: true, destination_type: dtype, effective_type: etype, weekly_flights: wf,
       aircraft_based: aircraftBased,

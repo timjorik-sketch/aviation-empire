@@ -515,44 +515,56 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
               {!capableLoading && capableAircraft.length === 0 && (
                 <div className="ap-modal-empty">No compatible aircraft found</div>
               )}
-              {!capableLoading && capableAircraft.length > 0 && (
-                <table className="ap-capable-table">
-                  <thead>
-                    <tr>
-                      <th>Aircraft</th>
-                      <th className="ap-ct-r">Pax</th>
-                      <th className="ap-ct-r">Range</th>
-                      <th className="ap-ct-r">Min. Runway</th>
-                      <th>Wake</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {capableAircraft.map(ac => (
-                      <tr key={ac.id}>
-                        <td className="ap-capable-name">
-                          {ac.image_filename && (
-                            <img
-                              src={`/aircraft-images/${ac.image_filename}`}
-                              alt=""
-                              className="ap-capable-img"
-                              onError={e => { e.target.style.display = 'none'; }}
-                            />
-                          )}
-                          <span>{ac.full_name}</span>
-                        </td>
-                        <td className="ap-ct-r">{ac.max_passengers.toLocaleString()}</td>
-                        <td className="ap-ct-r">{ac.range_km.toLocaleString()} km</td>
-                        <td className="ap-ct-r">{ac.min_runway_landing_m.toLocaleString()} m</td>
-                        <td>
-                          <span className={`ap-wake-badge ap-wake-${ac.wake_turbulence_category?.toLowerCase()}`}>
-                            {WAKE_LABELS[ac.wake_turbulence_category] || ac.wake_turbulence_category}
-                          </span>
-                        </td>
+              {!capableLoading && capableAircraft.length > 0 && (() => {
+                const WAKE_ORDER = ['L', 'M', 'H'];
+                const grouped = {};
+                WAKE_ORDER.forEach(w => { grouped[w] = []; });
+                capableAircraft.forEach(ac => {
+                  const w = ac.wake_turbulence_category || 'L';
+                  if (!grouped[w]) grouped[w] = [];
+                  grouped[w].push(ac);
+                });
+                WAKE_ORDER.forEach(w => grouped[w].sort((a, b) => a.full_name.localeCompare(b.full_name)));
+                return (
+                  <table className="ap-capable-table">
+                    <thead>
+                      <tr>
+                        <th>Aircraft</th>
+                        <th className="ap-ct-r">Min. Runway</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+                    </thead>
+                    <tbody>
+                      {WAKE_ORDER.filter(w => grouped[w].length > 0).map(w => (
+                        <>
+                          <tr key={`sep-${w}`} className="ap-capable-sep">
+                            <td colSpan={2}>
+                              <span className={`ap-wake-badge ap-wake-${w.toLowerCase()}`}>
+                                {WAKE_LABELS[w]} ({grouped[w].length})
+                              </span>
+                            </td>
+                          </tr>
+                          {grouped[w].map(ac => (
+                            <tr key={ac.id}>
+                              <td className="ap-capable-name">
+                                {ac.image_filename && (
+                                  <img
+                                    src={`/aircraft-images/${ac.image_filename}`}
+                                    alt=""
+                                    className="ap-capable-img"
+                                    onError={e => { e.target.style.display = 'none'; }}
+                                  />
+                                )}
+                                <span>{ac.full_name}</span>
+                              </td>
+                              <td className="ap-ct-r">{ac.min_runway_landing_m.toLocaleString()} m</td>
+                            </tr>
+                          ))}
+                        </>
+                      ))}
+                    </tbody>
+                  </table>
+                );
+              })()}
             </div>
             <div className="ap-modal-footer">
               <span className="ap-modal-count">{capableAircraft.length} aircraft type{capableAircraft.length !== 1 ? 's' : ''} compatible</span>
@@ -761,6 +773,8 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
         }
         .ap-capable-table tbody tr:last-child td { border-bottom: none; }
         .ap-capable-table tbody tr:hover td { background: #FAFAFA; }
+        .ap-capable-sep td { background: #F5F5F5; padding: 6px 12px; border-bottom: 1px solid #E0E0E0; }
+        .ap-capable-sep:hover td { background: #F5F5F5 !important; }
         .ap-ct-r { text-align: right !important; font-family: monospace; }
         .ap-capable-name {
           display: flex; align-items: center; gap: 0.6rem;

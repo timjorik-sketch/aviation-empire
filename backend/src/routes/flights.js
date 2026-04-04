@@ -1486,7 +1486,7 @@ router.get('/dev/route-calc', authMiddleware, async (req, res) => {
       route: { dep: dep.toUpperCase(), arr: arr.toUpperCase(), dep_name: depApt.name, arr_name: arrApt.name,
                dist_km: distKm, dep_cat: depApt.category, arr_cat: arrApt.category },
       market_prices: { eco: mkt.eco, biz: mkt.biz, first: mkt.first },
-      factors: { base_rate_per_km: baseRate, airport_premium: aptPremium, dist_mod: distMod,
+      factors: { base_rate_per_km: baseRate, airport_premium: aptPremium,
                  base_demand_per_hr: baseDemand,
                  service_factor_eco: svcEco, service_factor_biz: svcBiz, service_factor_fir: svcFir,
                  cond_factor: condFactor },

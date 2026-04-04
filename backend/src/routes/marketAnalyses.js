@@ -104,14 +104,6 @@ router.post('/request', authMiddleware, async (req, res) => {
     const bizPrice = routeRow.business_price;
     const firstPrice = routeRow.first_price;
 
-    // Route must have scheduled flights
-    const schedResult = await pool.query(
-      'SELECT COUNT(*) FROM weekly_schedule ws JOIN aircraft a ON ws.aircraft_id = a.id WHERE ws.route_id = $1 AND a.airline_id = $2',
-      [route_id, req.airlineId]
-    );
-    const schedCount = parseInt(schedResult.rows[0].count);
-    if (schedCount === 0) return res.status(400).json({ error: 'Route has no scheduled flights' });
-
     // No duplicate pending analysis
     const dupResult = await pool.query(
       "SELECT id FROM market_analyses WHERE airline_id = $1 AND route_id = $2 AND status = 'pending'",

@@ -863,7 +863,6 @@ async function processBookings() {
       }
 
       const baseDemand = calcBaseDemandPerHour(f.dep_cat, f.arr_cat);
-      const distMod    = calcDistanceMod(f.distance_km);
       const condFactor = calcConditionFactor(f.condition);
       const svcEco  = await calcServiceFactor(f.service_profile_id, 'economy');
       const svcBiz  = await calcServiceFactor(f.service_profile_id, 'business');
@@ -874,7 +873,7 @@ async function processBookings() {
 
       if (f.eco_price > 0 && ecoCap > f.booked_eco) {
         const attr = calcPriceAttractiveness(f.eco_price, f.mp_eco || f.eco_price);
-        const rate = baseDemand * distMod * attr * svcEco * condFactor * satMult;
+        const rate = baseDemand * attr * svcEco * condFactor * satMult;
         newEco = Math.max(0, Math.min(ecoCap - f.booked_eco,
           Math.round(rate * (0.85 + Math.random() * 0.30))));
         addedRev += newEco * f.eco_price;
@@ -882,7 +881,7 @@ async function processBookings() {
 
       if (f.biz_price > 0 && bizCap > f.booked_biz) {
         const attr = calcPriceAttractiveness(f.biz_price, f.mp_biz || f.biz_price);
-        const rate = baseDemand * 0.15 * distMod * attr * svcBiz * condFactor * satMult;
+        const rate = baseDemand * 0.15 * attr * svcBiz * condFactor * satMult;
         newBiz = Math.max(0, Math.min(bizCap - f.booked_biz,
           Math.round(rate * (0.85 + Math.random() * 0.30))));
         addedRev += newBiz * f.biz_price;
@@ -890,7 +889,7 @@ async function processBookings() {
 
       if (f.fir_price > 0 && firCap > f.booked_fir) {
         const attr = calcPriceAttractiveness(f.fir_price, f.mp_fir || f.fir_price);
-        const rate = baseDemand * 0.05 * distMod * attr * svcFir * condFactor * satMult;
+        const rate = baseDemand * 0.05 * attr * svcFir * condFactor * satMult;
         newFir = Math.max(0, Math.min(firCap - f.booked_fir,
           Math.round(rate * (0.85 + Math.random() * 0.30))));
         addedRev += newFir * f.fir_price;
@@ -1459,7 +1458,6 @@ router.get('/dev/route-calc', authMiddleware, async (req, res) => {
 
     const mkt        = calcMarketPrices(distKm, depApt.category, arrApt.category);
     const baseDemand = calcBaseDemandPerHour(depApt.category, arrApt.category);
-    const distMod    = calcDistanceMod(distKm);
     const svcEco     = await calcServiceFactor(spId, 'economy');
     const svcBiz     = await calcServiceFactor(spId, 'business');
     const svcFir     = await calcServiceFactor(spId, 'first');
@@ -1471,9 +1469,9 @@ router.get('/dev/route-calc', authMiddleware, async (req, res) => {
     const bizAttr = bizPx > 0 ? calcPriceAttractiveness(bizPx, mkt.biz)   : null;
     const firAttr = firPx > 0 ? calcPriceAttractiveness(firPx, mkt.first) : null;
 
-    const ecoRateHr = ecoPx > 0 ? baseDemand * 1.00 * distMod * ecoAttr * svcEco * condFactor : 0;
-    const bizRateHr = bizPx > 0 ? baseDemand * 0.15 * distMod * bizAttr * svcBiz * condFactor : 0;
-    const firRateHr = firPx > 0 ? baseDemand * 0.05 * distMod * firAttr * svcFir * condFactor : 0;
+    const ecoRateHr = ecoPx > 0 ? baseDemand * 1.00 * ecoAttr * svcEco * condFactor : 0;
+    const bizRateHr = bizPx > 0 ? baseDemand * 0.15 * bizAttr * svcBiz * condFactor : 0;
+    const firRateHr = firPx > 0 ? baseDemand * 0.05 * firAttr * svcFir * condFactor : 0;
 
     const eco72 = Math.min(ecoCap, Math.round(ecoRateHr * 72));
     const biz72 = Math.min(bizCap, Math.round(bizRateHr * 72));

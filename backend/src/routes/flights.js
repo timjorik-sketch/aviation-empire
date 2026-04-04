@@ -84,13 +84,15 @@ function calcBaseDemandPerHour(depCat, arrCat) {
 function calcPriceAttractiveness(actual, market) {
   if (!market || market <= 0) return 1.0;
   const ratio = actual / market;
-  if (ratio < 0.8)   return 1.8;
-  if (ratio < 1.0)   return 1.2;
-  if (ratio < 1.2)   return 1.0;
-  if (ratio < 1.35)  return 0.6;
-  if (ratio < 1.5)   return 0.2;
-  if (ratio < 1.7)   return 0.05;
-  return 0.01;
+  if (ratio < 0.80)  return 1.5;
+  if (ratio < 1.00)  return 1.1;
+  if (ratio < 1.10)  return 1.0;
+  if (ratio < 1.20)  return 0.6;
+  if (ratio < 1.30)  return 0.3;
+  if (ratio < 1.40)  return 0.1;
+  if (ratio < 1.50)  return 0.03;
+  if (ratio < 1.70)  return 0.008;
+  return 0.001;
 }
 
 async function calcServiceFactor(serviceProfileId, cabinClass = 'economy') {

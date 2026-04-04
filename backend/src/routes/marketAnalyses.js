@@ -206,6 +206,9 @@ router.get('/', authMiddleware, async (req, res) => {
   try {
     if (!req.airlineId) return res.json({ analyses: [], week_used: 0, week_limit: 4, week_start: getWeekStart() });
 
+    // Process any due analyses before returning results
+    await processMarketAnalyses();
+
     const result = await pool.query(`
       SELECT ma.id, ma.route_id, ma.status, ma.requested_at, ma.completed_at, ma.cost,
              ma.economy_price, ma.business_price, ma.first_price,

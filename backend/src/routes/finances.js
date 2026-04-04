@@ -430,7 +430,7 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
 
     // ── Ops stats ────────────────────────────────────────────────────────────
     const activeAircraftRow = await q(`SELECT COUNT(*) as val FROM aircraft WHERE airline_id=$1 AND is_active=1`, [airlineId]);
-    const activeRoutesRow   = await q(`SELECT COUNT(*) as val FROM routes WHERE airline_id=$1`, [airlineId]);
+    const activeRoutesRow   = await q(`SELECT COUNT(DISTINCT ws.route_id) as val FROM weekly_schedule ws JOIN aircraft a ON a.id = ws.aircraft_id WHERE a.airline_id=$1 AND a.is_active=1 AND ws.route_id IS NOT NULL`, [airlineId]);
     const destinationsRow   = await q(`SELECT COUNT(DISTINCT arrival_airport) as val FROM routes WHERE airline_id=$1`, [airlineId]);
 
     const activeAircraft = parseInt(activeAircraftRow.val);

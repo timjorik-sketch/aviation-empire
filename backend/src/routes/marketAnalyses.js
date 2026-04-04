@@ -113,7 +113,7 @@ router.post('/request', authMiddleware, async (req, res) => {
 
     // Weekly limit
     const limits = await getLimitsRow(req.airlineId);
-    if (limits.analyses_this_week >= 4) return res.status(400).json({ error: 'Weekly analysis limit reached (4/week)' });
+    // if (limits.analyses_this_week >= 4) return res.status(400).json({ error: 'Weekly analysis limit reached (4/week)' }); // disabled for testing
 
     const cost = getCost(distKm);
 
@@ -154,8 +154,8 @@ router.post('/request', authMiddleware, async (req, res) => {
     const bizMarket   = await getMarketPrice('business');
     const firstMarket = await getMarketPrice('first');
 
-    // completed_at = now + 12 hours
-    const completedAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+    // completed_at = now + 1 minute (testing)
+    const completedAt = new Date(Date.now() + 1 * 60 * 1000).toISOString();
 
     // Insert analysis with RETURNING id
     const insResult = await pool.query(`

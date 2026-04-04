@@ -47,11 +47,11 @@ function calculateFlightDuration(distanceKm) {
 // ── Hidden market price calculation (NEVER exposed to user) ─────────────────
 
 function calcBaseRate(d) {
-  if (d <= 500)  return 0.20;
+  if (d <= 500)  return 0.22;
   if (d <= 1500) return 0.15;
-  if (d <= 3000) return 0.12;
-  if (d <= 6000) return 0.10;
-  return 0.08;
+  if (d <= 3000) return 0.10;
+  if (d <= 6000) return 0.065;
+  return 0.055;
 }
 
 function calcAirportPremium(cat1, cat2) {
@@ -59,18 +59,12 @@ function calcAirportPremium(cat1, cat2) {
   return ((P[cat1] || 1.0) + (P[cat2] || 1.0)) / 2;
 }
 
-function calcDistanceMod(d) {
-  if (d < 1000)  return 0.8;
-  if (d <= 3000) return 1.0;
-  return 1.2;
-}
-
 function calcMarketPrices(distKm, depCat, arrCat) {
-  const eco = Math.round(distKm * calcBaseRate(distKm) * calcAirportPremium(depCat, arrCat) * calcDistanceMod(distKm));
+  const eco = Math.round(distKm * calcBaseRate(distKm) * calcAirportPremium(depCat, arrCat));
   return {
     eco,
     biz:   Math.round(eco * (distKm < 1000 ? 2.5 : distKm < 3000 ? 3.0 : 4.0)),
-    first: Math.round(eco * (distKm < 1000 ? 4.0 : distKm < 3000 ? 5.0 : 6.0)),
+    first: Math.round(eco * (distKm < 1000 ? 5.0 : distKm < 3000 ? 7.0 : 10.0)),
   };
 }
 

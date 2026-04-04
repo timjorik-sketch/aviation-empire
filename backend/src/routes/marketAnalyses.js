@@ -11,15 +11,38 @@ function getCost(distKm) {
   return 180000;
 }
 
-// Rating based on ratio actual/market
+// Rating based on ratio actual/market — aligned with attractiveness curve
 function getRating(actual, market) {
   if (!actual || !market) return null;
   const ratio = actual / market;
-  if (ratio < 0.7) return 'UNDERPRICED';
-  if (ratio < 0.9) return 'SLIGHTLY_LOW';
-  if (ratio <= 1.15) return 'COMPETITIVE';
-  if (ratio <= 1.35) return 'SLIGHTLY_HIGH';
+  if (ratio < 0.80) return 'UNDERPRICED';
+  if (ratio < 1.00) return 'SLIGHTLY_LOW';
+  if (ratio <= 1.10) return 'COMPETITIVE';
+  if (ratio <= 1.20) return 'SLIGHTLY_HIGH';
   return 'OVERPRICED';
+}
+
+// Market price formula (mirrors flights.js calcMarketPrices)
+function calcBaseRate(d) {
+  if (d <= 500)  return 0.22;
+  if (d <= 1500) return 0.15;
+  if (d <= 3000) return 0.10;
+  if (d <= 6000) return 0.065;
+  return 0.055;
+}
+
+function calcAirportPremium(cat1, cat2) {
+  const P = { 8: 1.5, 7: 1.4, 6: 1.3, 5: 1.2, 4: 1.15, 3: 1.05, 2: 1.0, 1: 0.9 };
+  return ((P[cat1] || 1.0) + (P[cat2] || 1.0)) / 2;
+}
+
+function calcMarketPrices(distKm, depCat, arrCat) {
+  const eco = Math.round(distKm * calcBaseRate(distKm) * calcAirportPremium(depCat, arrCat));
+  return {
+    eco,
+    biz:   Math.round(eco * (distKm < 1000 ? 2.5 : distKm < 3000 ? 3.0 : 4.0)),
+    first: Math.round(eco * (distKm < 1000 ? 5.0 : distKm < 3000 ? 7.0 : 10.0)),
+  };
 }
 
 // Get current week start (Monday 00:00 UTC as ISO date string YYYY-MM-DD)
@@ -107,7 +130,22 @@ router.post('/request', authMiddleware, async (req, res) => {
     const balance = balResult.rows[0].balance;
     if (balance < cost) return res.status(400).json({ error: 'Insufficient balance' });
 
-    // Calculate market price
+    // Get airport categories for fallback formula
+    const aptResult = await pool.query(
+      'SELECT iata_code, category FROM airports WHERE iata_code IN ((SELECT departure_airport FROM routes WHERE id = $1), (SELECT arrival_airport FROM routes WHERE id = $1))',
+      [route_id]
+    );
+    let depCat = 4, arrCat = 4;
+    const depAirport = (await pool.query('SELECT departure_airport, arrival_airport FROM routes WHERE id = $1', [route_id])).rows[0];
+    if (depAirport) {
+      for (const r of aptResult.rows) {
+        if (r.iata_code === depAirport.departure_airport) depCat = r.category || 4;
+        else arrCat = r.category || 4;
+      }
+    }
+    const formulaPrices = calcMarketPrices(distKm, depCat, arrCat);
+
+    // Calculate market price — avg from recent completed flights, fallback to formula
     async function getMarketPrice(cabin) {
       const col = `market_price_${cabin}`;
       const mpResult = await pool.query(
@@ -116,9 +154,8 @@ router.post('/request', authMiddleware, async (req, res) => {
       );
       const avg = mpResult.rows[0] ? parseFloat(mpResult.rows[0].avg) : null;
       if (avg && avg > 0) return Math.round(avg);
-      // Fallback: distance-based formula
-      const base = { economy: 0.08, business: 0.20, first: 0.38 };
-      return Math.round(distKm * (base[cabin] || 0.08));
+      // Fallback: current market price formula
+      return cabin === 'economy' ? formulaPrices.eco : cabin === 'business' ? formulaPrices.biz : formulaPrices.first;
     }
 
     const ecoMarket   = await getMarketPrice('economy');

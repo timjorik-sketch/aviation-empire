@@ -1272,59 +1272,18 @@ router.delete('/:id/schedule', authMiddleware, async (req, res) => {
     const countResult = await pool.query('SELECT COUNT(*) as cnt FROM weekly_schedule WHERE aircraft_id = $1', [aircraftId]);
     const count = parseInt(countResult.rows[0].cnt);
 
-    const airlineBalResult = await pool.query('SELECT id, balance FROM airlines WHERE id = $1', [airlineId]);
-    let currentBalance = airlineBalResult.rows[0]?.balance ?? 0;
-
-    const upcomingResult = await pool.query(`
-      SELECT id, flight_number,
-             booked_economy, booked_business, booked_first,
-             economy_price, business_price, first_price,
-             booking_revenue_collected
-      FROM flights
-      WHERE aircraft_id = $1 AND status IN ('scheduled', 'boarding')
-    `, [aircraftId]);
-
-    const upcomingFlights = upcomingResult.rows.map(r => ({
-      id: r.id, flight_number: r.flight_number,
-      booked_economy: r.booked_economy || 0, booked_business: r.booked_business || 0, booked_first: r.booked_first || 0,
-      economy_price: r.economy_price || 0, business_price: r.business_price || 0, first_price: r.first_price || 0,
-      booking_revenue_collected: r.booking_revenue_collected || 0
-    }));
-
-    if (upcomingFlights.length > 0) {
-      const ids = upcomingFlights.map((_, i) => `$${i + 1}`).join(',');
-      await pool.query(`UPDATE flights SET status = 'cancelled' WHERE id IN (${ids})`, upcomingFlights.map(f => f.id));
-
-      let totalPenalty = 0;
-      for (const f of upcomingFlights) {
-        if (!f.booking_revenue_collected) continue;
-        totalPenalty += f.booked_economy  * f.economy_price  * 1.2;
-        totalPenalty += f.booked_business * (f.business_price || f.economy_price) * 1.2;
-        totalPenalty += f.booked_first    * (f.first_price    || f.economy_price) * 1.2;
-      }
-      totalPenalty = Math.round(totalPenalty);
-
-      if (totalPenalty > 0) {
-        currentBalance -= totalPenalty;
-        await pool.query('UPDATE airlines SET balance = $1 WHERE id = $2', [currentBalance, airlineId]);
-        await pool.query(
-          "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
-          [airlineId, -totalPenalty, `Flight Cancellation Penalty - Schedule Cleared (${upcomingFlights.length} flights)`]
-        );
-      }
-    }
-
+    // Detach existing flight instances from the template (FK constraint), but let them run normally
+    await pool.query('UPDATE flights SET weekly_schedule_id = NULL WHERE aircraft_id = $1', [aircraftId]);
     await pool.query('DELETE FROM weekly_schedule WHERE aircraft_id = $1', [aircraftId]);
     await pool.query('DELETE FROM maintenance_schedule WHERE aircraft_id = $1', [aircraftId]);
 
     res.json({
       message: `Cleared ${count} schedule entry(s)`,
-      deleted_count: count,
-      cancelled_flights: upcomingFlights.length
+      deleted_count: count
     });
   } catch (error) {
     console.error('Clear schedule error:', error);
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: error.message || 'Server error' });
   }
 });
 

@@ -123,15 +123,18 @@ router.post('/request', authMiddleware, async (req, res) => {
     if (balance < cost) return res.status(400).json({ error: 'Insufficient balance' });
 
     // Get airport categories for fallback formula
-    const aptResult = await pool.query(
-      'SELECT iata_code, category FROM airports WHERE iata_code IN ((SELECT departure_airport FROM routes WHERE id = $1), (SELECT arrival_airport FROM routes WHERE id = $1))',
+    const routeAptResult = await pool.query(
+      `SELECT a.iata_code, a.category, r.departure_airport, r.arrival_airport
+       FROM routes r
+       JOIN airports a ON a.iata_code IN (r.departure_airport, r.arrival_airport)
+       WHERE r.id = $1`,
       [route_id]
     );
     let depCat = 4, arrCat = 4;
-    const depAirport = (await pool.query('SELECT departure_airport, arrival_airport FROM routes WHERE id = $1', [route_id])).rows[0];
-    if (depAirport) {
-      for (const r of aptResult.rows) {
-        if (r.iata_code === depAirport.departure_airport) depCat = r.category || 4;
+    if (routeAptResult.rows.length > 0) {
+      const depCode = routeAptResult.rows[0].departure_airport;
+      for (const r of routeAptResult.rows) {
+        if (r.iata_code === depCode) depCat = r.category || 4;
         else arrCat = r.category || 4;
       }
     }
@@ -177,7 +180,7 @@ router.post('/request', authMiddleware, async (req, res) => {
 
     // Record transaction
     await pool.query(
-      "INSERT INTO transactions (airline_id, amount, description) VALUES ($1, $2, $3)",
+      "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
       [req.airlineId, -cost, 'Market Analysis']
     );
 

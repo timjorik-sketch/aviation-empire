@@ -1283,7 +1283,7 @@ router.delete('/:id/schedule', authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error('Clear schedule error:', error);
-    res.status(500).json({ error: error.message || 'Server error' });
+    res.status(500).json({ error: 'Server error' });
   }
 });
 

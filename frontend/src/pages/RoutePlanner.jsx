@@ -133,6 +133,21 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
 
   useEffect(() => { fetchData(); }, []);
 
+  // Tick every second for pending analysis countdowns; also auto-refresh when one completes
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const hasPending = analyses.some(a => a.status === 'pending');
+    if (!hasPending) return;
+    const iv = setInterval(() => {
+      const nowMs = Date.now();
+      setNow(nowMs);
+      // Auto-refresh if any pending analysis just passed its completed_at
+      const justCompleted = analyses.some(a => a.status === 'pending' && new Date(a.completed_at).getTime() <= nowMs);
+      if (justCompleted) fetchAnalyses();
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [analyses]);
+
   // Fetch departure airport coordinates when selection changes
   useEffect(() => {
     if (!departureAirport) { setDepCoords(null); return; }
@@ -384,6 +399,10 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
         .ma-route-label { font-weight:700; font-family:monospace; font-size:0.9rem; color:#2C2C2C; }
         .ma-meta { font-size:0.75rem; color:#999; margin-top:2px; }
         .ma-pending-badge { display:inline-block; padding:2px 8px; border-radius:10px; background:#FEF3C7; color:#92400E; font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; }
+        .ma-progress-wrap { margin-top:8px; }
+        .ma-progress-bar-bg { height:6px; border-radius:3px; background:#F0F0F0; overflow:hidden; }
+        .ma-progress-bar-fill { height:100%; border-radius:3px; background:#F59E0B; transition:width 1s linear; }
+        .ma-progress-label { display:flex; justify-content:space-between; font-size:0.72rem; color:#92400E; margin-top:4px; }
         .ma-class-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-top:8px; }
         .ma-class-cell { background:#F9F9F9; border-radius:5px; padding:6px 8px; }
         .ma-class-label { font-size:0.65rem; color:#999; text-transform:uppercase; letter-spacing:0.06em; }
@@ -592,7 +611,18 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
                 </div>
                 {analyses.map(a => {
                   const isPending = a.status === 'pending';
-                  const hoursLeft = isPending ? Math.ceil((new Date(a.completed_at) - Date.now()) / 3600000) : 0;
+                  const completedMs = new Date(a.completed_at).getTime();
+                  const requestedMs = new Date(a.requested_at).getTime();
+                  const totalMs = completedMs - requestedMs;
+                  const elapsedMs = now - requestedMs;
+                  const pct = isPending ? Math.min(100, Math.max(0, Math.round(elapsedMs / totalMs * 100))) : 100;
+                  const msLeft = isPending ? Math.max(0, completedMs - now) : 0;
+                  const secsLeft = Math.ceil(msLeft / 1000);
+                  const timeLabel = secsLeft >= 3600
+                    ? `${Math.ceil(secsLeft / 3600)}h left`
+                    : secsLeft >= 60
+                    ? `${Math.floor(secsLeft / 60)}m ${secsLeft % 60}s left`
+                    : `${secsLeft}s left`;
                   const dateStr = new Date(a.requested_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
                   return (
                     <div key={a.id} className="ma-analysis-item">
@@ -602,14 +632,24 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
                           <span style={{ color: '#666', fontSize: '0.82rem', marginLeft: 6 }}>{a.departure_airport} → {a.arrival_airport}</span>
                         </div>
                         {isPending
-                          ? <span className="ma-pending-badge">Pending</span>
+                          ? <span className="ma-pending-badge">Analyzing…</span>
                           : <span style={{ fontSize: '0.72rem', color: '#999' }}>{dateStr}</span>}
                       </div>
                       <div className="ma-meta">
                         Cost: ${a.cost.toLocaleString()}
                         {a.distance_km ? <span style={{ marginLeft: 6 }}>{a.distance_km.toLocaleString()} km</span> : null}
-                        {isPending && hoursLeft > 0 && <span style={{ marginLeft: 8, color: '#92400E' }}>Available in {hoursLeft}h</span>}
                       </div>
+                      {isPending && (
+                        <div className="ma-progress-wrap">
+                          <div className="ma-progress-bar-bg">
+                            <div className="ma-progress-bar-fill" style={{ width: `${pct}%` }} />
+                          </div>
+                          <div className="ma-progress-label">
+                            <span>{pct}%</span>
+                            <span>{msLeft > 0 ? timeLabel : 'Completing…'}</span>
+                          </div>
+                        </div>
+                      )}
                       {isPending ? null : (
                         <div className="ma-class-grid">
                           {a.economy_price != null && (

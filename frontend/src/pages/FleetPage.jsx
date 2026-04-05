@@ -356,8 +356,8 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
       if (!b.code) return -1;
       return a.code.localeCompare(b.code);
     });
-    if (production.length > 0) groups.unshift({ code: '__in_production__', forSale: false, inProduction: true, aircraft: production });
     if (listed.length > 0) groups.push({ code: '__for_sale__', forSale: true, inProduction: false, aircraft: listed });
+    if (production.length > 0) groups.push({ code: '__in_production__', forSale: false, inProduction: true, aircraft: production });
     return groups;
   }, [sortedOverview]);
 
@@ -625,8 +625,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                         <span className="base-group-iata" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <span style={{
                             display: 'inline-block', width: 10, height: 10, borderRadius: '50%',
-                            border: '1.5px solid #ef4444',
-                            background: 'repeating-linear-gradient(-45deg, #ef4444 0px, #ef4444 2px, transparent 2px, transparent 5px)',
+                            background: '#9ca3af', boxShadow: '0 0 0 3px rgba(156,163,175,0.28)',
                             flexShrink: 0
                           }} />
                           In Production
@@ -698,8 +697,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                                     {inProduction ? (
                                       <span style={{
                                         display: 'inline-block', width: 10, height: 10, borderRadius: '50%',
-                                        border: '1.5px solid #ef4444',
-                                        background: 'repeating-linear-gradient(-45deg, #ef4444 0px, #ef4444 2px, transparent 2px, transparent 5px)',
+                                        background: '#9ca3af', boxShadow: '0 0 0 3px rgba(156,163,175,0.28)',
                                         flexShrink: 0, verticalAlign: 'middle', position: 'relative', top: -1
                                       }} />
                                     ) : (

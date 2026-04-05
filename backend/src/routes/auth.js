@@ -195,6 +195,12 @@ router.delete('/account', authMiddleware, async (req, res) => {
     const valid = await bcrypt.compare(password, hash);
     if (!valid) return res.status(401).json({ error: 'Incorrect password' });
 
+    // Clear FK references without CASCADE, then delete user
+    await pool.query('UPDATE users SET active_airline_id = NULL WHERE id = $1', [req.userId]);
+    await pool.query('UPDATE airlines SET active_airline_id = NULL WHERE user_id = $1', [req.userId]);
+    await pool.query('DELETE FROM market_analyses WHERE airline_id IN (SELECT id FROM airlines WHERE user_id = $1)', [req.userId]);
+    await pool.query('DELETE FROM analysis_limits WHERE airline_id IN (SELECT id FROM airlines WHERE user_id = $1)', [req.userId]);
+
     // Delete user — cascades to airlines → aircraft, routes, flights, transactions, etc.
     await pool.query('DELETE FROM users WHERE id = $1', [req.userId]);
 

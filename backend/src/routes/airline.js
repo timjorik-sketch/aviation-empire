@@ -427,7 +427,16 @@ router.delete('/:id', authMiddleware, async (req, res) => {
     );
     if (!ownResult.rows[0]) return res.status(404).json({ error: 'Airline not found' });
 
-    await pool.query('DELETE FROM airlines WHERE id = $1 AND user_id = $2', [airlineId, req.userId]);
+    // Clear FK references that have no CASCADE
+    await pool.query('UPDATE users SET active_airline_id = NULL WHERE active_airline_id = $1', [airlineId]);
+    await pool.query('UPDATE airlines SET active_airline_id = NULL WHERE active_airline_id = $1', [airlineId]);
+    await pool.query('DELETE FROM market_analyses WHERE airline_id = $1', [airlineId]);
+    await pool.query('DELETE FROM analysis_limits WHERE airline_id = $1', [airlineId]);
+
+    // Delete airline — cascades to aircraft, routes, flights, transactions,
+    // weekly_schedule, maintenance, service_profiles, cabin_profiles,
+    // destinations, personnel, airport_slots, slot_usage, transfer_flights, etc.
+    await pool.query('DELETE FROM airlines WHERE id = $1', [airlineId]);
 
     res.json({ message: 'Airline deleted' });
   } catch (error) {

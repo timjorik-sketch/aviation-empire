@@ -493,41 +493,46 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
           )}
         </section>
 
-        {/* Manage Fleet sidebar */}
-        <div style={{ flex: 3, background: 'white', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', overflow: 'hidden' }}>
-          <div style={{ background: '#2C2C2C', padding: '14px 20px' }}>
-            <span className="fleet-section-bar-title">Manage Fleet</span>
-          </div>
-          <div className="fo-nav-list">
-            {[
-              { label: 'Airplane Market', action: () => onOpenMarketplace?.()          },
-              { label: 'Cabin Profiles',  action: () => onNavigate?.('cabin-profiles') },
-            ].map(({ label, action }) => (
-              <button key={label} className="fo-nav-btn" onClick={action}>
-                {label}
-                <span className="fo-nav-arrow">›</span>
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* Right column: Manage Fleet + Aircraft on Order */}
+        <div style={{ flex: 3, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
-        {/* Orders box */}
-        {orders.length > 0 && (
-          <div style={{ flex: 3, background: 'white', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', overflow: 'hidden', marginTop: 16 }}>
-            <div style={{ background: '#2C2C2C', padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="fleet-section-bar-title">Aircraft on Order</span>
-              <span style={{ background: '#F59E0B', color: '#fff', borderRadius: 12, padding: '2px 10px', fontSize: '0.78rem', fontWeight: 700 }}>{orders.length}</span>
+          {/* Manage Fleet */}
+          <div style={{ background: 'white', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', overflow: 'hidden' }}>
+            <div style={{ background: '#2C2C2C', padding: '14px 20px' }}>
+              <span className="fleet-section-bar-title">Manage Fleet</span>
             </div>
-            <div style={{ padding: '14px 16px' }}>
-              <p style={{ margin: '0 0 10px', fontSize: '0.82rem', color: '#666' }}>
-                {orders.length} aircraft currently in production
-              </p>
-              <button className="fo-nav-btn" onClick={() => setOrdersOpen(true)}>
-                View Orders <span className="fo-nav-arrow">›</span>
-              </button>
+            <div className="fo-nav-list">
+              {[
+                { label: 'Airplane Market', action: () => onOpenMarketplace?.()          },
+                { label: 'Cabin Profiles',  action: () => onNavigate?.('cabin-profiles') },
+              ].map(({ label, action }) => (
+                <button key={label} className="fo-nav-btn" onClick={action}>
+                  {label}
+                  <span className="fo-nav-arrow">›</span>
+                </button>
+              ))}
             </div>
           </div>
-        )}
+
+          {/* Aircraft on Order */}
+          {orders.length > 0 && (
+            <div style={{ background: 'white', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', overflow: 'hidden' }}>
+              <div style={{ background: '#2C2C2C', padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="fleet-section-bar-title">Aircraft on Order</span>
+                <span style={{ background: '#F59E0B', color: '#fff', borderRadius: 12, padding: '2px 10px', fontSize: '0.78rem', fontWeight: 700 }}>{orders.length}</span>
+              </div>
+              <div style={{ padding: '14px 16px' }}>
+                <p style={{ margin: '0 0 10px', fontSize: '0.82rem', color: '#666' }}>
+                  {orders.length} aircraft currently in production
+                </p>
+                <button className="fo-nav-btn" onClick={() => setOrdersOpen(true)}>
+                  View Orders <span className="fo-nav-arrow">›</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+        </div>{/* end right column */}
 
         </div>{/* end flex row */}
 
@@ -560,7 +565,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                           <span style={{ fontWeight: 700, fontSize: '0.88rem', color: '#2C2C2C' }}>{o.full_name}</span>
                           <span style={{ marginLeft: 8, fontFamily: 'monospace', fontSize: '0.82rem', color: '#666' }}>{o.registration}</span>
                         </div>
-                        <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 10, background: '#FEF3C7', color: '#92400E', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 10, background: '#E5E7EB', color: '#6B7280', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                           In Production
                         </span>
                       </div>
@@ -677,7 +682,12 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                                 <tr key={ac.id} className={`ov-row ov-row--${inProduction ? 'inactive' : status}`}>
                                   <td style={{ textAlign: 'center' }}>
                                     {inProduction ? (
-                                      <span style={{ fontSize: '0.7rem', color: '#92400E' }}>⏳</span>
+                                      <span style={{
+                                        display: 'inline-block', width: 10, height: 10, borderRadius: '50%',
+                                        border: '1.5px solid #ef4444',
+                                        background: 'repeating-linear-gradient(-45deg, #ef4444 0px, #ef4444 2px, transparent 2px, transparent 5px)',
+                                        flexShrink: 0, verticalAlign: 'middle', position: 'relative', top: -1
+                                      }} />
                                     ) : (
                                       <span className={`status-dot status-dot--${status}`}
                                         title={status === 'inactive' ? 'Inactive' : status === 'in-flight' ? 'In Flight' : status === 'boarding' ? 'Boarding' : 'Active'} />

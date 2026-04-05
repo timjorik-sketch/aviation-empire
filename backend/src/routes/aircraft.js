@@ -539,7 +539,7 @@ router.post('/purchase',
       const airline = airlineResult.rows[0];
       const homeAirport = deliveryAirport || airline.home_airport_code;
 
-      const airportResult = await pool.query('SELECT registration_prefix FROM airports WHERE iata_code = $1', [homeAirport]);
+      const airportResult = await pool.query('SELECT registration_prefix FROM airports WHERE iata_code = $1', [airline.home_airport_code]);
       if (!airportResult.rows[0]) {
         return res.status(400).json({ error: 'Invalid delivery airport' });
       }

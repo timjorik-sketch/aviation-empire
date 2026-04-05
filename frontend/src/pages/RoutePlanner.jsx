@@ -800,7 +800,7 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
                                       <button className="rp-btn-edit" style={{ marginLeft: '0.5rem' }} onClick={() => handleStartEdit(route)}>Edit Prices</button>
                                     </div>
                                     {route.analysis && (route.analysis.economy_rating || route.analysis.business_rating || route.analysis.first_rating) && (
-                                      <div style={{ marginBottom: '12px', padding: '8px 10px', background: '#F5F5F5', borderRadius: '6px', border: '1px solid #E8E8E8' }}>
+                                      <div style={{ marginBottom: '17px', marginTop: '5px', padding: '13px 15px', background: '#F5F5F5', borderRadius: '6px', border: '1px solid #E8E8E8' }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                                           <span style={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999' }}>Market Analysis</span>
                                           <span style={{ fontSize: '0.68rem', color: '#BBB' }}>{new Date(route.analysis.requested_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>

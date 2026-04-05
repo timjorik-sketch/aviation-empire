@@ -622,14 +622,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                     >
                       <span className="base-group-chevron">{collapsed ? '▶' : '▼'}</span>
                       {group.inProduction ? (
-                        <span className="base-group-iata" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{
-                            display: 'inline-block', width: 10, height: 10, borderRadius: '50%',
-                            background: '#9ca3af', boxShadow: '0 0 0 3px rgba(156,163,175,0.28)',
-                            flexShrink: 0
-                          }} />
-                          In Production
-                        </span>
+                        <span className="base-group-iata">IN PRODUCTION</span>
                       ) : group.forSale ? (
                         <span className="base-group-iata">Zu verkaufen</span>
                       ) : group.code ? (

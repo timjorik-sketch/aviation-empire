@@ -1142,6 +1142,22 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
         <Toast error={error} onClearError={() => setError('')} success={success} onClearSuccess={() => setSuccess('')} />
 
+        {aircraft.delivery_at && new Date(aircraft.delivery_at) > new Date() && (() => {
+          const msLeft = new Date(aircraft.delivery_at).getTime() - Date.now();
+          const h = Math.ceil(msLeft / 3600000);
+          return (
+            <div style={{ background: '#FEF3C7', border: '1px solid #FCD34D', borderRadius: 8, padding: '12px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: '1.2rem' }}>⏳</span>
+              <div>
+                <span style={{ fontWeight: 700, color: '#92400E', fontSize: '0.9rem' }}>In Production</span>
+                <span style={{ color: '#92400E', fontSize: '0.85rem', marginLeft: 8 }}>
+                  Delivery in ~{h}h · {new Date(aircraft.delivery_at).toLocaleString()}
+                </span>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* ── Info strip ── */}
         <div className="ad-info-strip">
           <div className="ad-identity">

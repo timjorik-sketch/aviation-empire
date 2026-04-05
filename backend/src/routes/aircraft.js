@@ -186,7 +186,7 @@ async function getGroupedFleetHandler(req, res) {
              COUNT(a.id) as count, t.image_filename
       FROM aircraft a
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
-      WHERE a.airline_id = $1 AND (a.delivery_at IS NULL OR a.delivery_at <= NOW())
+      WHERE a.airline_id = $1
       GROUP BY t.id, t.manufacturer, t.model, t.full_name, t.max_passengers, t.range_km, t.image_filename
       ORDER BY t.manufacturer, t.model
     `, [airlineId]);
@@ -348,11 +348,12 @@ router.get('/fleet', authMiddleware, async (req, res) => {
              a.current_location,
              t.new_price_usd, t.depreciation_age, t.depreciation_fh, a.total_flight_hours,
              a.is_listed_for_sale, t.min_runway_takeoff_m, t.min_runway_landing_m,
+             a.delivery_at,
              (SELECT current_value FROM used_aircraft_market WHERE seller_aircraft_id = a.id LIMIT 1) as listed_price
       FROM aircraft a
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
       LEFT JOIN airline_cabin_profiles acp ON a.airline_cabin_profile_id = acp.id
-      WHERE a.airline_id = $1 AND (a.delivery_at IS NULL OR a.delivery_at <= NOW())
+      WHERE a.airline_id = $1
       ORDER BY a.purchased_at DESC
     `, [airlineId]);
 
@@ -382,6 +383,7 @@ router.get('/fleet', authMiddleware, async (req, res) => {
       listed_price: row.listed_price ?? null,
       min_runway_takeoff_m: row.min_runway_takeoff_m ?? 0,
       min_runway_landing_m: row.min_runway_landing_m ?? 0,
+      delivery_at: row.delivery_at ?? null,
     }));
 
     res.json({ fleet });
@@ -410,7 +412,7 @@ router.get('/fleet/overview', authMiddleware, async (req, res) => {
       FROM aircraft a
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
       LEFT JOIN airports ap ON a.home_airport = ap.iata_code
-      WHERE a.airline_id = $1 AND (a.delivery_at IS NULL OR a.delivery_at <= NOW())
+      WHERE a.airline_id = $1
       ORDER BY a.home_airport, a.registration
     `, [airlineId]);
 
@@ -634,7 +636,8 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
              t.image_filename, t.id as type_id, a.airline_cabin_profile_id,
              a.current_location, a.crew_assigned,
              t.new_price_usd, t.depreciation_age, t.depreciation_fh,
-             a.total_flight_hours, a.purchased_at, t.wake_turbulence_category
+             a.total_flight_hours, a.purchased_at, t.wake_turbulence_category,
+             a.delivery_at
       FROM aircraft a
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
       WHERE a.id = $1 AND a.airline_id = $2
@@ -659,7 +662,8 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
       depreciation_fh: row.depreciation_fh ?? 0.000010,
       total_flight_hours: row.total_flight_hours ?? 0,
       purchased_at: row.purchased_at ?? null,
-      wake_turbulence_category: row.wake_turbulence_category ?? 'M'
+      wake_turbulence_category: row.wake_turbulence_category ?? 'M',
+      delivery_at: row.delivery_at ?? null,
     };
 
     let home_airport_name = null;

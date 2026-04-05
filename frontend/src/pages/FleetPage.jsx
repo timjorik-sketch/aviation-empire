@@ -146,6 +146,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
           purchased_at: ac.purchased_at,
           is_listed_for_sale: ac.is_listed_for_sale ?? 0,
           listed_price: ac.listed_price ?? null,
+          delivery_at: ac.delivery_at ?? null,
         };
       });
 
@@ -671,11 +672,16 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                           <tbody>
                             {group.aircraft.map(ac => {
                               const status = getAircraftStatus(ac);
+                              const inProduction = ac.delivery_at && new Date(ac.delivery_at) > new Date();
                               return (
-                                <tr key={ac.id} className={`ov-row ov-row--${status}`}>
+                                <tr key={ac.id} className={`ov-row ov-row--${inProduction ? 'inactive' : status}`}>
                                   <td style={{ textAlign: 'center' }}>
-                                    <span className={`status-dot status-dot--${status}`}
-                                      title={status === 'inactive' ? 'Inactive' : status === 'in-flight' ? 'In Flight' : status === 'boarding' ? 'Boarding' : 'Active'} />
+                                    {inProduction ? (
+                                      <span style={{ fontSize: '0.7rem', color: '#92400E' }}>⏳</span>
+                                    ) : (
+                                      <span className={`status-dot status-dot--${status}`}
+                                        title={status === 'inactive' ? 'Inactive' : status === 'in-flight' ? 'In Flight' : status === 'boarding' ? 'Boarding' : 'Active'} />
+                                    )}
                                   </td>
                                   <td>
                                     <span className="ov-registration">{ac.registration}</span>
@@ -745,6 +751,22 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                                           onClick={() => handleCancelListing(ac)}
                                         >
                                           Verkauf beenden
+                                        </button>
+                                      </td>
+                                    </>
+                                  ) : inProduction ? (
+                                    <>
+                                      <td className="ov-location">
+                                        <span style={{ display: 'inline-block', padding: '2px 7px', borderRadius: 10, background: '#FEF3C7', color: '#92400E', fontSize: '0.7rem', fontWeight: 700 }}>
+                                          In Production
+                                        </span>
+                                      </td>
+                                      <td>
+                                        <button
+                                          className="ov-btn-schedule"
+                                          onClick={() => onSelectAircraft && onSelectAircraft(ac.id)}
+                                        >
+                                          View Details
                                         </button>
                                       </td>
                                     </>

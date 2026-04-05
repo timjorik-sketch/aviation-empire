@@ -206,6 +206,17 @@ router.get('/', authMiddleware, async (req, res) => {
       JOIN routes r ON ma.route_id = r.id
       WHERE ma.airline_id = $1
       ORDER BY ma.requested_at DESC
+      LIMIT 4
+    `, [req.airlineId]);
+
+    // Delete any older analyses beyond the 4 most recent
+    await pool.query(`
+      DELETE FROM market_analyses
+      WHERE airline_id = $1
+        AND id NOT IN (
+          SELECT id FROM market_analyses WHERE airline_id = $1
+          ORDER BY requested_at DESC LIMIT 4
+        )
     `, [req.airlineId]);
 
     const analyses = result.rows.map(row => ({

@@ -85,6 +85,7 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
   const [weekStart, setWeekStart] = useState('');
   const [selectedRouteForAnalysis, setSelectedRouteForAnalysis] = useState('');
   const [requestingAnalysis, setRequestingAnalysis] = useState(false);
+  const [analysesExpanded, setAnalysesExpanded] = useState(true);
 
   // Sort state
   const [sortCol, setSortCol] = useState('flight_number');
@@ -608,10 +609,14 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
             </div>
             {analyses.length > 0 && (
               <div style={{ borderTop: '2px solid #F0F0F0' }}>
-                <div style={{ padding: '10px 16px 6px', fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999' }}>
-                  Recent Analyses
+                <div
+                  onClick={() => setAnalysesExpanded(v => !v)}
+                  style={{ padding: '10px 16px 6px', fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', userSelect: 'none' }}
+                >
+                  <span>Recent Analyses</span>
+                  <span style={{ fontSize: '0.8rem' }}>{analysesExpanded ? '▲' : '▼'}</span>
                 </div>
-                {analyses.map(a => {
+                {analysesExpanded && analyses.map(a => {
                   const isPending = a.status === 'pending';
                   const completedMs = new Date(a.completed_at).getTime();
                   const requestedMs = new Date(a.requested_at).getTime();

@@ -6,9 +6,9 @@ const router = express.Router();
 
 // Cost tiers by distance
 function getCost(distKm) {
-  if (distKm < 3000) return 20000;
-  if (distKm <= 7000) return 80000;
-  return 180000;
+  if (distKm < 1000) return 100000;
+  if (distKm <= 3000) return 450000;
+  return 1000000;
 }
 
 // Rating based on ratio actual/market — aligned with attractiveness curve
@@ -114,7 +114,7 @@ router.post('/request', authMiddleware, async (req, res) => {
 
     // Weekly limit
     const limits = await getLimitsRow(req.airlineId);
-    // if (limits.analyses_this_week >= 4) return res.status(400).json({ error: 'Weekly analysis limit reached (4/week)' }); // disabled for testing
+    if (limits.analyses_this_week >= 4) return res.status(400).json({ error: 'Weekly analysis limit reached (4/week)' });
 
     const cost = getCost(distKm);
 
@@ -146,7 +146,7 @@ router.post('/request', authMiddleware, async (req, res) => {
     const firstMarket = formulaPrices.first;
 
     // completed_at = now + 1 minute (testing)
-    const completedAt = new Date(Date.now() + 5 * 1000).toISOString();
+    const completedAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
 
     // Insert analysis with RETURNING id
     const insResult = await pool.query(`

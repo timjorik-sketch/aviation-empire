@@ -711,6 +711,35 @@ async function initDatabase() {
     );
   }
 
+  // ── AIRPORT CATEGORY CORRECTIONS (runs after geo seed, before fee seed) ──────
+  const airportCategoryFixes = [
+    // Category 5
+    ['DAC', 5], ['DMM', 5], ['DWC', 5],
+    // Category 6
+    ['BNE', 6], ['CGO', 6], ['CSX', 6], ['DLC', 6], ['DME', 6], ['DPS', 6],
+    ['DTW', 6], ['ESB', 6], ['FUK', 6], ['HNL', 6], ['KIX', 6], ['LIM', 6],
+    ['SCL', 6], ['CCU', 6],
+    // Category 7
+    ['AUH', 7], ['AYT', 7], ['BCN', 7], ['BER', 7], ['BOS', 7], ['CJU', 7],
+    ['CLT', 7], ['CUN', 7], ['EWR', 7], ['FCO', 7], ['GRU', 7], ['IAD', 7],
+    ['IAH', 7], ['JED', 7], ['LAS', 7], ['LGW', 7], ['MCO', 7], ['MEL', 7],
+    ['MEX', 7], ['MSP', 7], ['MUC', 7], ['ORY', 7], ['PHL', 7], ['PHX', 7],
+    ['RUH', 7], ['SEA', 7], ['SGN', 7], ['STN', 7], ['SVO', 7], ['SYD', 7],
+    ['YVR', 7], ['ZRH', 7], ['BLR', 7], ['CKG', 7], ['DOH', 7], ['HKG', 7],
+    ['MIA', 7], ['NRT', 7], ['SFO', 7], ['BOM', 7], ['CGK', 7], ['CTU', 7],
+    ['XIY', 7],
+    // Category 8
+    ['AMS', 8], ['DEN', 8], ['DFW', 8], ['FRA', 8], ['HND', 8], ['ICN', 8],
+    ['JFK', 8], ['MAD', 8], ['PVG', 8], ['SZX', 8], ['ATL', 8], ['BKK', 8],
+    ['CAN', 8], ['CDG', 8], ['DEL', 8], ['DXB', 8], ['IST', 8], ['LAX', 8],
+    ['LHR', 8], ['ORD', 8], ['SIN', 8], ['PEK', 8],
+  ];
+  for (const [code, cat] of airportCategoryFixes) {
+    await safeQuery('UPDATE airports SET category=$1 WHERE iata_code=$2', [cat, code], `cat fix ${code}`);
+  }
+  // BJS → PEK rename (Beijing city code → actual airport code)
+  await safeQuery(`UPDATE airports SET iata_code='PEK', name='Beijing Capital International Airport' WHERE iata_code='BJS'`, null, 'BJS→PEK rename');
+
   // ── AIRPORT FEE SEED (runs after coordinate seed so category is correct) ─────
   const CAT_FEES = {
     8:[850,2900,7300,600,1200,2150], 7:[700,2400,5900,550,1075,1825],

@@ -1364,7 +1364,7 @@ INSERT OR IGNORE INTO airports (iata_code, name, country, registration_prefix, c
 ('BHU',  'Bhavnagar Airport',                                                 'India',                     'VT',   2, 'Asia',  2400,  21.7522,  72.1852),
 ('BIK',  'Frans Kaisiepo Airport',                                            'Indonesia',                 'PK',   3, 'Asia',  2500,  -1.1901, 136.1081),
 ('BJV',  'Milas-Bodrum Airport',                                              'Turkey',                    'TC',   4, 'Asia',  3000,  37.2506,  27.6643),
-('BJS',  'Beijing Capital International Airport',                             'China',                     'B',    8, 'Asia',  3800,  40.0801, 116.5846),
+('PEK',  'Beijing Capital International Airport',                             'China',                     'B',    8, 'Asia',  3800,  40.0801, 116.5846),
 ('BKI',  'Kota Kinabalu International Airport',                               'Malaysia',                  '9M',   5, 'Asia',  3780,   5.9372, 116.0508),
 ('BKK',  'Suvarnabhumi Airport',                                              'Thailand',                  'HS',   8, 'Asia',  4000,  13.6900, 100.7501),
 ('BKN',  'Balkanabat Airport',                                                'Turkmenistan',              'EZ',   2, 'Asia',  3800,  39.4633,  54.3650),

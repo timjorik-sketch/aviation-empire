@@ -395,7 +395,7 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
     }
   };
 
-  const TIER_LABEL = { home_base: ' 🏠', base: ' 🔥' };
+  const TIER_LABEL = { home_base: ' (Home-Base)', base: ' 🔥' };
   const airportsByCountry = airports.reduce((acc, a) => {
     if (!acc[a.country]) acc[a.country] = [];
     acc[a.country].push(a);

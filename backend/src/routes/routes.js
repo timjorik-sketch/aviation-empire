@@ -116,7 +116,7 @@ router.get('/', authMiddleware, async (req, res) => {
       departure_name: row.departure_name,
       arrival_name: row.arrival_name,
       weekly_flights: parseInt(row.weekly_flights),
-      analysis: row.economy_rating ? {
+      analysis: row.ma_requested_at ? {
         economy_rating: row.economy_rating,
         business_rating: row.business_rating,
         first_rating: row.first_rating,

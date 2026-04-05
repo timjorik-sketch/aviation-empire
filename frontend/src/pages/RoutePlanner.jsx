@@ -802,7 +802,7 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
                                           </div>
                                           <button className="rp-btn-edit" style={{ marginLeft: '0.5rem' }} onClick={() => handleStartEdit(route)}>Edit Prices</button>
                                         </div>
-                                        {an && (
+                                        {an && (an.economy_rating || an.business_rating || an.first_rating) && (
                                           <div style={{ marginBottom: '12px', padding: '8px 10px', background: '#F5F5F5', borderRadius: '6px', border: '1px solid #E8E8E8' }}>
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                                               <span style={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999' }}>Market Analysis</span>

@@ -520,6 +520,7 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
                           <span>Alter</span>
                           <span>Flugstunden</span>
                           <span>Standort</span>
+                          <span>Verkäufer</span>
                           <span style={{textAlign:'right'}}>Preis</span>
                         </div>
                         {modalUsedListings.map(l => {
@@ -534,6 +535,9 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
                               <span>{fmtAge(l.manufactured_year)}</span>
                               <span>{fmtFH(l.total_flight_hours)}</span>
                               <span>{l.location || '—'}</span>
+                              <span style={{ fontSize: '0.78rem', color: l.seller_type === 'player' ? '#2C2C2C' : '#888' }}>
+                                {l.seller_name}
+                              </span>
                               <span className="am-ul-price">{fmt(l.current_value)}</span>
                             </button>
                           );
@@ -812,12 +816,12 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
         .am-used-list-label { font-size: 0.78rem; font-weight: 600; color: #666; text-transform: uppercase; letter-spacing: 0.05em; }
         .am-used-list { display: flex; flex-direction: column; gap: 2px; }
         .am-ul-header {
-          display: grid; grid-template-columns: 1fr 0.8fr 1fr 0.8fr 0.8fr;
+          display: grid; grid-template-columns: 1fr 0.8fr 1fr 0.8fr 1.2fr 0.8fr;
           padding: 0.3rem 0.7rem; font-size: 0.68rem; font-weight: 700;
           color: #999; text-transform: uppercase; letter-spacing: 0.05em;
         }
         .am-used-listing {
-          width: 100%; display: grid; grid-template-columns: 1fr 0.8fr 1fr 0.8fr 0.8fr;
+          width: 100%; display: grid; grid-template-columns: 1fr 0.8fr 1fr 0.8fr 1.2fr 0.8fr;
           padding: 0.55rem 0.7rem; border: 1.5px solid transparent;
           border-radius: 6px; background: #F7F7F7; cursor: pointer; text-align: left;
           font-size: 0.82rem; color: #666; align-items: center;

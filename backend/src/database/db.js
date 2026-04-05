@@ -353,6 +353,8 @@ async function initDatabase() {
     // fuel_prices table
     `ALTER TABLE fuel_prices ADD COLUMN IF NOT EXISTS price_per_liter REAL`,
     `ALTER TABLE fuel_prices ADD COLUMN IF NOT EXISTS price_per_kg REAL`,
+    // used_aircraft_market
+    `ALTER TABLE used_aircraft_market ADD COLUMN IF NOT EXISTS seller_type TEXT DEFAULT 'system'`,
   ];
   await runStatements(alterCols, 'alter cols');
 

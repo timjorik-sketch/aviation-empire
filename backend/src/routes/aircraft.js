@@ -108,7 +108,7 @@ export async function fillUsedMarket() {
         const reg = airport ? await genRegForPrefix(airport.prefix) : await genRegForPrefix('D');
         const val = Math.round(calcUsedValue(t.newPrice, t.kAge, t.kFh, ageYears, totalFh));
         await pool.query(
-          'INSERT INTO used_aircraft_market (aircraft_type_id, registration, manufactured_year, total_flight_hours, current_value, location) VALUES ($1, $2, $3, $4, $5, $6)',
+          "INSERT INTO used_aircraft_market (aircraft_type_id, registration, manufactured_year, total_flight_hours, current_value, location, seller_type) VALUES ($1, $2, $3, $4, $5, $6, 'system')",
           [t.id, reg, manufacturedYear, totalFh, val, location]
         );
         total++;
@@ -117,6 +117,42 @@ export async function fillUsedMarket() {
     console.log(`[UsedMarket] Added ${total} listings (target: ${MARKET_TARGET_PER_TYPE} per type)`);
     return total;
   } catch(e) { console.error('fillUsedMarket error:', e); return 0; }
+}
+
+async function runAeroTradePurchases() {
+  try {
+    const result = await pool.query(`
+      SELECT id, seller_aircraft_id, seller_airline_id, current_value, registration,
+             EXTRACT(EPOCH FROM (NOW() - listed_at)) / 86400 AS days_listed
+      FROM used_aircraft_market
+      WHERE seller_type = 'player'
+        AND listed_at <= NOW() - INTERVAL '2 days'
+    `);
+
+    let purchased = 0;
+    for (const listing of result.rows) {
+      const days = parseFloat(listing.days_listed);
+      const prob = days < 4 ? 0.10 : days < 6 ? 0.20 : days < 8 ? 0.35 : days < 15 ? 0.50 : 0.75;
+      if (Math.random() >= prob) continue;
+
+      const { id: listingId, seller_aircraft_id: sellerAircraftId, seller_airline_id: sellerAirlineId,
+              current_value: price, registration } = listing;
+
+      await pool.query('DELETE FROM used_aircraft_market WHERE id = $1', [listingId]);
+      if (sellerAircraftId && sellerAirlineId) {
+        await pool.query('UPDATE personnel SET aircraft_id = NULL WHERE aircraft_id = $1', [sellerAircraftId]);
+        await pool.query('DELETE FROM aircraft WHERE id = $1', [sellerAircraftId]);
+        await pool.query('UPDATE airlines SET balance = balance + $1 WHERE id = $2', [price, sellerAirlineId]);
+        await pool.query(
+          "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
+          [sellerAirlineId, price, `Aircraft purchased by AeroTrade International: ${registration}`]
+        );
+        console.log(`[AeroTrade] Bought ${registration} for $${price.toLocaleString()} from airline ${sellerAirlineId}`);
+      }
+      purchased++;
+    }
+    if (purchased > 0) console.log(`[AeroTrade] Purchased ${purchased} aircraft today`);
+  } catch(e) { console.error('AeroTrade purchase error:', e); }
 }
 
 let lastMarketRefreshDate = null;
@@ -128,7 +164,8 @@ export function startMarketRefreshScheduler() {
       if (cetHour >= 3 && cetDate !== lastMarketRefreshDate) {
         lastMarketRefreshDate = cetDate;
         await fillUsedMarket();
-        console.log('[UsedMarket] Daily refresh completed');
+        await runAeroTradePurchases();
+        console.log('[UsedMarket] Daily refresh + AeroTrade purchases completed');
       }
     } catch(e) { console.error('Market refresh error:', e); }
   }, 10 * 60 * 1000);
@@ -1748,11 +1785,13 @@ router.get('/market/used', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT u.id, u.registration, u.manufactured_year, u.total_flight_hours, u.current_value, u.listed_at,
+             u.seller_type, COALESCE(al.name, 'AeroTrade International') AS seller_name,
              t.id as type_id, t.manufacturer, t.model, t.full_name, t.max_passengers, t.range_km,
              t.cruise_speed_kmh, t.wake_turbulence_category, t.image_filename,
              t.new_price_usd, t.min_runway_takeoff_m, t.min_runway_landing_m, u.location
       FROM used_aircraft_market u
       JOIN aircraft_types t ON u.aircraft_type_id = t.id
+      LEFT JOIN airlines al ON u.seller_airline_id = al.id
       ORDER BY u.current_value ASC
     `);
     const listings = result.rows.map(r => {
@@ -1761,6 +1800,7 @@ router.get('/market/used', authMiddleware, async (req, res) => {
       return {
         id: r.id, registration: r.registration, manufactured_year: r.manufactured_year,
         total_flight_hours: r.total_flight_hours, current_value: r.current_value, listed_at: r.listed_at,
+        seller_type: r.seller_type, seller_name: r.seller_name,
         age_years: ageYears,
         type_id: r.type_id, manufacturer: r.manufacturer, model: r.model, full_name: r.full_name,
         max_passengers: r.max_passengers, range_km: r.range_km, cruise_speed_kmh: r.cruise_speed_kmh,
@@ -1864,7 +1904,7 @@ router.post('/:id/sell-to-market', authMiddleware, async (req, res) => {
     const finalReg = await genRegForLocation(currentLocation);
 
     await pool.query(
-      'INSERT INTO used_aircraft_market (aircraft_type_id, registration, manufactured_year, total_flight_hours, current_value, location, seller_aircraft_id, seller_airline_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+      "INSERT INTO used_aircraft_market (aircraft_type_id, registration, manufactured_year, total_flight_hours, current_value, location, seller_aircraft_id, seller_airline_id, seller_type) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'player')",
       [typeId, finalReg, manufacturedYear, totalFh || 0, marketValue, currentLocation || null, aircraftId, req.airlineId]
     );
 

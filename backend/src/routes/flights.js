@@ -1419,8 +1419,8 @@ async function generateFuelPrice() {
     await pool.query('INSERT INTO fuel_prices (price_per_liter, price_per_kg) VALUES ($1, $2)',
       [rounded, Math.round(rounded * 1.25 * 100) / 100]);
 
-    // Keep only last 3 days of history
-    await pool.query("DELETE FROM fuel_prices WHERE created_at < NOW() - INTERVAL '3 days'");
+    // Keep only last 24 hours of history
+    await pool.query("DELETE FROM fuel_prices WHERE created_at < NOW() - INTERVAL '24 hours'");
 
     // Keep only last 15 days of transactions
     await pool.query("DELETE FROM transactions WHERE created_at < NOW() - INTERVAL '15 days'");
@@ -1549,8 +1549,11 @@ function startFlightProcessor() {
   // Generate flights, bookings, fuel price — all synced to :13 each hour
   scheduleAtMinute13(generateFlights, 'FlightGen');
   scheduleAtMinute13(processBookings, 'Bookings');
-  // Fuel price: generate immediately on start, backfill history, then sync to :13
-  generateFuelPrice();
+  // Fuel price: only generate on start if last entry is >30min old, then sync to :13
+  pool.query('SELECT created_at FROM fuel_prices ORDER BY created_at DESC LIMIT 1').then(r => {
+    const lastAt = r.rows[0] ? new Date(r.rows[0].created_at).getTime() : 0;
+    if (Date.now() - lastAt > 30 * 60 * 1000) generateFuelPrice();
+  });
   backfillFuelPrices();
   scheduleAtMinute13(generateFuelPrice, 'FuelPrice');
   // Process flight statuses every 10 seconds (status changes need to be fast)

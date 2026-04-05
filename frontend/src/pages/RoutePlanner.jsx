@@ -136,11 +136,11 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
 
   useEffect(() => { fetchData(); }, []);
 
-  // Tick every second for pending analysis countdowns; also auto-refresh when one completes
+  // Tick every second — only when analyses box is expanded AND has pending entries
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const hasPending = analyses.some(a => a.status === 'pending');
-    if (!hasPending) return;
+    if (!analysesExpanded || !hasPending) return;
     const iv = setInterval(() => {
       const nowMs = Date.now();
       setNow(nowMs);
@@ -149,7 +149,7 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
       if (justCompleted) { fetchAnalyses().then(() => refreshRoutes()); }
     }, 1000);
     return () => clearInterval(iv);
-  }, [analyses]);
+  }, [analyses, analysesExpanded]);
 
   // Fetch departure airport coordinates when selection changes
   useEffect(() => {

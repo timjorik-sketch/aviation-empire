@@ -283,6 +283,7 @@ async function initDatabase() {
   const alterCols = [
     // aircraft table
     `ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS is_active INTEGER DEFAULT 0`,
+    `ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS delivery_at TIMESTAMPTZ`,
     `ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS airline_cabin_profile_id INTEGER REFERENCES airline_cabin_profiles(id)`,
     `ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS current_location TEXT REFERENCES airports(iata_code)`,
     `ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS crew_assigned INTEGER DEFAULT 0`,

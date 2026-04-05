@@ -186,7 +186,7 @@ async function getGroupedFleetHandler(req, res) {
              COUNT(a.id) as count, t.image_filename
       FROM aircraft a
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
-      WHERE a.airline_id = $1
+      WHERE a.airline_id = $1 AND (a.delivery_at IS NULL OR a.delivery_at <= NOW())
       GROUP BY t.id, t.manufacturer, t.model, t.full_name, t.max_passengers, t.range_km, t.image_filename
       ORDER BY t.manufacturer, t.model
     `, [airlineId]);
@@ -352,7 +352,7 @@ router.get('/fleet', authMiddleware, async (req, res) => {
       FROM aircraft a
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
       LEFT JOIN airline_cabin_profiles acp ON a.airline_cabin_profile_id = acp.id
-      WHERE a.airline_id = $1
+      WHERE a.airline_id = $1 AND (a.delivery_at IS NULL OR a.delivery_at <= NOW())
       ORDER BY a.purchased_at DESC
     `, [airlineId]);
 
@@ -408,7 +408,7 @@ router.get('/fleet/overview', authMiddleware, async (req, res) => {
       FROM aircraft a
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
       LEFT JOIN airports ap ON a.home_airport = ap.iata_code
-      WHERE a.airline_id = $1
+      WHERE a.airline_id = $1 AND (a.delivery_at IS NULL OR a.delivery_at <= NOW())
       ORDER BY a.home_airport, a.registration
     `, [airlineId]);
 
@@ -452,6 +452,42 @@ router.get('/fleet/overview', authMiddleware, async (req, res) => {
     res.json({ aircraft });
   } catch (error) {
     console.error('Get fleet overview error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// GET /api/aircraft/orders — aircraft on order (delivery_at in future)
+router.get('/orders', authMiddleware, async (req, res) => {
+  try {
+    const airlineId = req.airlineId;
+    if (!airlineId) return res.status(400).json({ error: 'No active airline' });
+
+    const result = await pool.query(`
+      SELECT a.id, a.registration, a.name, a.purchased_at, a.delivery_at, a.home_airport,
+             t.full_name, t.manufacturer, t.model, t.image_filename, t.wake_turbulence_category
+      FROM aircraft a
+      JOIN aircraft_types t ON a.aircraft_type_id = t.id
+      WHERE a.airline_id = $1 AND a.delivery_at > NOW()
+      ORDER BY a.delivery_at ASC
+    `, [airlineId]);
+
+    const orders = result.rows.map(r => ({
+      id: r.id,
+      registration: r.registration,
+      name: r.name,
+      purchased_at: r.purchased_at,
+      delivery_at: r.delivery_at,
+      home_airport: r.home_airport,
+      full_name: r.full_name,
+      manufacturer: r.manufacturer,
+      model: r.model,
+      image_filename: r.image_filename,
+      wake_turbulence_category: r.wake_turbulence_category,
+    }));
+
+    res.json({ orders });
+  } catch(e) {
+    console.error('Get orders error:', e);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -505,7 +541,7 @@ router.post('/purchase',
       }
       const registrationPrefix = airportResult.rows[0].registration_prefix;
 
-      const typeResult = await pool.query('SELECT id, manufacturer, model, full_name, max_passengers, range_km, new_price_usd, required_level, image_filename FROM aircraft_types WHERE id = $1', [aircraft_type_id]);
+      const typeResult = await pool.query('SELECT id, manufacturer, model, full_name, max_passengers, range_km, new_price_usd, required_level, image_filename, wake_turbulence_category FROM aircraft_types WHERE id = $1', [aircraft_type_id]);
       if (!typeResult.rows[0]) {
         return res.status(400).json({ error: 'Aircraft type not found' });
       }
@@ -525,13 +561,17 @@ router.post('/purchase',
         });
       }
 
+      const DELIVERY_HOURS = { L: 48, M: 72, H: 96 };
+      const deliveryHours = DELIVERY_HOURS[aircraftType.wake_turbulence_category] || 72;
+
       const purchasedAircraft = [];
       for (let i = 0; i < quantity; i++) {
         const registration = await generateRegistration(registrationPrefix);
 
         const insertResult = await pool.query(
-          'INSERT INTO aircraft (airline_id, aircraft_type_id, registration, name, home_airport, current_location, condition, is_active) VALUES ($1, $2, $3, $4, $5, $6, 100, 0) RETURNING id',
-          [airline.id, aircraft_type_id, registration, name || null, homeAirport, deliveryAirport || homeAirport]
+          `INSERT INTO aircraft (airline_id, aircraft_type_id, registration, name, home_airport, current_location, condition, is_active, purchased_at, delivery_at)
+           VALUES ($1, $2, $3, $4, $5, $6, 100, 0, NOW(), NOW() + ($7 * INTERVAL '1 hour')) RETURNING id`,
+          [airline.id, aircraft_type_id, registration, name || null, homeAirport, deliveryAirport || homeAirport, deliveryHours]
         );
         const aircraftId = insertResult.rows[0].id;
 
@@ -545,7 +585,8 @@ router.post('/purchase',
           id: aircraftId,
           registration,
           name: name || null,
-          home_airport: homeAirport
+          home_airport: homeAirport,
+          delivery_hours: deliveryHours
         });
       }
 

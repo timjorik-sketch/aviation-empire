@@ -32,6 +32,11 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
   const [errorMsg, setErrorMsg]     = useState('');
   const [collapsedBases, setCollapsedBases] = useState(new Set());
 
+  // Orders state
+  const [orders, setOrders] = useState([]);
+  const [ordersOpen, setOrdersOpen] = useState(false);
+  const [now, setNow] = useState(Date.now());
+
   const toggleBase = (key) => {
     setCollapsedBases(prev => {
       const next = new Set(prev);
@@ -42,7 +47,23 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
 
   useEffect(() => {
     fetchData();
+    fetchOrders();
   }, []);
+
+  useEffect(() => {
+    if (!ordersOpen) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [ordersOpen]);
+
+  const fetchOrders = async () => {
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch(`${API_URL}/api/aircraft/orders`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const data = await res.json();
+      setOrders(data.orders || []);
+    } catch(e) { console.error('fetchOrders error:', e); }
+  };
 
   const fetchData = async () => {
     const token = localStorage.getItem('token');
@@ -489,7 +510,76 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
           </div>
         </div>
 
+        {/* Orders box */}
+        {orders.length > 0 && (
+          <div style={{ flex: 3, background: 'white', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', overflow: 'hidden', marginTop: 16 }}>
+            <div style={{ background: '#2C2C2C', padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span className="fleet-section-bar-title">Aircraft on Order</span>
+              <span style={{ background: '#F59E0B', color: '#fff', borderRadius: 12, padding: '2px 10px', fontSize: '0.78rem', fontWeight: 700 }}>{orders.length}</span>
+            </div>
+            <div style={{ padding: '14px 16px' }}>
+              <p style={{ margin: '0 0 10px', fontSize: '0.82rem', color: '#666' }}>
+                {orders.length} aircraft currently in production
+              </p>
+              <button className="fo-nav-btn" onClick={() => setOrdersOpen(true)}>
+                View Orders <span className="fo-nav-arrow">›</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         </div>{/* end flex row */}
+
+        {/* Orders popup */}
+        {ordersOpen && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ background: '#fff', borderRadius: 12, width: '100%', maxWidth: 560, maxHeight: '80vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
+              <div style={{ background: '#2C2C2C', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: '#fff', fontWeight: 700, fontSize: '1rem' }}>Aircraft on Order ({orders.length})</span>
+                <button onClick={() => setOrdersOpen(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: '1.4rem', cursor: 'pointer', lineHeight: 1 }}>×</button>
+              </div>
+              <div style={{ overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {orders.map(o => {
+                  const orderedMs = new Date(o.purchased_at).getTime();
+                  const deliveryMs = new Date(o.delivery_at).getTime();
+                  const totalMs = deliveryMs - orderedMs;
+                  const elapsedMs = now - orderedMs;
+                  const pct = Math.min(100, Math.max(0, Math.round(elapsedMs / totalMs * 100)));
+                  const msLeft = Math.max(0, deliveryMs - now);
+                  const secsLeft = Math.ceil(msLeft / 1000);
+                  const timeLabel = secsLeft >= 3600
+                    ? `${Math.ceil(secsLeft / 3600)}h left`
+                    : secsLeft >= 60
+                    ? `${Math.floor(secsLeft / 60)}m ${secsLeft % 60}s left`
+                    : `${secsLeft}s left`;
+                  return (
+                    <div key={o.id} style={{ background: '#F9F9F9', borderRadius: 8, padding: '12px 14px', border: '1px solid #E8E8E8' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                        <div>
+                          <span style={{ fontWeight: 700, fontSize: '0.88rem', color: '#2C2C2C' }}>{o.full_name}</span>
+                          <span style={{ marginLeft: 8, fontFamily: 'monospace', fontSize: '0.82rem', color: '#666' }}>{o.registration}</span>
+                        </div>
+                        <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 10, background: '#FEF3C7', color: '#92400E', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          In Production
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.78rem', color: '#888', marginBottom: 8 }}>
+                        Delivery to {o.home_airport} · Wake {o.wake_turbulence_category}
+                      </div>
+                      <div style={{ height: 6, borderRadius: 3, background: '#F0F0F0', overflow: 'hidden', marginBottom: 4 }}>
+                        <div style={{ height: '100%', borderRadius: 3, background: '#F59E0B', width: `${pct}%`, transition: 'width 1s linear' }} />
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: '#92400E' }}>
+                        <span>{pct}%</span>
+                        <span>{msLeft > 0 ? timeLabel : 'Delivering…'}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Airplane List Section */}
         <section className="overview-section">

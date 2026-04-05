@@ -738,7 +738,7 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
 
     res.json({
       aircraft: { ...aircraft, home_airport_name },
-      cabin_profile, weekly_schedule,
+      weekly_schedule,
       current_flight, current_location,
       stats: { total_flights, total_profit, total_passengers }
     });

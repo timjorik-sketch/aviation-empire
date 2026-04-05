@@ -19,7 +19,8 @@ function getRating(actual, market) {
   if (ratio < 1.00) return 'SLIGHTLY_LOW';
   if (ratio <= 1.10) return 'COMPETITIVE';
   if (ratio <= 1.20) return 'SLIGHTLY_HIGH';
-  return 'OVERPRICED';
+  if (ratio <= 1.40) return 'OVERPRICED';
+  return 'STRONGLY_OVERPRICED';
 }
 
 // Market price formula (mirrors flights.js calcMarketPrices)
@@ -140,25 +141,12 @@ router.post('/request', authMiddleware, async (req, res) => {
     }
     const formulaPrices = calcMarketPrices(distKm, depCat, arrCat);
 
-    // Calculate market price — avg from recent completed flights, fallback to formula
-    async function getMarketPrice(cabin) {
-      const col = `market_price_${cabin}`;
-      const mpResult = await pool.query(
-        `SELECT AVG(f.${col}) FROM flights f WHERE f.route_id = $1 AND f.status = 'completed' AND f.${col} > 0 AND f.departure_time > NOW() - INTERVAL '30 days'`,
-        [route_id]
-      );
-      const avg = mpResult.rows[0] ? parseFloat(mpResult.rows[0].avg) : null;
-      if (avg && avg > 0) return Math.round(avg);
-      // Fallback: current market price formula
-      return cabin === 'economy' ? formulaPrices.eco : cabin === 'business' ? formulaPrices.biz : formulaPrices.first;
-    }
-
-    const ecoMarket   = await getMarketPrice('economy');
-    const bizMarket   = await getMarketPrice('business');
-    const firstMarket = await getMarketPrice('first');
+    const ecoMarket   = formulaPrices.eco;
+    const bizMarket   = formulaPrices.biz;
+    const firstMarket = formulaPrices.first;
 
     // completed_at = now + 1 minute (testing)
-    const completedAt = new Date(Date.now() + 1 * 60 * 1000).toISOString();
+    const completedAt = new Date(Date.now() + 5 * 1000).toISOString();
 
     // Insert analysis with RETURNING id
     const insResult = await pool.query(`

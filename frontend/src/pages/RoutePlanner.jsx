@@ -40,6 +40,7 @@ function RatingDot({ rating }) {
     COMPETITIVE: '#16a34a',
     SLIGHTLY_HIGH: '#ea580c',
     OVERPRICED: '#dc2626',
+    STRONGLY_OVERPRICED: '#7f1d1d',
   };
   const labels = {
     UNDERPRICED: 'Underpriced',
@@ -47,6 +48,7 @@ function RatingDot({ rating }) {
     COMPETITIVE: 'Competitive',
     SLIGHTLY_HIGH: 'Slightly High',
     OVERPRICED: 'Overpriced',
+    STRONGLY_OVERPRICED: 'Strongly Overpriced',
   };
   const color = colors[rating] || '#999';
   return (

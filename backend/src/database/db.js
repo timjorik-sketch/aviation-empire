@@ -436,7 +436,8 @@ async function initDatabase() {
     (58,'Saab','340','Saab 340',36,1735,522,1290,975,0.015,0.019,'L',7500000,1,2,'Aircraft_Saab_Saab-340.png'),
     (59,'Sukhoi','Superjet 100','Sukhoi Superjet 100',108,4578,828,1731,1680,0.022,0.028,'M',36000000,5,2,'Aircraft_Suchoi_Superjet-100.png'),
     (60,'Airbus','A350-900 ULR','Airbus A350-900 ULR',440,18000,903,2850,2200,0.033,0.043,'H',370000000,14,2,'Aircraft_Airbus_350-900.png'),
-    (61,'Boeing','777-200LR','Boeing 777-200LR',440,17370,892,3100,2100,0.036,0.046,'H',360000000,13,2,'Aircraft_Boeing_777-200.png')
+    (61,'Boeing','777-200LR','Boeing 777-200LR',440,17370,892,3100,2100,0.036,0.046,'H',360000000,13,2,'Aircraft_Boeing_777-200.png'),
+    (62,'Airbus','A321 XLR','Airbus A321 XLR',206,8700,840,2500,1980,0.022,0.028,'M',142000000,11,2,'Aircraft_Airbus_321_Neo.png')
     ON CONFLICT (id) DO NOTHING
   `, null, 'aircraft_types seed');
   await safeQuery(`SELECT setval('aircraft_types_id_seq', COALESCE((SELECT MAX(id) FROM aircraft_types), 1))`, null, 'setval at');
@@ -479,6 +480,7 @@ async function initDatabase() {
     ["UPDATE aircraft_types SET min_runway_landing_m=1600, fuel_consumption_per_km=2.1  WHERE full_name='Bombardier CRJ-700'"],
     ["UPDATE aircraft_types SET min_runway_landing_m=2560, fuel_consumption_per_km=3.3  WHERE full_name='Airbus A321'"],
     ["UPDATE aircraft_types SET min_runway_landing_m=2300, fuel_consumption_per_km=2.8  WHERE full_name='Airbus A321 Neo'"],
+    ["UPDATE aircraft_types SET min_runway_landing_m=1980, fuel_consumption_per_km=3.3  WHERE full_name='Airbus A321 XLR'"],
     ["UPDATE aircraft_types SET min_runway_landing_m=2100, fuel_consumption_per_km=2.9  WHERE full_name='Boeing 737-10 Max'"],
     ["UPDATE aircraft_types SET min_runway_landing_m=2100, fuel_consumption_per_km=3.4  WHERE full_name='Boeing 737-400'"],
     ["UPDATE aircraft_types SET min_runway_landing_m=1700, fuel_consumption_per_km=2.3  WHERE full_name='Bombardier CRJ-900'"],
@@ -523,7 +525,7 @@ async function initDatabase() {
     ["UPDATE aircraft_types SET required_level=8  WHERE full_name IN ('Airbus A220-300','Airbus A319','Airbus A319 Neo','COMAC C919')"],
     ["UPDATE aircraft_types SET required_level=9  WHERE full_name IN ('Airbus A320','Airbus A321','Boeing 737-800','Boeing 737-8 Max')"],
     ["UPDATE aircraft_types SET required_level=10 WHERE full_name IN ('Airbus A321 Neo','Boeing 737-10 Max','Boeing 757-200','Boeing 757-300')"],
-    ["UPDATE aircraft_types SET required_level=11 WHERE full_name IN ('Airbus A330-200','Airbus A330-300','Airbus A330-800 Neo','Airbus A330-900 Neo')"],
+    ["UPDATE aircraft_types SET required_level=11 WHERE full_name IN ('Airbus A330-200','Airbus A330-300','Airbus A330-800 Neo','Airbus A330-900 Neo','Airbus A321 XLR')"],
     ["UPDATE aircraft_types SET required_level=12 WHERE full_name IN ('Airbus A340-300','Airbus A340-500','Airbus A340-600','Boeing 787-8')"],
     ["UPDATE aircraft_types SET required_level=13 WHERE full_name IN ('Airbus A350-900','Boeing 787-9','Boeing 787-10','Boeing 777-200','Boeing 777-200LR')"],
     ["UPDATE aircraft_types SET required_level=14 WHERE full_name IN ('Boeing 747-300','Boeing 777-300','Airbus A350-1000','Airbus A350-900 ULR')"],
@@ -568,6 +570,7 @@ async function initDatabase() {
     "UPDATE aircraft_types SET min_runway_takeoff_m=1600 WHERE full_name='Bombardier CRJ-700'",
     "UPDATE aircraft_types SET min_runway_takeoff_m=2560 WHERE full_name='Airbus A321'",
     "UPDATE aircraft_types SET min_runway_takeoff_m=2300 WHERE full_name='Airbus A321 Neo'",
+    "UPDATE aircraft_types SET min_runway_takeoff_m=2500 WHERE full_name='Airbus A321 XLR'",
     "UPDATE aircraft_types SET min_runway_takeoff_m=2400 WHERE full_name='Boeing 737-10 Max'",
     "UPDATE aircraft_types SET min_runway_takeoff_m=2250 WHERE full_name='Boeing 737-400'",
     "UPDATE aircraft_types SET min_runway_takeoff_m=1700 WHERE full_name='Bombardier CRJ-900'",

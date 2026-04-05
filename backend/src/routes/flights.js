@@ -13,7 +13,7 @@ const ATC_RATE_PER_KM = 0.50;     // USD per km for ATC/navigation fees
 
 // XP progression thresholds (cumulative total_points needed to reach each level index)
 // Index = level number. threshold[1]=1000 means you need 1000 XP to reach level 2.
-const XP_THRESHOLDS = [0, 1000, 3000, 7000, 15000, 30000, 55000, 95000, 155000, 240000, 360000, 520000, 750000, 1050000, 1450000];
+const XP_THRESHOLDS = [0, 1000, 3500, 8500, 18500, 36500, 66500, 111500, 176500, 266500, 386500, 546500, 756500, 1036500, 1406500];
 
 function calcFlightXP(distanceKm, loadFactor) {
   const loadMult = loadFactor >= 1.0 ? 1.0

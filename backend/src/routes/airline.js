@@ -54,7 +54,7 @@ async function checkLevelUpPg(airlineId) {
   if (!result.rows[0]) return { leveledUp: false };
   const { level: currentLevel, total_points: totalPoints } = result.rows[0];
   let newLevel = currentLevel;
-  while (newLevel < XP_THRESHOLDS.length - 1 && totalPoints >= XP_THRESHOLDS[newLevel + 1]) {
+  while (newLevel < XP_THRESHOLDS.length - 1 && totalPoints >= XP_THRESHOLDS[newLevel]) {
     newLevel++;
   }
   if (newLevel !== currentLevel) {

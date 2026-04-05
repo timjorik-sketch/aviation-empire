@@ -2877,4 +2877,7 @@ INSERT OR IGNORE INTO aircraft_types (id, manufacturer, model, full_name, max_pa
 -- Saab (Level 1)
 (58, 'Saab',              '340',           'Saab 340',                                 36,  1735,  522, 1290,  975, 0.015, 0.019, 'L',    7500000, 1, 2, 'Aircraft_Saab_Saab-340.png'),
 -- Sukhoi (Level 1)
-(59, 'Sukhoi',            'Superjet 100',  'Sukhoi Superjet 100',                     108,  4578,  828, 1731, 1680, 0.022, 0.028, 'M',   36000000, 1, 2, 'Aircraft_Suchoi_Superjet-100.png');
+(59, 'Sukhoi',            'Superjet 100',  'Sukhoi Superjet 100',                     108,  4578,  828, 1731, 1680, 0.022, 0.028, 'M',   36000000, 1, 2, 'Aircraft_Suchoi_Superjet-100.png'),
+(60, 'Airbus',            'A350-900 ULR',  'Airbus A350-900 ULR',                     440, 18000,  903, 2850, 2200, 0.033, 0.043, 'H',  370000000, 14, 2, 'Aircraft_Airbus_350-900.png'),
+(61, 'Boeing',            '777-200LR',     'Boeing 777-200LR',                         440, 17370,  892, 3100, 2100, 0.036, 0.046, 'H',  360000000, 13, 2, 'Aircraft_Boeing_777-200.png'),
+(62, 'Airbus',            'A321 XLR',      'Airbus A321 XLR',                          206,  8700,  840, 2500, 1980, 0.022, 0.028, 'M',  142000000, 11, 2, 'Aircraft_Airbus_321_Neo.png');

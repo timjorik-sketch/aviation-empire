@@ -499,13 +499,13 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
   }
 });
 
-// Get fuel price history (last 3 days, public — no auth needed)
+// Get fuel price history (last 24 hours, public — no auth needed)
 router.get('/fuel-price-history', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT price_per_liter, created_at
       FROM fuel_prices
-      WHERE created_at >= NOW() - INTERVAL '3 days'
+      WHERE created_at >= NOW() - INTERVAL '24 hours'
       ORDER BY created_at ASC
     `);
 

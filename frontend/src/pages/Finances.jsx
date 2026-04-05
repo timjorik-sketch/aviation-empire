@@ -97,7 +97,7 @@ function FuelChart({ prices, currentPrice }) {
 
   // Fixed 72h window ending now
   const tMax = Date.now();
-  const tMin = tMax - 72 * 60 * 60 * 1000;
+  const tMin = tMax - 24 * 60 * 60 * 1000;
 
   // X position by timestamp
   const xT = (ms) => PAD.left + ((ms - tMin) / (tMax - tMin)) * chartW;
@@ -116,48 +116,11 @@ function FuelChart({ prices, currentPrice }) {
   const yTickCount = 4;
   const yTicks = Array.from({ length: yTickCount + 1 }, (_, i) => minV + (range / yTickCount) * i);
 
-  // Midnight boundaries (Berlin) within the 72h window
-  const midnights = (() => {
-    const result = [];
-    // Walk back from now finding each Berlin midnight
-    for (let d = 0; d <= 3; d++) {
-      const t = tMax - d * 24 * 60 * 60 * 1000;
-      const berlinDate = new Date(t).toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' });
-      const [yr, mo, dy] = berlinDate.split('-').map(Number);
-      // Midnight Berlin = find UTC ms for that Berlin date 00:00
-      // Approximation: format as ISO and adjust by offset
-      const approx = Date.UTC(yr, mo - 1, dy, 0, 0, 0);
-      const fmt = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit',
-        day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
-      });
-      // Use the offset from a nearby known time
-      const offsetMs = (() => {
-        const probe = new Date(approx);
-        const localStr = probe.toLocaleString('sv', { timeZone: 'Europe/Berlin' }); // "YYYY-MM-DD HH:MM:SS"
-        const localDate = new Date(localStr.replace(' ', 'T') + 'Z');
-        return probe.getTime() - localDate.getTime();
-      })();
-      const midnight = approx - offsetMs;
-      if (midnight > tMin && midnight < tMax) result.push(midnight);
-    }
-    return [...new Set(result)].sort((a, b) => a - b);
-  })();
-
-  // Day bands between midnights
-  const bandEdges = [tMin, ...midnights, tMax];
-  const dayBands = bandEdges.slice(0, -1).map((start, i) => ({
-    x1: xT(start), x2: xT(bandEdges[i + 1]), odd: i % 2 === 0,
+  // X-axis labels: every 6 hours
+  const xLabels = [24, 18, 12, 6, 0].map(h => ({
+    ms: tMax - h * 60 * 60 * 1000,
+    label: h === 0 ? 'Now' : `-${h}h`,
   }));
-
-  // X-axis labels: center of each band, day name
-  const dayLabels = dayBands.map((b) => {
-    const midMs = tMin + ((b.x1 - PAD.left + (b.x2 - b.x1) / 2) / chartW) * (tMax - tMin);
-    const label = new Date(midMs).toLocaleDateString('de-DE', {
-      timeZone: 'Europe/Berlin', weekday: 'short', day: 'numeric', month: 'numeric',
-    });
-    return { x: (b.x1 + b.x2) / 2, label };
-  });
 
   // Line path
   const pathD = hasPrices
@@ -176,14 +139,6 @@ function FuelChart({ prices, currentPrice }) {
       </div>
       {hasPrices ? (
         <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
-          {/* Day bands */}
-          {dayBands.map((b, i) => b.odd ? (
-            <rect key={i} x={b.x1} y={PAD.top} width={Math.max(0, b.x2 - b.x1)} height={chartH} fill="#F7F7F7" />
-          ) : null)}
-          {/* Midnight dividers */}
-          {midnights.map((ms, i) => (
-            <line key={i} x1={xT(ms)} x2={xT(ms)} y1={PAD.top} y2={PAD.top + chartH} stroke="#E0E0E0" strokeWidth="1" strokeDasharray="3,3" />
-          ))}
           {/* Y grid + labels */}
           {yTicks.map((v, i) => (
             <g key={i}>
@@ -191,9 +146,9 @@ function FuelChart({ prices, currentPrice }) {
               <text x={PAD.left - 6} y={y(v)} textAnchor="end" dominantBaseline="middle" fontSize="15" fill="#999">${v.toFixed(2)}</text>
             </g>
           ))}
-          {/* X-axis day labels */}
-          {dayLabels.map((dl, i) => (
-            <text key={i} x={Math.max(PAD.left + 2, Math.min(W - PAD.right - 2, dl.x))} y={PAD.top + chartH + 16} textAnchor="middle" fontSize="11" fill="#AAA">{dl.label}</text>
+          {/* X-axis hour labels */}
+          {xLabels.map((xl, i) => (
+            <text key={i} x={Math.max(PAD.left + 2, Math.min(W - PAD.right - 2, xT(xl.ms)))} y={PAD.top + chartH + 16} textAnchor="middle" fontSize="11" fill="#AAA">{xl.label}</text>
           ))}
           {/* Price line */}
           <path d={pathD} fill="none" stroke={priceColor} strokeWidth="2" />
@@ -368,7 +323,7 @@ export default function Finances({ airline, onBack, onNavigateToAirport }) {
         </div>
 
         {/* ── P&L Chart + Fuel Price ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '30% 70%', gap: '16px', marginBottom: '20px', alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px', alignItems: 'start' }}>
           <div className="info-card" style={{ marginBottom: 0 }}>
             <div className="card-header-bar">
               <span className="card-header-bar-title">Profit & Loss — Last 7 Days</span>
@@ -378,7 +333,7 @@ export default function Finances({ airline, onBack, onNavigateToAirport }) {
 
           <div className="info-card" style={{ marginBottom: 0 }}>
             <div className="card-header-bar">
-              <span className="card-header-bar-title">Jet Fuel Price — Last 3 Days</span>
+              <span className="card-header-bar-title">Jet Fuel Price — Last 24 Hours</span>
             </div>
             <FuelChart prices={fuelHistory.prices} currentPrice={fuelHistory.currentPrice} />
           </div>

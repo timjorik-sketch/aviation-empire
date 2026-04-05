@@ -347,7 +347,7 @@ router.get('/fleet', authMiddleware, async (req, res) => {
              t.image_filename, a.airline_cabin_profile_id, acp.name as airline_cabin_profile_name,
              a.current_location,
              t.new_price_usd, t.depreciation_age, t.depreciation_fh, a.total_flight_hours,
-             a.is_listed_for_sale,
+             a.is_listed_for_sale, t.min_runway_takeoff_m, t.min_runway_landing_m,
              (SELECT current_value FROM used_aircraft_market WHERE seller_aircraft_id = a.id LIMIT 1) as listed_price
       FROM aircraft a
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
@@ -380,6 +380,8 @@ router.get('/fleet', authMiddleware, async (req, res) => {
       total_flight_hours: row.total_flight_hours ?? 0,
       is_listed_for_sale: row.is_listed_for_sale ?? 0,
       listed_price: row.listed_price ?? null,
+      min_runway_takeoff_m: row.min_runway_takeoff_m ?? 0,
+      min_runway_landing_m: row.min_runway_landing_m ?? 0,
     }));
 
     res.json({ fleet });

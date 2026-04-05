@@ -146,7 +146,7 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
       setNow(nowMs);
       // Auto-refresh if any pending analysis just passed its completed_at
       const justCompleted = analyses.some(a => a.status === 'pending' && new Date(a.completed_at).getTime() <= nowMs);
-      if (justCompleted) fetchAnalyses();
+      if (justCompleted) { fetchAnalyses(); refreshRoutes(); }
     }, 1000);
     return () => clearInterval(iv);
   }, [analyses]);
@@ -783,21 +783,63 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
                                     <button className="rp-btn-cancel" onClick={handleCancelEdit}>Cancel</button>
                                   </div>
                                 ) : (
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap', marginBottom: '12px' }}>
-                                    <div>
-                                      <div style={{ fontSize: '0.7rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Economy</div>
-                                      <div style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatPrice(route.economy_price)}</div>
-                                    </div>
-                                    <div>
-                                      <div style={{ fontSize: '0.7rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Business</div>
-                                      <div style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatPrice(route.business_price)}</div>
-                                    </div>
-                                    <div>
-                                      <div style={{ fontSize: '0.7rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em' }}>First</div>
-                                      <div style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatPrice(route.first_price)}</div>
-                                    </div>
-                                    <button className="rp-btn-edit" style={{ marginLeft: '0.5rem' }} onClick={() => handleStartEdit(route)}>Edit Prices</button>
-                                  </div>
+                                  {(() => {
+                                    const an = route.analysis;
+                                    const stale = an && (
+                                      an.ma_eco_price != route.economy_price ||
+                                      an.ma_biz_price != route.business_price ||
+                                      an.ma_fir_price != route.first_price
+                                    );
+                                    return (
+                                      <>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap', marginBottom: an ? '8px' : '12px' }}>
+                                          <div>
+                                            <div style={{ fontSize: '0.7rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Economy</div>
+                                            <div style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatPrice(route.economy_price)}</div>
+                                          </div>
+                                          <div>
+                                            <div style={{ fontSize: '0.7rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Business</div>
+                                            <div style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatPrice(route.business_price)}</div>
+                                          </div>
+                                          <div>
+                                            <div style={{ fontSize: '0.7rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em' }}>First</div>
+                                            <div style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatPrice(route.first_price)}</div>
+                                          </div>
+                                          <button className="rp-btn-edit" style={{ marginLeft: '0.5rem' }} onClick={() => handleStartEdit(route)}>Edit Prices</button>
+                                        </div>
+                                        {an && (
+                                          <div style={{ marginBottom: '12px', padding: '8px 10px', background: stale ? '#FFF8F0' : '#F5F5F5', borderRadius: '6px', border: stale ? '1px solid #FCD9A0' : '1px solid #E8E8E8' }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                                              <span style={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: stale ? '#B45309' : '#999' }}>
+                                                Market Analysis{stale ? ' — Stale (prices changed)' : ''}
+                                              </span>
+                                              <span style={{ fontSize: '0.68rem', color: '#BBB' }}>{new Date(an.requested_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+                                            </div>
+                                            <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
+                                              {an.economy_rating && (
+                                                <div>
+                                                  <div style={{ fontSize: '0.68rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>Economy <span style={{ color: '#BBB' }}>Market ${an.economy_market_price}</span></div>
+                                                  <RatingDot rating={an.economy_rating} />
+                                                </div>
+                                              )}
+                                              {an.business_rating && (
+                                                <div>
+                                                  <div style={{ fontSize: '0.68rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>Business <span style={{ color: '#BBB' }}>Market ${an.business_market_price}</span></div>
+                                                  <RatingDot rating={an.business_rating} />
+                                                </div>
+                                              )}
+                                              {an.first_rating && (
+                                                <div>
+                                                  <div style={{ fontSize: '0.68rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>First <span style={{ color: '#BBB' }}>Market ${an.first_market_price}</span></div>
+                                                  <RatingDot rating={an.first_rating} />
+                                                </div>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </>
+                                    );
+                                  })()}
                                 )}
 
                                 {/* Assigned Aircraft */}

@@ -83,10 +83,24 @@ router.get('/', authMiddleware, async (req, res) => {
           FROM weekly_schedule ws
           JOIN aircraft a ON ws.aircraft_id = a.id
           WHERE ws.route_id = r.id AND a.airline_id = r.airline_id
-        ), 0) as weekly_flights
+        ), 0) as weekly_flights,
+        ma.economy_rating, ma.business_rating, ma.first_rating,
+        ma.economy_market_price, ma.business_market_price, ma.first_market_price,
+        ma.economy_price as ma_eco_price, ma.business_price as ma_biz_price, ma.first_price as ma_fir_price,
+        ma.requested_at as ma_requested_at
       FROM routes r
       JOIN airports dep ON r.departure_airport = dep.iata_code
       JOIN airports arr ON r.arrival_airport = arr.iata_code
+      LEFT JOIN LATERAL (
+        SELECT economy_rating, business_rating, first_rating,
+               economy_market_price, business_market_price, first_market_price,
+               economy_price, business_price, first_price,
+               requested_at
+        FROM market_analyses
+        WHERE route_id = r.id AND airline_id = $1 AND status = 'completed'
+        ORDER BY requested_at DESC
+        LIMIT 1
+      ) ma ON true
       WHERE r.airline_id = $1
       ORDER BY r.flight_number ASC
     `, [airlineId]);
@@ -103,7 +117,19 @@ router.get('/', authMiddleware, async (req, res) => {
       first_price: row.first_price,
       departure_name: row.departure_name,
       arrival_name: row.arrival_name,
-      weekly_flights: parseInt(row.weekly_flights)
+      weekly_flights: parseInt(row.weekly_flights),
+      analysis: row.economy_rating ? {
+        economy_rating: row.economy_rating,
+        business_rating: row.business_rating,
+        first_rating: row.first_rating,
+        economy_market_price: row.economy_market_price,
+        business_market_price: row.business_market_price,
+        first_market_price: row.first_market_price,
+        ma_eco_price: row.ma_eco_price,
+        ma_biz_price: row.ma_biz_price,
+        ma_fir_price: row.ma_fir_price,
+        requested_at: row.ma_requested_at,
+      } : null,
     }));
 
     res.json({ routes, airline_code: airlineCode });

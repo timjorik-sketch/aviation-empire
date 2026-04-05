@@ -728,6 +728,16 @@ async function initDatabase() {
     ['YVR', 7], ['ZRH', 7], ['BLR', 7], ['CKG', 7], ['DOH', 7], ['HKG', 7],
     ['MIA', 7], ['NRT', 7], ['SFO', 7], ['BOM', 7], ['CGK', 7], ['CTU', 7],
     ['XIY', 7],
+    // Category 6 (batch 2)
+    ['AGP', 6], ['AUS', 6], ['ARN', 6], ['BNA', 6], ['BRU', 6], ['BWI', 6],
+    ['DUS', 6], ['EZE', 6], ['FLL', 6], ['GMP', 6], ['GVA', 6], ['HAN', 6],
+    ['HEL', 6], ['HKT', 6], ['HYD', 6], ['LGA', 6], ['LIS', 6], ['MAN', 6],
+    ['MXP', 6], ['NKG', 6], ['OPO', 6], ['OSL', 6], ['PDX', 6], ['PER', 6],
+    ['PMI', 6], ['SAN', 6], ['SLC', 6], ['TPA', 6], ['WAW', 6], ['YUL', 6],
+    ['YYC', 6],
+    // Category 7 (batch 2)
+    ['ATH', 7], ['CAI', 7], ['CPH', 7], ['DUB', 7], ['HGH', 7], ['KMG', 7],
+    ['MNL', 7], ['SAW', 7], ['SHA', 7], ['TPE', 7], ['VIE', 7], ['YYZ', 7],
     // Category 8
     ['AMS', 8], ['DEN', 8], ['DFW', 8], ['FRA', 8], ['HND', 8], ['ICN', 8],
     ['JFK', 8], ['MAD', 8], ['PVG', 8], ['SZX', 8], ['ATL', 8], ['BKK', 8],

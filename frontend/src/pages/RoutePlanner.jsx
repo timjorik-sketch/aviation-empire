@@ -808,19 +808,19 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
                                         <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
                                           {route.analysis.economy_rating && (
                                             <div>
-                                              <div style={{ fontSize: '0.68rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>Economy <span style={{ color: '#BBB' }}>Market ${route.analysis.economy_market_price}</span></div>
+                                              <div style={{ fontSize: '0.68rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>Economy</div>
                                               <RatingDot rating={route.analysis.economy_rating} />
                                             </div>
                                           )}
                                           {route.analysis.business_rating && (
                                             <div>
-                                              <div style={{ fontSize: '0.68rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>Business <span style={{ color: '#BBB' }}>Market ${route.analysis.business_market_price}</span></div>
+                                              <div style={{ fontSize: '0.68rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>Business</div>
                                               <RatingDot rating={route.analysis.business_rating} />
                                             </div>
                                           )}
                                           {route.analysis.first_rating && (
                                             <div>
-                                              <div style={{ fontSize: '0.68rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>First <span style={{ color: '#BBB' }}>Market ${route.analysis.first_market_price}</span></div>
+                                              <div style={{ fontSize: '0.68rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>First</div>
                                               <RatingDot rating={route.analysis.first_rating} />
                                             </div>
                                           )}

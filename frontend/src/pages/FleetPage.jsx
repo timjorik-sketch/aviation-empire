@@ -333,9 +333,12 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
   // Group sorted aircraft by home_airport; listed-for-sale aircraft go into a special group
   const groupedOverview = useMemo(() => {
     const listed = [];
+    const production = [];
     const normal = [];
+    const now = new Date();
     for (const ac of sortedOverview) {
       if (ac.is_listed_for_sale) listed.push(ac);
+      else if (ac.delivery_at && new Date(ac.delivery_at) > now) production.push(ac);
       else normal.push(ac);
     }
 
@@ -343,7 +346,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
     for (const ac of normal) {
       const code = ac.home_airport || null;
       const key = code ?? '__none__';
-      if (!groupMap.has(key)) groupMap.set(key, { code, forSale: false, aircraft: [] });
+      if (!groupMap.has(key)) groupMap.set(key, { code, forSale: false, inProduction: false, aircraft: [] });
       groupMap.get(key).aircraft.push(ac);
     }
     const groups = Array.from(groupMap.values());
@@ -353,7 +356,8 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
       if (!b.code) return -1;
       return a.code.localeCompare(b.code);
     });
-    if (listed.length > 0) groups.push({ code: '__for_sale__', forSale: true, aircraft: listed });
+    if (production.length > 0) groups.unshift({ code: '__in_production__', forSale: false, inProduction: true, aircraft: production });
+    if (listed.length > 0) groups.push({ code: '__for_sale__', forSale: true, inProduction: false, aircraft: listed });
     return groups;
   }, [sortedOverview]);
 
@@ -617,7 +621,17 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                       onClick={() => toggleBase(key)}
                     >
                       <span className="base-group-chevron">{collapsed ? '▶' : '▼'}</span>
-                      {group.forSale ? (
+                      {group.inProduction ? (
+                        <span className="base-group-iata" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{
+                            display: 'inline-block', width: 10, height: 10, borderRadius: '50%',
+                            border: '1.5px solid #ef4444',
+                            background: 'repeating-linear-gradient(-45deg, #ef4444 0px, #ef4444 2px, transparent 2px, transparent 5px)',
+                            flexShrink: 0
+                          }} />
+                          In Production
+                        </span>
+                      ) : group.forSale ? (
                         <span className="base-group-iata">Zu verkaufen</span>
                       ) : group.code ? (
                         <>
@@ -653,7 +667,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                                   Condition <SortIcon col="condition" />
                                 </th>
                               )}
-                              {editMode && !group.forSale ? (
+                              {editMode && !group.forSale && !group.inProduction ? (
                                 <>
                                   <th>Cabin Profile</th>
                                   <th>Home Base</th>
@@ -713,7 +727,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                                       })()}
                                     </td>
                                   )}
-                                  {editMode && !group.forSale ? (
+                                  {editMode && !group.forSale && !group.inProduction ? (
                                     <>
                                       <td>
                                         <select
@@ -767,7 +781,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                                   ) : inProduction ? (
                                     <>
                                       <td className="ov-location">
-                                        <span style={{ display: 'inline-block', padding: '2px 7px', borderRadius: 10, background: '#FEF3C7', color: '#92400E', fontSize: '0.7rem', fontWeight: 700 }}>
+                                        <span style={{ display: 'inline-block', padding: '2px 7px', borderRadius: 10, background: '#E5E7EB', color: '#6B7280', fontSize: '0.7rem', fontWeight: 700 }}>
                                           In Production
                                         </span>
                                       </td>

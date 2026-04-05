@@ -537,7 +537,7 @@ router.post('/purchase',
         return res.status(400).json({ error: 'No airline found' });
       }
       const airline = airlineResult.rows[0];
-      const homeAirport = airline.home_airport_code;
+      const homeAirport = deliveryAirport || airline.home_airport_code;
 
       const airportResult = await pool.query('SELECT registration_prefix FROM airports WHERE iata_code = $1', [homeAirport]);
       if (!airportResult.rows[0]) {
@@ -575,7 +575,7 @@ router.post('/purchase',
         const insertResult = await pool.query(
           `INSERT INTO aircraft (airline_id, aircraft_type_id, registration, name, home_airport, current_location, condition, is_active, purchased_at, delivery_at)
            VALUES ($1, $2, $3, $4, $5, $6, 100, 0, NOW(), NOW() + ($7 * INTERVAL '1 hour')) RETURNING id`,
-          [airline.id, aircraft_type_id, registration, name || null, homeAirport, deliveryAirport || homeAirport, deliveryHours]
+          [airline.id, aircraft_type_id, registration, name || null, homeAirport, homeAirport, deliveryHours]
         );
         const aircraftId = insertResult.rows[0].id;
 

@@ -785,11 +785,6 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
                                 ) : (
                                   {(() => {
                                     const an = route.analysis;
-                                    const stale = an && (
-                                      an.ma_eco_price != route.economy_price ||
-                                      an.ma_biz_price != route.business_price ||
-                                      an.ma_fir_price != route.first_price
-                                    );
                                     return (
                                       <>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap', marginBottom: an ? '8px' : '12px' }}>
@@ -808,11 +803,9 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
                                           <button className="rp-btn-edit" style={{ marginLeft: '0.5rem' }} onClick={() => handleStartEdit(route)}>Edit Prices</button>
                                         </div>
                                         {an && (
-                                          <div style={{ marginBottom: '12px', padding: '8px 10px', background: stale ? '#FFF8F0' : '#F5F5F5', borderRadius: '6px', border: stale ? '1px solid #FCD9A0' : '1px solid #E8E8E8' }}>
+                                          <div style={{ marginBottom: '12px', padding: '8px 10px', background: '#F5F5F5', borderRadius: '6px', border: '1px solid #E8E8E8' }}>
                                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                                              <span style={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: stale ? '#B45309' : '#999' }}>
-                                                Market Analysis{stale ? ' — Stale (prices changed)' : ''}
-                                              </span>
+                                              <span style={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999' }}>Market Analysis</span>
                                               <span style={{ fontSize: '0.68rem', color: '#BBB' }}>{new Date(an.requested_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
                                             </div>
                                             <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>

@@ -86,7 +86,6 @@ router.get('/', authMiddleware, async (req, res) => {
         ), 0) as weekly_flights,
         ma.economy_rating, ma.business_rating, ma.first_rating,
         ma.economy_market_price, ma.business_market_price, ma.first_market_price,
-        ma.economy_price as ma_eco_price, ma.business_price as ma_biz_price, ma.first_price as ma_fir_price,
         ma.requested_at as ma_requested_at
       FROM routes r
       JOIN airports dep ON r.departure_airport = dep.iata_code
@@ -94,7 +93,6 @@ router.get('/', authMiddleware, async (req, res) => {
       LEFT JOIN LATERAL (
         SELECT economy_rating, business_rating, first_rating,
                economy_market_price, business_market_price, first_market_price,
-               economy_price, business_price, first_price,
                requested_at
         FROM market_analyses
         WHERE route_id = r.id AND airline_id = $1 AND status = 'completed'
@@ -125,9 +123,6 @@ router.get('/', authMiddleware, async (req, res) => {
         economy_market_price: row.economy_market_price,
         business_market_price: row.business_market_price,
         first_market_price: row.first_market_price,
-        ma_eco_price: row.ma_eco_price,
-        ma_biz_price: row.ma_biz_price,
-        ma_fir_price: row.ma_fir_price,
         requested_at: row.ma_requested_at,
       } : null,
     }));
@@ -357,6 +352,9 @@ router.patch('/:id',
 
       params.push(routeId);
       await pool.query(`UPDATE routes SET ${updates.join(', ')} WHERE id = $${paramIndex}`, params);
+
+      // Delete all market analyses for this route (prices changed)
+      await pool.query('DELETE FROM market_analyses WHERE route_id = $1', [routeId]);
 
       // Read back the current prices and sync schedule/flights
       const priceResult = await pool.query(

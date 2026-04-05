@@ -1123,7 +1123,11 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       <div className="ad-hero" />
       <div className="ad-container">
         <TopBar onBack={onBack} backLabel="Back to Fleet" balance={airline?.balance} airline={airline} />
-        <div style={{ padding:'3rem', textAlign:'center', color:'#666' }}>Aircraft not found.</div>
+        <div style={{ padding:'3rem', textAlign:'center', color:'#666' }}>
+          <div style={{ fontSize:'0.95rem', marginBottom:8 }}>Aircraft not found.</div>
+          {error && <div style={{ fontSize:'0.8rem', color:'#dc2626', background:'#FEE2E2', borderRadius:6, padding:'8px 12px', display:'inline-block' }}>{error}</div>}
+          <div style={{ fontSize:'0.75rem', color:'#999', marginTop:8 }}>ID: {aircraftId}</div>
+        </div>
       </div>
       <style>{styles}</style>
     </div>

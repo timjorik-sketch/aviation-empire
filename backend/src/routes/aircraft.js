@@ -155,20 +155,24 @@ async function runAeroTradePurchases() {
   } catch(e) { console.error('AeroTrade purchase error:', e); }
 }
 
-let lastMarketRefreshDate = null;
+async function runMarketHourly() {
+  try {
+    await fillUsedMarket();
+    await runAeroTradePurchases();
+    console.log('[UsedMarket] Hourly refresh + AeroTrade purchases completed');
+  } catch(e) { console.error('Market refresh error:', e); }
+}
+
 export function startMarketRefreshScheduler() {
-  setInterval(async () => {
-    try {
-      const cetDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Berlin' }).format(new Date());
-      const cetHour = parseInt(new Intl.DateTimeFormat('en', { timeZone: 'Europe/Berlin', hour: 'numeric', hour12: false }).format(new Date()));
-      if (cetHour >= 3 && cetDate !== lastMarketRefreshDate) {
-        lastMarketRefreshDate = cetDate;
-        await fillUsedMarket();
-        await runAeroTradePurchases();
-        console.log('[UsedMarket] Daily refresh + AeroTrade purchases completed');
-      }
-    } catch(e) { console.error('Market refresh error:', e); }
-  }, 10 * 60 * 1000);
+  const now = new Date();
+  let minsUntil = (7 - now.getMinutes() + 60) % 60;
+  if (minsUntil === 0) minsUntil = 60;
+  const msUntil = minsUntil * 60000 - now.getSeconds() * 1000 - now.getMilliseconds();
+  console.log(`[UsedMarket] Next run in ${Math.round(msUntil / 60000)} min (at :07)`);
+  setTimeout(() => {
+    runMarketHourly();
+    setInterval(runMarketHourly, 60 * 60 * 1000);
+  }, msUntil);
 }
 
 // Helper function to get grouped fleet

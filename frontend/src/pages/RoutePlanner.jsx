@@ -784,7 +784,7 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
                                   </div>
                                 ) : (
                                   <>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap', marginBottom: route.analysis ? '8px' : '12px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap', marginBottom: '12px' }}>
                                       <div>
                                         <div style={{ fontSize: '0.7rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Economy</div>
                                         <div style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatPrice(route.economy_price)}</div>
@@ -799,34 +799,6 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
                                       </div>
                                       <button className="rp-btn-edit" style={{ marginLeft: '0.5rem' }} onClick={() => handleStartEdit(route)}>Edit Prices</button>
                                     </div>
-                                    {route.analysis && (route.analysis.economy_rating || route.analysis.business_rating || route.analysis.first_rating) && (
-                                      <div style={{ marginBottom: '17px', marginTop: '5px', padding: '13px 15px', background: '#F5F5F5', borderRadius: '6px', border: '1px solid #E8E8E8' }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                                          <span style={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999' }}>Market Analysis</span>
-                                          <span style={{ fontSize: '0.68rem', color: '#BBB' }}>{new Date(route.analysis.requested_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
-                                        </div>
-                                        <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
-                                          {route.analysis.economy_rating && (
-                                            <div>
-                                              <div style={{ fontSize: '0.68rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>Economy</div>
-                                              <RatingDot rating={route.analysis.economy_rating} />
-                                            </div>
-                                          )}
-                                          {route.analysis.business_rating && (
-                                            <div>
-                                              <div style={{ fontSize: '0.68rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>Business</div>
-                                              <RatingDot rating={route.analysis.business_rating} />
-                                            </div>
-                                          )}
-                                          {route.analysis.first_rating && (
-                                            <div>
-                                              <div style={{ fontSize: '0.68rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>First</div>
-                                              <RatingDot rating={route.analysis.first_rating} />
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-                                    )}
                                   </>
                                 )}
 

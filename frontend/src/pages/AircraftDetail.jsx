@@ -182,7 +182,6 @@ function FlightProgress({ flight, onNavigate }) {
 function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   // Aircraft metadata
   const [aircraft, setAircraft]         = useState(null);
-  const [cabinProfile, setCabinProfile] = useState(null);
   const [cabinProfiles, setCabinProfiles] = useState([]);
   const [userCabinProfiles, setUserCabinProfiles] = useState([]);
   const [selectedCabinProfileId, setSelectedCabinProfileId] = useState(null);
@@ -314,7 +313,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setAircraft(data.aircraft);
-      setCabinProfile(data.cabin_profile);
       setSelectedCabinProfileId(data.aircraft.airline_cabin_profile_id ?? null);
       setIsActive(data.aircraft.is_active ?? 0);
       setEditName(data.aircraft.name || '');

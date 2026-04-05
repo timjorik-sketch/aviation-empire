@@ -434,8 +434,8 @@ router.delete('/:id', authMiddleware, async (req, res) => {
     await pool.query('DELETE FROM analysis_limits WHERE airline_id = $1', [airlineId]);
 
     // Delete airline — cascades to aircraft, routes, flights, transactions,
-    // weekly_schedule, maintenance, service_profiles, cabin_profiles,
-    // destinations, personnel, airport_slots, slot_usage, transfer_flights, etc.
+    // weekly_schedule, maintenance, cabin_profiles, destinations, personnel,
+    // airport_slots, slot_usage, transfer_flights, etc.
     await pool.query('DELETE FROM airlines WHERE id = $1', [airlineId]);
 
     res.json({ message: 'Airline deleted' });

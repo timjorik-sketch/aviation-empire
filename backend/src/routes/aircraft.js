@@ -545,7 +545,7 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
 
     const acResult = await pool.query(`
       SELECT a.id, a.registration, a.name, a.home_airport, a.condition,
-             a.aircraft_type_id, a.is_active, a.cabin_profile_id,
+             a.aircraft_type_id, a.is_active,
              t.manufacturer, t.model, t.full_name, t.max_passengers, t.range_km,
              t.image_filename, t.id as type_id, a.airline_cabin_profile_id,
              a.current_location, a.crew_assigned,
@@ -564,7 +564,6 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
       id: row.id, registration: row.registration, name: row.name,
       home_airport: row.home_airport, condition: row.condition,
       aircraft_type_id: row.aircraft_type_id, is_active: row.is_active ?? 0,
-      cabin_profile_id: row.cabin_profile_id,
       manufacturer: row.manufacturer, model: row.model, full_name: row.full_name,
       max_passengers: row.max_passengers, range_km: row.range_km,
       image_filename: row.image_filename, type_id: row.type_id,
@@ -578,18 +577,6 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
       purchased_at: row.purchased_at ?? null,
       wake_turbulence_category: row.wake_turbulence_category ?? 'M'
     };
-
-    let cabin_profile = null;
-    if (aircraft.cabin_profile_id) {
-      try {
-        const cpResult = await pool.query('SELECT id, name FROM airline_cabin_profiles WHERE id = $1', [aircraft.cabin_profile_id]);
-        if (cpResult.rows[0]) {
-          cabin_profile = { id: cpResult.rows[0].id, name: cpResult.rows[0].name };
-        }
-      } catch (e) {
-        // legacy cabin_profiles table may not exist — ignore
-      }
-    }
 
     let home_airport_name = null;
     if (aircraft.home_airport) {
@@ -669,62 +656,6 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error('Get aircraft detail error:', error);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// Get cabin profiles for an aircraft type
-router.get('/:id/cabin-profiles', authMiddleware, async (req, res) => {
-  try {
-    const aircraftId = parseInt(req.params.id);
-    const airlineId = req.airlineId;
-    if (!airlineId) return res.status(400).json({ error: 'No active airline' });
-
-    const acResult = await pool.query('SELECT aircraft_type_id FROM aircraft WHERE id = $1 AND airline_id = $2', [aircraftId, airlineId]);
-    if (!acResult.rows[0]) {
-      return res.status(404).json({ error: 'Aircraft not found' });
-    }
-    const typeId = acResult.rows[0].aircraft_type_id;
-
-    const cpResult = await pool.query('SELECT id, name, aircraft_type_id, economy_seats, business_seats, first_seats FROM cabin_profiles WHERE aircraft_type_id = $1', [typeId]);
-    const profiles = cpResult.rows.map(row => ({
-      id: row.id, name: row.name, aircraft_type_id: row.aircraft_type_id,
-      economy_seats: row.economy_seats, business_seats: row.business_seats, first_seats: row.first_seats
-    }));
-
-    res.json({ profiles });
-  } catch (error) {
-    console.error('Get cabin profiles error:', error);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// Update aircraft cabin profile
-router.put('/:id/cabin-profile', authMiddleware, async (req, res) => {
-  try {
-    const aircraftId = parseInt(req.params.id);
-    const { cabinProfileId } = req.body;
-    const airlineId = req.airlineId;
-    if (!airlineId) return res.status(400).json({ error: 'No active airline' });
-
-    const acResult = await pool.query('SELECT id, aircraft_type_id FROM aircraft WHERE id = $1 AND airline_id = $2', [aircraftId, airlineId]);
-    if (!acResult.rows[0]) {
-      return res.status(404).json({ error: 'Aircraft not found' });
-    }
-    const typeId = acResult.rows[0].aircraft_type_id;
-
-    if (cabinProfileId) {
-      const cpResult = await pool.query('SELECT id FROM cabin_profiles WHERE id = $1 AND aircraft_type_id = $2', [cabinProfileId, typeId]);
-      if (!cpResult.rows[0]) {
-        return res.status(400).json({ error: 'Cabin profile not valid for this aircraft type' });
-      }
-    }
-
-    await pool.query('UPDATE aircraft SET cabin_profile_id = $1 WHERE id = $2', [cabinProfileId || null, aircraftId]);
-
-    res.json({ message: 'Cabin profile updated' });
-  } catch (error) {
-    console.error('Update cabin profile error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -890,20 +821,9 @@ router.get('/:id/upcoming-flights', authMiddleware, async (req, res) => {
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
-    const acResult = await pool.query('SELECT id, cabin_profile_id FROM aircraft WHERE id = $1 AND airline_id = $2', [aircraftId, airlineId]);
+    const acResult = await pool.query('SELECT id FROM aircraft WHERE id = $1 AND airline_id = $2', [aircraftId, airlineId]);
     if (!acResult.rows[0]) {
       return res.status(404).json({ error: 'Aircraft not found' });
-    }
-    const cabinProfileId = acResult.rows[0].cabin_profile_id;
-
-    let economy_total = 0, business_total = 0, first_total = 0;
-    if (cabinProfileId) {
-      const cpResult = await pool.query('SELECT economy_seats, business_seats, first_seats FROM cabin_profiles WHERE id = $1', [cabinProfileId]);
-      if (cpResult.rows[0]) {
-        economy_total = cpResult.rows[0].economy_seats;
-        business_total = cpResult.rows[0].business_seats;
-        first_total = cpResult.rows[0].first_seats;
-      }
     }
 
     const wsResult = await pool.query(`
@@ -959,10 +879,7 @@ router.get('/:id/upcoming-flights', authMiddleware, async (req, res) => {
           status,
           booked_economy,
           booked_business,
-          booked_first,
-          economy_total,
-          business_total,
-          first_total
+          booked_first
         });
       }
     }
@@ -1047,12 +964,9 @@ router.get('/:id/schedule', authMiddleware, async (req, res) => {
       SELECT a.id, a.registration, a.name, a.home_airport, a.condition,
              t.manufacturer, t.model, t.full_name, t.max_passengers, t.range_km, t.id as type_id,
              a.is_active, t.image_filename,
-             cp.id as cp_id, cp.name as cp_name,
-             cp.economy_seats, cp.business_seats, cp.first_seats,
              a.airline_cabin_profile_id, t.wake_turbulence_category
       FROM aircraft a
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
-      LEFT JOIN cabin_profiles cp ON a.cabin_profile_id = cp.id
       WHERE a.id = $1 AND a.airline_id = $2
     `, [aircraftId, airlineId]);
 
@@ -1067,11 +981,6 @@ router.get('/:id/schedule', authMiddleware, async (req, res) => {
       airline_cabin_profile_id: acRow.airline_cabin_profile_id ?? null,
       wake_turbulence_category: acRow.wake_turbulence_category ?? 'M'
     };
-    const cabin_profile = acRow.cp_id ? {
-      id: acRow.cp_id, name: acRow.cp_name,
-      economy_seats: acRow.economy_seats, business_seats: acRow.business_seats, first_seats: acRow.first_seats
-    } : null;
-
     const routesResult = await pool.query(`
       SELECT r.id, r.flight_number, r.departure_airport, r.arrival_airport, r.distance_km,
              r.economy_price, r.business_price, r.first_price, r.service_profile_id
@@ -1116,7 +1025,7 @@ router.get('/:id/schedule', authMiddleware, async (req, res) => {
       type: row.type, status: row.status
     }));
 
-    res.json({ aircraft, cabin_profile, routes, schedule, maintenance });
+    res.json({ aircraft, routes, schedule, maintenance });
   } catch (error) {
     console.error('Get aircraft schedule error:', error);
     res.status(500).json({ error: 'Server error' });

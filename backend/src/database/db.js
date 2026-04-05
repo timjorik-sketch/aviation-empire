@@ -283,7 +283,6 @@ async function initDatabase() {
   const alterCols = [
     // aircraft table
     `ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS is_active INTEGER DEFAULT 0`,
-    `ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS cabin_profile_id INTEGER REFERENCES cabin_profiles(id)`,
     `ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS airline_cabin_profile_id INTEGER REFERENCES airline_cabin_profiles(id)`,
     `ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS current_location TEXT REFERENCES airports(iata_code)`,
     `ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS crew_assigned INTEGER DEFAULT 0`,
@@ -301,7 +300,7 @@ async function initDatabase() {
     // users table
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS active_airline_id INTEGER REFERENCES airlines(id)`,
     // flights table
-    `ALTER TABLE flights ADD COLUMN IF NOT EXISTS service_profile_id INTEGER REFERENCES service_profiles(id)`,
+    `ALTER TABLE flights ADD COLUMN IF NOT EXISTS service_profile_id INTEGER`,
     `ALTER TABLE flights ADD COLUMN IF NOT EXISTS booked_economy INTEGER DEFAULT 0`,
     `ALTER TABLE flights ADD COLUMN IF NOT EXISTS booked_business INTEGER DEFAULT 0`,
     `ALTER TABLE flights ADD COLUMN IF NOT EXISTS booked_first INTEGER DEFAULT 0`,
@@ -438,60 +437,6 @@ async function initDatabase() {
     ON CONFLICT (id) DO NOTHING
   `, null, 'aircraft_types seed');
   await safeQuery(`SELECT setval('aircraft_types_id_seq', COALESCE((SELECT MAX(id) FROM aircraft_types), 1))`, null, 'setval at');
-
-  // ── SEED cabin profiles (IDs 36-152) ─────────────────────────────────────────
-  await safeQuery(`
-    INSERT INTO cabin_profiles (id, name, aircraft_type_id, economy_seats, business_seats, first_seats) VALUES
-    (36,'All Economy',15,160,0,0),(37,'Mixed',15,136,24,0),(38,'Two Class',15,120,28,12),
-    (39,'All Economy',16,406,0,0),(40,'Two Class',16,300,70,36),(41,'Three Class',16,250,90,66),
-    (42,'All Economy',17,440,0,0),(43,'Two Class',17,320,80,40),(44,'Three Class',17,270,100,70),
-    (45,'All Economy',18,406,0,0),(46,'Two Class',18,300,70,36),(47,'Three Class',18,250,90,66),
-    (48,'All Economy',19,440,0,0),(49,'Two Class',19,320,80,40),(50,'Three Class',19,270,100,70),
-    (51,'All Economy',20,440,0,0),(52,'Two Class',20,320,80,40),(53,'Three Class',20,270,100,70),
-    (54,'All Economy',21,375,0,0),(55,'Two Class',21,275,65,35),(56,'Three Class',21,225,85,65),
-    (57,'All Economy',22,475,0,0),(58,'Two Class',22,350,85,40),(59,'Three Class',22,290,110,75),
-    (60,'All Economy',23,440,0,0),(61,'Two Class',23,320,80,40),(62,'Three Class',23,265,100,75),
-    (63,'All Economy',24,480,0,0),(64,'Two Class',24,350,90,40),(65,'Three Class',24,290,110,80),
-    (66,'All Economy',25,50,0,0),(67,'Mixed',25,42,8,0),
-    (68,'All Economy',26,78,0,0),(69,'Mixed',26,66,12,0),
-    (70,'All Economy',27,112,0,0),(71,'Mixed',27,94,18,0),(72,'Two Class',27,84,22,6),
-    (73,'All Economy',28,210,0,0),(74,'Mixed',28,174,36,0),(75,'Two Class',28,160,38,12),
-    (76,'All Economy',29,230,0,0),(77,'Mixed',29,190,40,0),(78,'Two Class',29,175,43,12),
-    (79,'All Economy',30,149,0,0),(80,'Mixed',30,125,24,0),(81,'Two Class',30,110,27,12),
-    (82,'All Economy',31,188,0,0),(83,'Mixed',31,158,30,0),(84,'Two Class',31,145,33,10),
-    (85,'All Economy',32,132,0,0),(86,'Mixed',32,110,22,0),
-    (87,'All Economy',33,132,0,0),(88,'Mixed',33,110,22,0),
-    (89,'All Economy',34,189,0,0),(90,'Mixed',34,159,30,0),(91,'Two Class',34,148,33,8),
-    (92,'All Economy',35,660,0,0),(93,'Two Class',35,480,140,40),(94,'Three Class',35,400,160,100),
-    (95,'All Economy',36,660,0,0),(96,'Two Class',36,480,140,40),(97,'Three Class',36,400,160,100),
-    (98,'All Economy',37,239,0,0),(99,'Mixed',37,195,44,0),(100,'Two Class',37,178,49,12),
-    (101,'All Economy',38,289,0,0),(102,'Mixed',38,235,54,0),(103,'Two Class',38,220,57,12),
-    (104,'All Economy',39,440,0,0),(105,'Two Class',39,320,80,40),(106,'Three Class',39,270,100,70),
-    (107,'All Economy',40,406,0,0),(108,'Two Class',40,300,70,36),(109,'Three Class',40,250,90,66),
-    (110,'All Economy',41,440,0,0),(111,'Two Class',41,320,80,40),(112,'Three Class',41,270,100,70),
-    (113,'All Economy',42,50,0,0),(114,'Mixed',42,44,6,0),
-    (115,'All Economy',43,78,0,0),(116,'Mixed',43,64,14,0),
-    (117,'All Economy',44,90,0,0),(118,'Mixed',44,74,16,0),
-    (119,'All Economy',45,29,0,0),
-    (120,'All Economy',46,95,0,0),(121,'Mixed',46,79,16,0),
-    (122,'All Economy',47,174,0,0),(123,'Mixed',47,148,26,0),(124,'Two Class',47,134,28,12),
-    (125,'All Economy',48,56,0,0),(126,'Mixed',48,48,8,0),
-    (127,'All Economy',49,90,0,0),(128,'Mixed',49,76,14,0),
-    (129,'All Economy',50,33,0,0),
-    (130,'All Economy',51,34,0,0),
-    (131,'All Economy',52,30,0,0),
-    (132,'All Economy',53,37,0,0),
-    (133,'All Economy',54,44,0,0),(134,'Mixed',54,38,6,0),
-    (135,'All Economy',55,50,0,0),(136,'Mixed',55,44,6,0),
-    (137,'All Economy',56,114,0,0),(138,'Mixed',56,96,18,0),(139,'Two Class',56,86,22,6),
-    (140,'All Economy',57,124,0,0),(141,'Mixed',57,104,20,0),(142,'Two Class',57,94,24,6),
-    (143,'All Economy',58,36,0,0),
-    (144,'All Economy',59,108,0,0),(145,'Mixed',59,90,18,0),(146,'Two Class',59,80,22,6),
-    (147,'All Economy',60,440,0,0),(148,'Two Class',60,320,80,40),(149,'Three Class',60,265,100,75),
-    (150,'All Economy',61,440,0,0),(151,'Two Class',61,320,80,40),(152,'Three Class',61,265,100,75)
-    ON CONFLICT (id) DO NOTHING
-  `, null, 'cabin_profiles seed');
-  await safeQuery(`SELECT setval('cabin_profiles_id_seq', COALESCE((SELECT MAX(id) FROM cabin_profiles), 1))`, null, 'setval cp');
 
   // ── DATA CORRECTIONS ─────────────────────────────────────────────────────────
   // Aircraft runway & fuel corrections
@@ -783,6 +728,13 @@ async function initDatabase() {
   if (parseInt(fuelRows[0]?.c ?? 0) === 0) {
     await safeQuery('INSERT INTO fuel_prices (price_per_liter) VALUES ($1)', [0.72], 'fuel seed');
   }
+
+  // ── CLEANUP: drop legacy/unused tables ───────────────────────────────────────
+  await safeQuery(`ALTER TABLE flights DROP CONSTRAINT IF EXISTS flights_service_profile_id_fkey`, null, 'drop sp fkey');
+  await safeQuery(`DROP TABLE IF EXISTS service_profiles`, null, 'drop service_profiles');
+  await safeQuery(`DROP TABLE IF EXISTS mega_hubs`, null, 'drop mega_hubs');
+  await safeQuery(`ALTER TABLE aircraft DROP COLUMN IF EXISTS cabin_profile_id`, null, 'drop cabin_profile_id');
+  await safeQuery(`DROP TABLE IF EXISTS cabin_profiles`, null, 'drop cabin_profiles');
 
   // ── AUTO-SET active_airline_id for existing users ────────────────────────────
   await safeQuery(`

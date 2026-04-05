@@ -1422,6 +1422,9 @@ async function generateFuelPrice() {
     // Keep only last 3 days of history
     await pool.query("DELETE FROM fuel_prices WHERE created_at < NOW() - INTERVAL '3 days'");
 
+    // Keep only last 15 days of transactions
+    await pool.query("DELETE FROM transactions WHERE created_at < NOW() - INTERVAL '15 days'");
+
     console.log(`[FuelPrice] New price: $${rounded.toFixed(2)}/kg (prev $${previousPrice.toFixed(2)})${isSpike ? ' (spike)' : ''}`);
   } catch (err) {
     console.error('generateFuelPrice error:', err);

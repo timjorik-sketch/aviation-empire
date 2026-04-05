@@ -368,7 +368,7 @@ export default function Finances({ airline, onBack, onNavigateToAirport }) {
         </div>
 
         {/* ── P&L Chart + Fuel Price ── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px', alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '30% 70%', gap: '16px', marginBottom: '20px', alignItems: 'start' }}>
           <div className="info-card" style={{ marginBottom: 0 }}>
             <div className="card-header-bar">
               <span className="card-header-bar-title">Profit & Loss — Last 7 Days</span>

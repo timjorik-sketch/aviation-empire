@@ -146,7 +146,7 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
       setNow(nowMs);
       // Auto-refresh if any pending analysis just passed its completed_at
       const justCompleted = analyses.some(a => a.status === 'pending' && new Date(a.completed_at).getTime() <= nowMs);
-      if (justCompleted) { fetchAnalyses(); refreshRoutes(); }
+      if (justCompleted) { fetchAnalyses().then(() => refreshRoutes()); }
     }, 1000);
     return () => clearInterval(iv);
   }, [analyses]);

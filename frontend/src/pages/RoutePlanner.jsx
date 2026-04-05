@@ -123,6 +123,61 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
     finally { setLoadingAircraft(p => ({ ...p, [routeId]: false })); }
   };
 
+  // Check Route mode
+  const [checkMode, setCheckMode] = useState(false);
+  const [checkFleet, setCheckFleet] = useState([]);
+  const [checkFleetLoaded, setCheckFleetLoaded] = useState(false);
+  const [allAirports, setAllAirports] = useState([]);
+  const [allAirportsLoaded, setAllAirportsLoaded] = useState(false);
+  const [checkAircraftId, setCheckAircraftId] = useState('');
+  const [checkDep, setCheckDep] = useState('');
+  const [checkArr, setCheckArr] = useState('');
+  const [checkDepData, setCheckDepData] = useState(null);
+  const [checkArrData, setCheckArrData] = useState(null);
+
+  const enterCheckMode = async () => {
+    setCheckMode(true);
+    if (!checkFleetLoaded) {
+      const token = localStorage.getItem('token');
+      const [fleetRes, airRes] = await Promise.all([
+        fetch(`${API_URL}/api/aircraft/fleet`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_URL}/api/airports`),
+      ]);
+      const fleetData = await fleetRes.json();
+      const airData = await airRes.json();
+      setCheckFleet(fleetData.fleet || []);
+      setAllAirports(airData.airports || []);
+      setCheckFleetLoaded(true);
+      setAllAirportsLoaded(true);
+    }
+  };
+
+  useEffect(() => {
+    if (!checkDep) { setCheckDepData(null); return; }
+    fetch(`${API_URL}/api/airports/${checkDep}`).then(r => r.json())
+      .then(d => setCheckDepData(d.airport || null)).catch(() => setCheckDepData(null));
+  }, [checkDep]);
+
+  useEffect(() => {
+    if (!checkArr) { setCheckArrData(null); return; }
+    fetch(`${API_URL}/api/airports/${checkArr}`).then(r => r.json())
+      .then(d => setCheckArrData(d.airport || null)).catch(() => setCheckArrData(null));
+  }, [checkArr]);
+
+  const checkAircraft = checkFleet.find(a => String(a.id) === checkAircraftId) || null;
+  const checkResult = (() => {
+    if (!checkAircraft || !checkDepData || !checkArrData) return null;
+    const dist = Math.round(haversineKm(checkDepData.latitude, checkDepData.longitude, checkArrData.latitude, checkArrData.longitude));
+    const rangeOk = checkAircraft.range_km >= dist;
+    const depRunwayOk = (checkDepData.runway_length_m || 0) >= (checkAircraft.min_runway_takeoff_m || 0);
+    const arrRunwayOk = (checkArrData.runway_length_m || 0) >= (checkAircraft.min_runway_landing_m || 0);
+    return { dist, rangeOk, depRunwayOk, arrRunwayOk };
+  })();
+
+  const allAirportsByCountry = allAirports.reduce((acc, a) => {
+    (acc[a.country] = acc[a.country] || []).push(a); return acc;
+  }, {});
+
   // Edit state
   const [editingId, setEditingId] = useState(null);
   const [editEconomy, setEditEconomy] = useState('');
@@ -440,13 +495,23 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
 
           {/* Form */}
           <div className="info-card">
-            <div className="card-header-bar">
-              <span className="card-header-bar-title">Create New Route</span>
-              {routeInfo && (
-                <span style={{ fontWeight: 400, opacity: 0.85, fontSize: '0.78rem', letterSpacing: '0.04em' }}>
-                  {routeInfo.distKm.toLocaleString()} km · {routeInfo.flightTime}
-                </span>
-              )}
+            <div className="card-header-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span className="card-header-bar-title">{checkMode ? 'Check Route' : 'Create New Route'}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {!checkMode && routeInfo && (
+                  <span style={{ fontWeight: 400, opacity: 0.85, fontSize: '0.78rem', letterSpacing: '0.04em' }}>
+                    {routeInfo.distKm.toLocaleString()} km · {routeInfo.flightTime}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ padding: '5px 12px', fontSize: '0.78rem' }}
+                  onClick={() => { setCheckMode(m => !m); if (!checkMode) enterCheckMode(); }}
+                >
+                  {checkMode ? '← Create Route' : 'Check Route'}
+                </button>
+              </div>
             </div>
 
             {/* Route preview map — negative margins flush with card edges */}
@@ -454,6 +519,86 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
               <RoutePreviewMap dep={depCoords} arr={arrCoords} />
             </div>
 
+            {checkMode ? (
+              <div>
+                {/* Aircraft */}
+                <div style={{ marginBottom: '1rem' }}>
+                  <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600, fontSize: '0.9rem', color: '#2C2C2C' }}>Aircraft</label>
+                  <select value={checkAircraftId} onChange={e => setCheckAircraftId(e.target.value)}
+                    style={{ width: '100%', padding: '0.5rem', borderRadius: 6, border: '1px solid #E0E0E0', fontSize: '0.9rem' }}>
+                    <option value="">Select aircraft…</option>
+                    {checkFleet.filter(a => !a.is_listed_for_sale).map(a => (
+                      <option key={a.id} value={a.id}>{a.registration} — {a.full_name} ({a.range_km?.toLocaleString()} km)</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Airports */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600, fontSize: '0.9rem', color: '#2C2C2C' }}>Departure</label>
+                    <select value={checkDep} onChange={e => setCheckDep(e.target.value)}
+                      style={{ width: '100%', padding: '0.5rem', borderRadius: 6, border: '1px solid #E0E0E0', fontSize: '0.9rem' }}>
+                      <option value="">Select…</option>
+                      {Object.entries(allAirportsByCountry).sort(([a],[b]) => a.localeCompare(b)).map(([country, list]) => (
+                        <optgroup key={country} label={country}>
+                          {list.map(a => <option key={a.iata_code} value={a.iata_code}>{a.iata_code} – {a.name}</option>)}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600, fontSize: '0.9rem', color: '#2C2C2C' }}>Arrival</label>
+                    <select value={checkArr} onChange={e => setCheckArr(e.target.value)}
+                      style={{ width: '100%', padding: '0.5rem', borderRadius: 6, border: '1px solid #E0E0E0', fontSize: '0.9rem' }}>
+                      <option value="">Select…</option>
+                      {Object.entries(allAirportsByCountry).sort(([a],[b]) => a.localeCompare(b)).map(([country, list]) => (
+                        <optgroup key={country} label={country}>
+                          {list.map(a => <option key={a.iata_code} value={a.iata_code} disabled={a.iata_code === checkDep}>{a.iata_code} – {a.name}</option>)}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Result */}
+                {checkResult && (
+                  <div style={{ background: '#F9F9F9', border: '1px solid #E8E8E8', borderRadius: 8, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#2C2C2C', marginBottom: 4 }}>
+                      {checkDep} → {checkArr} · {checkResult.dist.toLocaleString()} km
+                    </div>
+                    {[
+                      {
+                        ok: checkResult.rangeOk,
+                        label: 'Range',
+                        detail: `${checkResult.dist.toLocaleString()} km required — ${checkAircraft.range_km?.toLocaleString()} km available`,
+                      },
+                      {
+                        ok: checkResult.depRunwayOk,
+                        label: `Departure runway (${checkDep})`,
+                        detail: `${checkAircraft.min_runway_takeoff_m?.toLocaleString()} m required — ${checkDepData?.runway_length_m?.toLocaleString()} m available`,
+                      },
+                      {
+                        ok: checkResult.arrRunwayOk,
+                        label: `Arrival runway (${checkArr})`,
+                        detail: `${checkAircraft.min_runway_landing_m?.toLocaleString()} m required — ${checkArrData?.runway_length_m?.toLocaleString()} m available`,
+                      },
+                    ].map(({ ok, label, detail }) => (
+                      <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ fontSize: '1.1rem', lineHeight: 1 }}>{ok ? '✅' : '❌'}</span>
+                        <div>
+                          <span style={{ fontWeight: 600, fontSize: '0.82rem', color: ok ? '#166534' : '#991B1B' }}>{label}</span>
+                          <span style={{ fontSize: '0.78rem', color: '#666', marginLeft: 6 }}>{detail}</span>
+                        </div>
+                      </div>
+                    ))}
+                    <div style={{ marginTop: 4, padding: '8px 12px', borderRadius: 6, background: checkResult.rangeOk && checkResult.depRunwayOk && checkResult.arrRunwayOk ? '#DCFCE7' : '#FEE2E2', textAlign: 'center', fontWeight: 700, fontSize: '0.85rem', color: checkResult.rangeOk && checkResult.depRunwayOk && checkResult.arrRunwayOk ? '#166534' : '#991B1B' }}>
+                      {checkResult.rangeOk && checkResult.depRunwayOk && checkResult.arrRunwayOk ? '✈ Route is feasible' : '✗ Route not feasible'}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
             <form onSubmit={handleCreateRoute}>
 
               {/* Airports */}
@@ -558,6 +703,7 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
                 {creating ? 'Creating...' : createReturn ? 'Create Both Routes' : 'Create Route'}
               </button>
             </form>
+            )}
           </div>
 
         </div>{/* end rp-create-grid */}

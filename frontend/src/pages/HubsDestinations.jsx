@@ -19,14 +19,14 @@ function fmtCost(n) {
 }
 
 const CATEGORY_LABELS = {
-  1: 'Small Regional',
-  2: 'Local Airport',
+  1: 'Airstrip',
+  2: 'Local',
   3: 'Regional',
   4: 'National',
-  5: 'Large Airport',
-  6: 'International Hub',
+  5: 'International',
+  6: 'Continental',
   7: 'Major Hub',
-  8: 'Major International Hub',
+  8: 'Mega Hub',
 };
 
 const CONTINENTS = ['Africa', 'Asia', 'Europe', 'North America', 'Oceania', 'South America'];

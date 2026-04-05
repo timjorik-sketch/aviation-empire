@@ -9,12 +9,12 @@ const GROUND_STAFF_BY_CAT = { 1: 2, 2: 4, 3: 7, 4: 10, 5: 14, 6: 18, 7: 22, 8: 2
 
 const CATEGORY_LABELS = {
   1: 'Airstrip',
-  2: 'Local Airport',
-  3: 'Regional Airport',
-  4: 'Medium Airport',
-  5: 'Large Airport',
-  6: 'National Hub',
-  7: 'International Hub',
+  2: 'Local',
+  3: 'Regional',
+  4: 'National',
+  5: 'International',
+  6: 'Continental',
+  7: 'Major Hub',
   8: 'Mega Hub',
 };
 

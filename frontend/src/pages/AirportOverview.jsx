@@ -8,8 +8,8 @@ const CATEGORY_LABELS = {
   2: 'Local',
   3: 'Regional',
   4: 'National',
-  5: 'Large',
-  6: 'National Hub',
+  5: 'International',
+  6: 'Continental',
   7: 'Major Hub',
   8: 'Mega Hub',
 };

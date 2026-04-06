@@ -115,7 +115,7 @@ export default function RoutePreviewMap({ dep, arr, routes, containerStyle }) {
       routes.forEach(({ depLat, depLng, arrLat, arrLng }) => {
         const arc = greatCirclePoints(depLat, depLng, arrLat, arrLng);
         splitAtAntimeridian(arc).forEach(seg =>
-          L.polyline(seg, { color: '#26A9F0', weight: 1.5, opacity: 0.85 }).addTo(map)
+          L.polyline(seg, { color: '#26A9F0', weight: 1, opacity: 0.85 }).addTo(map)
         );
       });
     }

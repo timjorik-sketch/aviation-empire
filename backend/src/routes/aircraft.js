@@ -2009,6 +2009,41 @@ router.post('/dev/fill-market', authMiddleware, async (_req, res) => {
   }
 });
 
+// GET /api/aircraft/types/available — all types unlocked for the airline's current level
+router.get('/types/available', authMiddleware, async (req, res) => {
+  try {
+    const lvlResult = await pool.query(
+      'SELECT level FROM airlines WHERE id = (SELECT airline_id FROM users WHERE id = $1)',
+      [req.userId]
+    );
+    if (!lvlResult.rows[0]) return res.status(400).json({ error: 'No airline found' });
+    const airlineLevel = lvlResult.rows[0].level;
+
+    const result = await pool.query(`
+      SELECT id, manufacturer, full_name, range_km, cruise_speed_kmh,
+             min_runway_takeoff_m, min_runway_landing_m, wake_turbulence_category, required_level
+      FROM aircraft_types
+      WHERE required_level <= $1
+      ORDER BY required_level ASC, range_km ASC
+    `, [airlineLevel]);
+
+    const types = result.rows.map(r => ({
+      type_id: r.id,
+      manufacturer: r.manufacturer,
+      full_name: r.full_name,
+      range_km: r.range_km,
+      cruise_speed_kmh: r.cruise_speed_kmh,
+      min_runway_takeoff_m: r.min_runway_takeoff_m,
+      min_runway_landing_m: r.min_runway_landing_m,
+      wake_turbulence_category: r.wake_turbulence_category,
+      required_level: r.required_level,
+    }));
+    res.json({ types });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // GET /api/aircraft/types?level=X — aircraft types for a specific required_level
 router.get('/types', authMiddleware, async (req, res) => {
   try {

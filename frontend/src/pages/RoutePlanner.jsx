@@ -125,8 +125,8 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
 
   // Check Route mode
   const [checkMode, setCheckMode] = useState(false);
-  const [checkFleet, setCheckFleet] = useState([]);
-  const [checkFleetLoaded, setCheckFleetLoaded] = useState(false);
+  const [checkTypes, setCheckTypes] = useState([]);
+  const [checkTypesLoaded, setCheckTypesLoaded] = useState(false);
   const [allAirports, setAllAirports] = useState([]);
   const [allAirportsLoaded, setAllAirportsLoaded] = useState(false);
   const [checkAircraftTypeId, setCheckAircraftTypeId] = useState('');
@@ -139,17 +139,17 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
 
   const enterCheckMode = async () => {
     setCheckMode(true);
-    if (!checkFleetLoaded) {
+    if (!checkTypesLoaded) {
       const token = localStorage.getItem('token');
-      const [fleetRes, airRes] = await Promise.all([
-        fetch(`${API_URL}/api/aircraft/fleet`, { headers: { Authorization: `Bearer ${token}` } }),
+      const [typesRes, airRes] = await Promise.all([
+        fetch(`${API_URL}/api/aircraft/types/available`, { headers: { Authorization: `Bearer ${token}` } }),
         fetch(`${API_URL}/api/airports`),
       ]);
-      const fleetData = await fleetRes.json();
+      const typesData = await typesRes.json();
       const airData = await airRes.json();
-      setCheckFleet(fleetData.fleet || []);
+      setCheckTypes(typesData.types || []);
       setAllAirports(airData.airports || []);
-      setCheckFleetLoaded(true);
+      setCheckTypesLoaded(true);
       setAllAirportsLoaded(true);
     }
   };
@@ -166,19 +166,7 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
       .then(d => setCheckArrData(d.airport || null)).catch(() => setCheckArrData(null));
   }, [checkArr]);
 
-  // Unique aircraft types in fleet (deduplicated by type_id)
-  const checkAircraftTypes = (() => {
-    const seen = new Set();
-    return checkFleet.filter(a => {
-      if (!a.is_listed_for_sale && a.type_id && !seen.has(a.type_id)) {
-        seen.add(a.type_id);
-        return true;
-      }
-      return false;
-    });
-  })();
-
-  const checkAircraft = checkAircraftTypes.find(a => String(a.type_id) === checkAircraftTypeId) || null;
+  const checkAircraft = checkTypes.find(a => String(a.type_id) === checkAircraftTypeId) || null;
   const checkResult = (() => {
     if (!checkAircraft || !checkDepData || !checkArrData) return null;
     const dist = Math.round(haversineKm(checkDepData.latitude, checkDepData.longitude, checkArrData.latitude, checkArrData.longitude));
@@ -548,7 +536,7 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
                   <select value={checkAircraftTypeId} onChange={e => setCheckAircraftTypeId(e.target.value)}
                     style={{ width: '100%', padding: '0.5rem', borderRadius: 6, border: '1px solid #E0E0E0', fontSize: '0.9rem' }}>
                     <option value="">Select type…</option>
-                    {checkAircraftTypes.map(a => (
+                    {checkTypes.map(a => (
                       <option key={a.type_id} value={a.type_id}>{a.full_name} ({a.range_km?.toLocaleString()} km)</option>
                     ))}
                   </select>

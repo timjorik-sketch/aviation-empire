@@ -192,6 +192,13 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
     (acc[a.country] = acc[a.country] || []).push(a); return acc;
   }, {});
 
+  const checkDepCoords = checkDepData?.latitude != null
+    ? { iata: checkDepData.iata_code, name: checkDepData.name, lat: checkDepData.latitude, lng: checkDepData.longitude }
+    : null;
+  const checkArrCoords = checkArrData?.latitude != null
+    ? { iata: checkArrData.iata_code, name: checkArrData.name, lat: checkArrData.latitude, lng: checkArrData.longitude }
+    : null;
+
   // Edit state
   const [editingId, setEditingId] = useState(null);
   const [editEconomy, setEditEconomy] = useState('');
@@ -530,7 +537,7 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
 
             {/* Route preview map — negative margins flush with card edges */}
             <div style={{ margin: '-20px -28px 28px', borderBottom: '1px solid #F0F0F0' }}>
-              <RoutePreviewMap dep={depCoords} arr={arrCoords} />
+              <RoutePreviewMap dep={checkMode ? checkDepCoords : depCoords} arr={checkMode ? checkArrCoords : arrCoords} />
             </div>
 
             {checkMode ? (
@@ -611,7 +618,7 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
                       },
                     ].map(({ ok, label, detail }) => (
                       <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <span style={{ fontSize: '1.1rem', lineHeight: 1 }}>{ok ? '✅' : '❌'}</span>
+                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: ok ? '#16a34a' : '#dc2626', flexShrink: 0, display: 'inline-block' }} />
                         <div>
                           <span style={{ fontWeight: 600, fontSize: '0.82rem', color: ok ? '#166534' : '#991B1B' }}>{label}</span>
                           <span style={{ fontSize: '0.78rem', color: '#666', marginLeft: 6 }}>{detail}</span>
@@ -619,7 +626,7 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
                       </div>
                     ))}
                     <div style={{ marginTop: 4, padding: '8px 12px', borderRadius: 6, background: checkResult.rangeOk && checkResult.depRunwayOk && checkResult.arrRunwayOk ? '#DCFCE7' : '#FEE2E2', textAlign: 'center', fontWeight: 700, fontSize: '0.85rem', color: checkResult.rangeOk && checkResult.depRunwayOk && checkResult.arrRunwayOk ? '#166534' : '#991B1B' }}>
-                      {checkResult.rangeOk && checkResult.depRunwayOk && checkResult.arrRunwayOk ? '✈ Route is feasible' : '✗ Route not feasible'}
+                      {checkResult.rangeOk && checkResult.depRunwayOk && checkResult.arrRunwayOk ? 'Route is feasible' : 'Route not feasible'}
                     </div>
                   </div>
                 )}

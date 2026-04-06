@@ -187,11 +187,14 @@ export default function RoutePreviewMap({ dep, arr, routes, hubs, homeAirport, c
     }
 
     if (homeAirport && homeAirport.lat != null) {
-      L.circleMarker([homeAirport.lat, homeAirport.lng], {
+      const homeMarker = L.circleMarker([homeAirport.lat, homeAirport.lng], {
         radius: 5, color: '#1a6dc4', fillColor: '#26A9F0',
         fillOpacity: 1, weight: 2, interactive: true,
-      }).bindTooltip(`${homeAirport.code} (Home-Base)`, { permanent: false, direction: 'top', offset: [0, -7] })
-        .addTo(dotLayer);
+      });
+      homeMarker.bindTooltip(`${homeAirport.code} (Home-Base)`, { permanent: false, direction: 'top', offset: [0, -7] });
+      homeMarker.on('click', () => setActiveHub(prev => prev === homeAirport.code ? null : homeAirport.code));
+      homeMarker.addTo(dotLayer);
+      hubMarkersRef.current[homeAirport.code] = homeMarker;
     }
   }, [hubs?.map(h => h.code).join(','), homeAirport?.code, isMulti]); // eslint-disable-line react-hooks/exhaustive-deps
 

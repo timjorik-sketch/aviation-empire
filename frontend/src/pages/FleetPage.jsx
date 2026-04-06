@@ -45,6 +45,16 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
     });
   };
 
+  const toggleAllBases = () => {
+    const allKeys = groupedOverview.map(g => g.code ?? '__none__');
+    const allCollapsed = allKeys.length > 0 && allKeys.every(k => collapsedBases.has(k));
+    if (allCollapsed) {
+      setCollapsedBases(new Set());
+    } else {
+      setCollapsedBases(new Set(allKeys));
+    }
+  };
+
   useEffect(() => {
     fetchData();
     fetchOrders();
@@ -595,13 +605,22 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
         <section className="overview-section">
           <div className="fleet-section-bar">
             <span className="fleet-section-bar-title">Airplane List</span>
-            <button
-              className={`ov-btn-edit-mode${editMode ? ' ov-btn-edit-mode--active' : ''}`}
-              onClick={handleToggleEdit}
-              disabled={profilesLoading}
-            >
-              {profilesLoading ? 'Loading…' : editMode ? 'Done Editing' : 'Edit Airplanes'}
-            </button>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button
+                className="ov-btn-toggle-all"
+                onClick={toggleAllBases}
+                title={groupedOverview.length > 0 && groupedOverview.every(g => collapsedBases.has(g.code ?? '__none__')) ? 'Expand All' : 'Collapse All'}
+              >
+                {groupedOverview.length > 0 && groupedOverview.every(g => collapsedBases.has(g.code ?? '__none__')) ? '▶ All' : '▼ All'}
+              </button>
+              <button
+                className={`ov-btn-edit-mode${editMode ? ' ov-btn-edit-mode--active' : ''}`}
+                onClick={handleToggleEdit}
+                disabled={profilesLoading}
+              >
+                {profilesLoading ? 'Loading…' : editMode ? 'Done Editing' : 'Edit Airplanes'}
+              </button>
+            </div>
           </div>
 
           {fleetOverview.length === 0 ? (
@@ -1504,6 +1523,20 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
         .ov-btn-edit-mode:hover { background: rgba(255,255,255,0.15); border-color: white; }
         .ov-btn-edit-mode--active { background: white; color: #2C2C2C; border-color: white; }
         .ov-btn-edit-mode--active:hover { background: #E0E0E0; }
+
+        .ov-btn-toggle-all {
+          padding: 0.3rem 0.7rem;
+          background: transparent;
+          border: 1px solid rgba(255,255,255,0.5);
+          color: white;
+          border-radius: 6px;
+          font-size: 0.72rem;
+          font-weight: 600;
+          cursor: pointer;
+          letter-spacing: 0.03em;
+          transition: background 0.15s, border-color 0.15s;
+        }
+        .ov-btn-toggle-all:hover { background: rgba(255,255,255,0.15); border-color: white; }
 
         .ov-inline-select {
           padding: 0.25rem 0.4rem;

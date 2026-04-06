@@ -20,6 +20,7 @@ async function syncRoutePrices(routeId, ecoPrice, bizPrice, firPrice, servicePro
     UPDATE flights SET economy_price = $1, business_price = $2, first_price = $3
     WHERE status IN ('scheduled', 'boarding')
       AND (route_id = $4 OR weekly_schedule_id IN (SELECT id FROM weekly_schedule WHERE route_id = $5))
+      AND booked_economy = 0 AND booked_business = 0 AND booked_first = 0
   `, [ecoPrice, bizPrice ?? null, firPrice ?? null, routeId, routeId]);
 }
 

@@ -28,6 +28,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
   const [cpSaving, setCpSaving] = useState(false);
 
   const [decommModal, setDecommModal] = useState(null); // aircraft object
+  const [deliveryModal, setDeliveryModal] = useState(null); // aircraft object for in-production popup
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg]     = useState('');
   const [collapsedBases, setCollapsedBases] = useState(new Set());
@@ -798,7 +799,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                                       <td>
                                         <button
                                           className="ov-btn-schedule"
-                                          onClick={() => onSelectAircraft && onSelectAircraft(ac.id)}
+                                          onClick={() => setDeliveryModal(ac)}
                                         >
                                           View Details
                                         </button>
@@ -946,6 +947,38 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                     <button className="decomm-btn-market" onClick={handleSellToMarket}>Sell to Market</button>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {deliveryModal && (() => {
+        const ac = deliveryModal;
+        const deliveryDate = new Date(ac.delivery_at);
+        const nowMs = Date.now();
+        const diffMs = deliveryDate.getTime() - nowMs;
+        const totalHours = Math.max(0, Math.floor(diffMs / 3600000));
+        const days = Math.floor(totalHours / 24);
+        const hours = totalHours % 24;
+        const timeStr = days > 0 ? `${days}d ${hours}h` : `${hours}h`;
+        return (
+          <div className="decomm-modal-overlay" onClick={() => setDeliveryModal(null)}>
+            <div className="decomm-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+              <div className="decomm-modal-head">
+                <h3>{ac.registration}</h3>
+                <button className="decomm-modal-close" onClick={() => setDeliveryModal(null)}>&times;</button>
+              </div>
+              <div className="decomm-modal-body" style={{ textAlign: 'center', padding: '1.5rem' }}>
+                <p style={{ fontSize: '0.95rem', fontWeight: 600, margin: '0 0 0.5rem' }}>{ac.aircraft_type}</p>
+                <p style={{ fontSize: '0.85rem', color: '#666', margin: '0 0 1.25rem' }}>In Production</p>
+                <div style={{ fontSize: '1.8rem', fontWeight: 700, color: '#2C2C2C', margin: '0.5rem 0' }}>{timeStr}</div>
+                <p style={{ fontSize: '0.8rem', color: '#999', margin: '0 0 1rem' }}>remaining until delivery</p>
+                {ac.home_airport && (
+                  <p style={{ fontSize: '0.85rem', color: '#444' }}>
+                    Delivery to <strong>{ac.home_airport}</strong>
+                  </p>
+                )}
               </div>
             </div>
           </div>

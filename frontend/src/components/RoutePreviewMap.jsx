@@ -88,7 +88,9 @@ export default function RoutePreviewMap({ dep, arr, routes, hubs, homeAirport, c
   const hubMarkersRef = useRef({});
   const [activeHub, setActiveHub] = useState(null);
 
-  const isMulti = !!(routes && routes.length > 0);
+  // isMulti: true whenever the routes prop is provided (even if initially empty),
+  // so the map mode doesn't flip when async data arrives and cause a remount.
+  const isMulti = routes !== undefined && routes !== null;
   const hubKey = hubs ? hubs.map(h => h.code).join(',') : '';
 
   // Effect 1: Map init, tiles, hub dots, home dot. Re-runs when airports/hubs change.

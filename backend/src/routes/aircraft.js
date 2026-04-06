@@ -2012,12 +2012,8 @@ router.post('/dev/fill-market', authMiddleware, async (_req, res) => {
 // GET /api/aircraft/types/available — all types unlocked for the airline's current level
 router.get('/types/available', authMiddleware, async (req, res) => {
   try {
-    const lvlResult = await pool.query(
-      'SELECT level FROM airlines WHERE id = (SELECT airline_id FROM users WHERE id = $1)',
-      [req.userId]
-    );
-    if (!lvlResult.rows[0]) return res.status(400).json({ error: 'No airline found' });
-    const airlineLevel = lvlResult.rows[0].level;
+    const airlineLevel = req.airlineLevel;
+    if (!airlineLevel) return res.status(400).json({ error: 'No airline found' });
 
     const result = await pool.query(`
       SELECT id, manufacturer, full_name, range_km, cruise_speed_kmh,

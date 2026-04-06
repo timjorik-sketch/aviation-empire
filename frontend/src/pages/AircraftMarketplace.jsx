@@ -508,7 +508,7 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
                       <div className="am-used-empty-icon">✈</div>
                       <div>No used {modal.model} currently on the market.</div>
                       <div style={{ fontSize:'0.8rem', color:'#999', marginTop:'0.3rem' }}>
-                        Used aircraft are restocked daily at 03:00 CET.
+                        Used aircraft are restocked hourly when sold out.
                       </div>
                     </div>
                   ) : (

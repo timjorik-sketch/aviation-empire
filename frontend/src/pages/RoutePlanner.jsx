@@ -21,9 +21,9 @@ function formatFlightTime(km) {
 
 function getAnalysisCost(distKm) {
   if (!distKm) return null;
-  if (distKm < 3000) return 20000;
-  if (distKm <= 7000) return 80000;
-  return 180000;
+  if (distKm < 1000) return 100000;
+  if (distKm <= 3000) return 450000;
+  return 1000000;
 }
 
 function getNextMonday(weekStartStr) {

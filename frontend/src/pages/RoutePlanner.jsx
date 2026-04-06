@@ -129,9 +129,11 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
   const [checkFleetLoaded, setCheckFleetLoaded] = useState(false);
   const [allAirports, setAllAirports] = useState([]);
   const [allAirportsLoaded, setAllAirportsLoaded] = useState(false);
-  const [checkAircraftId, setCheckAircraftId] = useState('');
+  const [checkAircraftTypeId, setCheckAircraftTypeId] = useState('');
   const [checkDep, setCheckDep] = useState('');
   const [checkArr, setCheckArr] = useState('');
+  const [checkDepCountry, setCheckDepCountry] = useState('');
+  const [checkArrCountry, setCheckArrCountry] = useState('');
   const [checkDepData, setCheckDepData] = useState(null);
   const [checkArrData, setCheckArrData] = useState(null);
 
@@ -164,7 +166,19 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
       .then(d => setCheckArrData(d.airport || null)).catch(() => setCheckArrData(null));
   }, [checkArr]);
 
-  const checkAircraft = checkFleet.find(a => String(a.id) === checkAircraftId) || null;
+  // Unique aircraft types in fleet (deduplicated by type_id)
+  const checkAircraftTypes = (() => {
+    const seen = new Set();
+    return checkFleet.filter(a => {
+      if (!a.is_listed_for_sale && a.type_id && !seen.has(a.type_id)) {
+        seen.add(a.type_id);
+        return true;
+      }
+      return false;
+    });
+  })();
+
+  const checkAircraft = checkAircraftTypes.find(a => String(a.type_id) === checkAircraftTypeId) || null;
   const checkResult = (() => {
     if (!checkAircraft || !checkDepData || !checkArrData) return null;
     const dist = Math.round(haversineKm(checkDepData.latitude, checkDepData.longitude, checkArrData.latitude, checkArrData.longitude));
@@ -521,41 +535,53 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
 
             {checkMode ? (
               <div>
-                {/* Aircraft */}
+                {/* Aircraft type */}
                 <div style={{ marginBottom: '1rem' }}>
-                  <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600, fontSize: '0.9rem', color: '#2C2C2C' }}>Aircraft</label>
-                  <select value={checkAircraftId} onChange={e => setCheckAircraftId(e.target.value)}
+                  <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600, fontSize: '0.9rem', color: '#2C2C2C' }}>Aircraft Type</label>
+                  <select value={checkAircraftTypeId} onChange={e => setCheckAircraftTypeId(e.target.value)}
                     style={{ width: '100%', padding: '0.5rem', borderRadius: 6, border: '1px solid #E0E0E0', fontSize: '0.9rem' }}>
-                    <option value="">Select aircraft…</option>
-                    {checkFleet.filter(a => !a.is_listed_for_sale).map(a => (
-                      <option key={a.id} value={a.id}>{a.registration} — {a.full_name} ({a.range_km?.toLocaleString()} km)</option>
+                    <option value="">Select type…</option>
+                    {checkAircraftTypes.map(a => (
+                      <option key={a.type_id} value={a.type_id}>{a.full_name} ({a.range_km?.toLocaleString()} km)</option>
                     ))}
                   </select>
                 </div>
 
-                {/* Airports */}
+                {/* Airports — country + airport dropdowns */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600, fontSize: '0.9rem', color: '#2C2C2C' }}>Departure</label>
-                    <select value={checkDep} onChange={e => setCheckDep(e.target.value)}
+                  {/* Departure */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <label style={{ fontWeight: 600, fontSize: '0.9rem', color: '#2C2C2C' }}>Departure</label>
+                    <select value={checkDepCountry} onChange={e => { setCheckDepCountry(e.target.value); setCheckDep(''); }}
                       style={{ width: '100%', padding: '0.5rem', borderRadius: 6, border: '1px solid #E0E0E0', fontSize: '0.9rem' }}>
-                      <option value="">Select…</option>
-                      {Object.entries(allAirportsByCountry).sort(([a],[b]) => a.localeCompare(b)).map(([country, list]) => (
-                        <optgroup key={country} label={country}>
-                          {list.map(a => <option key={a.iata_code} value={a.iata_code}>{a.iata_code} – {a.name}</option>)}
-                        </optgroup>
+                      <option value="">Country…</option>
+                      {Object.keys(allAirportsByCountry).sort((a, b) => a.localeCompare(b)).map(c => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                    <select value={checkDep} onChange={e => setCheckDep(e.target.value)} disabled={!checkDepCountry}
+                      style={{ width: '100%', padding: '0.5rem', borderRadius: 6, border: '1px solid #E0E0E0', fontSize: '0.9rem' }}>
+                      <option value="">Airport…</option>
+                      {(allAirportsByCountry[checkDepCountry] || []).map(a => (
+                        <option key={a.iata_code} value={a.iata_code}>{a.iata_code} – {a.name}</option>
                       ))}
                     </select>
                   </div>
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600, fontSize: '0.9rem', color: '#2C2C2C' }}>Arrival</label>
-                    <select value={checkArr} onChange={e => setCheckArr(e.target.value)}
+                  {/* Arrival */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <label style={{ fontWeight: 600, fontSize: '0.9rem', color: '#2C2C2C' }}>Arrival</label>
+                    <select value={checkArrCountry} onChange={e => { setCheckArrCountry(e.target.value); setCheckArr(''); }}
                       style={{ width: '100%', padding: '0.5rem', borderRadius: 6, border: '1px solid #E0E0E0', fontSize: '0.9rem' }}>
-                      <option value="">Select…</option>
-                      {Object.entries(allAirportsByCountry).sort(([a],[b]) => a.localeCompare(b)).map(([country, list]) => (
-                        <optgroup key={country} label={country}>
-                          {list.map(a => <option key={a.iata_code} value={a.iata_code} disabled={a.iata_code === checkDep}>{a.iata_code} – {a.name}</option>)}
-                        </optgroup>
+                      <option value="">Country…</option>
+                      {Object.keys(allAirportsByCountry).sort((a, b) => a.localeCompare(b)).map(c => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                    <select value={checkArr} onChange={e => setCheckArr(e.target.value)} disabled={!checkArrCountry}
+                      style={{ width: '100%', padding: '0.5rem', borderRadius: 6, border: '1px solid #E0E0E0', fontSize: '0.9rem' }}>
+                      <option value="">Airport…</option>
+                      {(allAirportsByCountry[checkArrCountry] || []).filter(a => a.iata_code !== checkDep).map(a => (
+                        <option key={a.iata_code} value={a.iata_code}>{a.iata_code} – {a.name}</option>
                       ))}
                     </select>
                   </div>

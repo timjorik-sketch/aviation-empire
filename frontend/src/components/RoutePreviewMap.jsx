@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 
 // Mercator aspect ratio (width / height) for bounds [−58°S, 75°N]
@@ -76,28 +76,29 @@ function splitAtAntimeridian(pts) {
   return segments;
 }
 
-function badgeIcon(code) {
-  return L.divIcon({
-    className: '',
-    html: `<div style="background:#2C2C2C;color:#fff;font-family:monospace;font-weight:700;font-size:11px;padding:3px 8px;border-radius:3px;white-space:nowrap;letter-spacing:0.08em">${code}</div>`,
-    iconSize: null,
-    iconAnchor: [-4, 8],
-  });
-}
-
 // dep / arr: { iata, name, lat, lng } or null  — single route with markers
-// routes: [{ depLat, depLng, arrLat, arrLng }]  — multiple routes, no markers
+// routes: [{ dep, arr, depLat, depLng, arrLat, arrLng }]  — multiple routes, no markers
+// hubs: [{ code, lat, lng }] — clickable hub dots (toggle filter)
+// homeAirport: { code, lat, lng } — home base dot
 // containerStyle: optional override for the container div style
 export default function RoutePreviewMap({ dep, arr, routes, hubs, homeAirport, containerStyle }) {
   const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const routeLayerRef = useRef(null);
+  const hubMarkersRef = useRef({});
+  const [activeHub, setActiveHub] = useState(null);
 
+  const isMulti = !!(routes && routes.length > 0);
+  const hubKey = hubs ? hubs.map(h => h.code).join(',') : '';
+
+  // Effect 1: Map init, tiles, hub dots, home dot. Re-runs when airports/hubs change.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     delete container._leaflet_id;
-
-    const isMulti = routes && routes.length > 0;
+    setActiveHub(null);
+    hubMarkersRef.current = {};
 
     const map = L.map(container, {
       dragging: isMulti, scrollWheelZoom: isMulti,
@@ -112,36 +113,44 @@ export default function RoutePreviewMap({ dep, arr, routes, hubs, homeAirport, c
       { attribution: '© OpenStreetMap contributors © CARTO', maxZoom: 19, subdomains: 'abcd' }
     ).addTo(map);
 
-    let networkBounds = null;
+    // Route lines go in a layer group so Effect 2 can clear+redraw them
+    const routeLayer = L.layerGroup().addTo(map);
+    mapRef.current = map;
+    routeLayerRef.current = routeLayer;
 
-    // Multiple routes mode (dashboard overview — no markers)
+    // Single route mode: draw line here (static, no filtering needed)
+    if (dep && arr) {
+      const arc = greatCirclePoints(dep.lat, dep.lng, arr.lat, arr.lng);
+      splitAtAntimeridian(arc).forEach(seg =>
+        L.polyline(seg, { color: '#26A9F0', weight: 1.8 }).addTo(map)
+      );
+      setTimeout(() => {
+        map.invalidateSize();
+        map.fitBounds(WORLD_BOUNDS, { padding: [0, 0], animate: false });
+      }, 100);
+    }
+
     if (isMulti) {
-      const allPoints = [];
-      routes.forEach(({ depLat, depLng, arrLat, arrLng }) => {
-        const arc = greatCirclePoints(depLat, depLng, arrLat, arrLng);
-        allPoints.push(...arc);
-        splitAtAntimeridian(arc).forEach(seg =>
-          L.polyline(seg, { color: '#26A9F0', weight: 1, opacity: 0.85 }).addTo(map)
-        );
-      });
-      if (allPoints.length > 0) networkBounds = L.latLngBounds(allPoints);
-
-      // Hub dots
+      // Hub dots — clickable toggle
       if (hubs && hubs.length > 0) {
         hubs.forEach(h => {
           if (h.lat == null || h.lng == null) return;
-          L.circleMarker([h.lat, h.lng], {
+          const marker = L.circleMarker([h.lat, h.lng], {
             radius: 4,
             color: '#1a6dc4',
             fillColor: '#26A9F0',
             fillOpacity: 1,
             weight: 1.5,
-          }).bindTooltip(h.code, { permanent: false, direction: 'top', offset: [0, -6] })
-            .addTo(map);
+            interactive: true,
+          });
+          marker.bindTooltip(h.code, { permanent: false, direction: 'top', offset: [0, -6] });
+          marker.on('click', () => setActiveHub(prev => prev === h.code ? null : h.code));
+          marker.addTo(map);
+          hubMarkersRef.current[h.code] = marker;
         });
       }
 
-      // Home base dot
+      // Home base dot (not clickable — just a marker)
       if (homeAirport && homeAirport.lat != null) {
         L.circleMarker([homeAirport.lat, homeAirport.lng], {
           radius: 5,
@@ -149,36 +158,64 @@ export default function RoutePreviewMap({ dep, arr, routes, hubs, homeAirport, c
           fillColor: '#26A9F0',
           fillOpacity: 1,
           weight: 2,
+          interactive: true,
         }).bindTooltip(`${homeAirport.code} (Home-Base)`, { permanent: false, direction: 'top', offset: [0, -7] })
           .addTo(map);
       }
+
+      setTimeout(() => map.invalidateSize(), 100);
     }
 
-    // Single route mode (Route Map page — line only, no markers)
-    if (dep && arr) {
-      const arc = greatCirclePoints(dep.lat, dep.lng, arr.lat, arr.lng);
-      splitAtAntimeridian(arc).forEach(seg =>
-        L.polyline(seg, { color: '#26A9F0', weight: 1.8 }).addTo(map)
-      );
-    }
-
-    const fit = () => {
-      map.invalidateSize();
-      if (networkBounds) {
-        map.fitBounds(networkBounds, { padding: [24, 24], animate: false });
-      } else {
-        map.fitBounds(WORLD_BOUNDS, { padding: [0, 0], animate: false });
-      }
-    };
-
-    setTimeout(fit, 100);
-
-    // Refit on resize only for single-route (multi is interactive)
-    const ro = new ResizeObserver(() => { if (!isMulti) fit(); });
+    const ro = new ResizeObserver(() => { if (!isMulti) { map.invalidateSize(); map.fitBounds(WORLD_BOUNDS, { padding: [0, 0], animate: false }); } });
     ro.observe(container);
 
-    return () => { ro.disconnect(); map.remove(); };
-  }, [dep?.iata, arr?.iata, routes]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => {
+      ro.disconnect();
+      map.remove();
+      mapRef.current = null;
+      routeLayerRef.current = null;
+      hubMarkersRef.current = {};
+    };
+  }, [dep?.iata, arr?.iata, isMulti, hubKey, homeAirport?.code]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Effect 2: Draw/redraw route lines whenever routes or activeHub changes.
+  useEffect(() => {
+    const routeLayer = routeLayerRef.current;
+    const map = mapRef.current;
+    if (!routeLayer || !map || !routes) return;
+
+    routeLayer.clearLayers();
+
+    const filtered = activeHub
+      ? routes.filter(r => r.dep === activeHub || r.arr === activeHub)
+      : routes;
+
+    const allPoints = [];
+    filtered.forEach(({ depLat, depLng, arrLat, arrLng }) => {
+      const arc = greatCirclePoints(depLat, depLng, arrLat, arrLng);
+      allPoints.push(...arc);
+      splitAtAntimeridian(arc).forEach(seg =>
+        L.polyline(seg, { color: '#26A9F0', weight: 1, opacity: 0.85 }).addTo(routeLayer)
+      );
+    });
+
+    if (allPoints.length > 0) {
+      map.fitBounds(L.latLngBounds(allPoints), { padding: [24, 24], animate: !!activeHub });
+    } else if (routes.length > 0 && activeHub) {
+      // Hub selected but no routes — stay put
+    } else {
+      map.fitBounds(WORLD_BOUNDS, { padding: [0, 0], animate: false });
+    }
+
+    // Update hub marker styles to reflect active/inactive state
+    Object.entries(hubMarkersRef.current).forEach(([code, marker]) => {
+      marker.setStyle({
+        fillColor: activeHub === code ? '#ffffff' : '#26A9F0',
+        color: activeHub === code ? '#ffffff' : '#1a6dc4',
+        weight: activeHub === code ? 2 : 1.5,
+      });
+    });
+  }, [routes, activeHub]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div

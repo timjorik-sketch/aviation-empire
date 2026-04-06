@@ -1310,35 +1310,63 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
 
     const TURNAROUND_BY_CATEGORY = { L: 25, M: 40, H: 60 };
     const GROUND_MIN = TURNAROUND_BY_CATEGORY[wakeCategory] || 40;
-    const added = [];
+
+    // ── Validate all flights first ──
+    for (const flightData of flightsToSchedule) {
+      const { route_id, day_of_week, departure_time, economy_price } = flightData;
+      if (route_id === undefined || day_of_week === undefined || !departure_time || !economy_price) {
+        return res.status(400).json({ error: 'Each flight requires route_id, day_of_week, departure_time (HH:MM), economy_price' });
+      }
+      const dow = parseInt(day_of_week);
+      if (dow < 0 || dow > 6) return res.status(400).json({ error: 'day_of_week must be 0 (Mon) – 6 (Sun)' });
+    }
+
+    // ── Batch-fetch: routes, existing schedule, maintenance (3 queries total) ──
+    const uniqueRouteIds = [...new Set(flightsToSchedule.map(f => f.route_id))];
+    const routeCache = new Map();
+    const routeResult = await pool.query(
+      `SELECT id, flight_number, distance_km, departure_airport, arrival_airport
+       FROM routes WHERE id = ANY($1) AND airline_id = $2`,
+      [uniqueRouteIds, airlineId]
+    );
+    for (const r of routeResult.rows) routeCache.set(r.id, r);
+
+    const [existResult, maintResult] = await Promise.all([
+      pool.query(`SELECT day_of_week, departure_time, arrival_time FROM weekly_schedule WHERE aircraft_id = $1`, [aircraftId]),
+      pool.query(`SELECT day_of_week, start_minutes, duration_minutes FROM maintenance_schedule WHERE aircraft_id = $1 AND airline_id = $2`, [aircraftId, airlineId]),
+    ]);
+
+    // Index existing schedule and maintenance by day
+    const existByDay = new Map();
+    for (const row of existResult.rows) {
+      const d = row.day_of_week;
+      if (!existByDay.has(d)) existByDay.set(d, []);
+      const [eDepH, eDepM] = row.departure_time.split(':').map(Number);
+      const [eArrH, eArrM] = row.arrival_time.split(':').map(Number);
+      existByDay.get(d).push({ depMin: eDepH * 60 + eDepM, arrMin: eArrH * 60 + eArrM });
+    }
+    const maintByDay = new Map();
+    for (const row of maintResult.rows) {
+      const d = row.day_of_week;
+      if (!maintByDay.has(d)) maintByDay.set(d, []);
+      maintByDay.get(d).push({ start: row.start_minutes, end: row.start_minutes + row.duration_minutes });
+    }
+
+    // ── Validate all flights against cached data ──
+    const prepared = [];
     const newBatch = [];
 
     for (const flightData of flightsToSchedule) {
       const { route_id, day_of_week, departure_time, economy_price, business_price, first_price, service_profile_id } = flightData;
-
-      if (route_id === undefined || day_of_week === undefined || !departure_time || !economy_price) {
-        return res.status(400).json({ error: 'Each flight requires route_id, day_of_week, departure_time (HH:MM), economy_price' });
-      }
-
       const dow = parseInt(day_of_week);
-      if (dow < 0 || dow > 6) return res.status(400).json({ error: 'day_of_week must be 0 (Mon) – 6 (Sun)' });
 
-      const routeResult = await pool.query(`
-        SELECT r.id, r.flight_number, r.distance_km, r.departure_airport, r.arrival_airport
-        FROM routes r WHERE r.id = $1 AND r.airline_id = $2
-      `, [route_id, airlineId]);
-      if (!routeResult.rows[0]) return res.status(400).json({ error: `Route ${route_id} not found` });
-      const route = routeResult.rows[0];
+      const route = routeCache.get(route_id);
+      if (!route) return res.status(400).json({ error: `Route ${route_id} not found` });
 
       if (aircraftRange && route.distance_km > aircraftRange) {
         return res.status(400).json({
           error: `Route exceeds aircraft range`,
-          detail: {
-            flight_number: route.flight_number,
-            route_distance_km: route.distance_km,
-            aircraft_name: aircraftName,
-            aircraft_range_km: aircraftRange
-          }
+          detail: { flight_number: route.flight_number, route_distance_km: route.distance_km, aircraft_name: aircraftName, aircraft_range_km: aircraftRange }
         });
       }
 
@@ -1350,33 +1378,21 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
       const arrMM = arrMin % 60;
       const arrTime = `${String(arrH).padStart(2, '0')}:${String(arrMM).padStart(2, '0')}`;
 
-      const existResult = await pool.query(`
-        SELECT departure_time, arrival_time FROM weekly_schedule
-        WHERE aircraft_id = $1 AND day_of_week = $2
-      `, [aircraftId, dow]);
-
-      let overlap = false;
-      for (const row of existResult.rows) {
-        const [eDepH, eDepM] = row.departure_time.split(':').map(Number);
-        const [eArrH, eArrM] = row.arrival_time.split(':').map(Number);
-        const eDepMin = eDepH * 60 + eDepM;
-        const eArrMin = eArrH * 60 + eArrM;
-        if (depMin < eArrMin + GROUND_MIN && eDepMin < arrMin + GROUND_MIN) { overlap = true; break; }
+      // Check overlap with existing schedule
+      for (const ex of (existByDay.get(dow) || [])) {
+        if (depMin < ex.arrMin + GROUND_MIN && ex.depMin < arrMin + GROUND_MIN) {
+          return res.status(400).json({ error: `Flight at ${departure_time} on day ${dow} overlaps with an existing entry (incl. ${GROUND_MIN}min turnaround)` });
+        }
       }
-      if (overlap) return res.status(400).json({ error: `Flight at ${departure_time} on day ${dow} overlaps with an existing entry (incl. ${GROUND_MIN}min turnaround)` });
 
-      const maintResult = await pool.query(`
-        SELECT start_minutes, duration_minutes FROM maintenance_schedule
-        WHERE aircraft_id = $1 AND airline_id = $2 AND day_of_week = $3
-      `, [aircraftId, airlineId, dow]);
-
-      let maintOverlap = false;
-      for (const row of maintResult.rows) {
-        const mStart = row.start_minutes, mEnd = row.start_minutes + row.duration_minutes;
-        if (depMin < mEnd && mStart < arrMin) { maintOverlap = true; break; }
+      // Check overlap with maintenance
+      for (const m of (maintByDay.get(dow) || [])) {
+        if (depMin < m.end && m.start < arrMin) {
+          return res.status(400).json({ error: `Flight at ${departure_time} overlaps with a maintenance window` });
+        }
       }
-      if (maintOverlap) return res.status(400).json({ error: `Flight at ${departure_time} overlaps with a maintenance window` });
 
+      // Check overlap within this batch
       for (const nw of newBatch) {
         if (nw.dow !== dow) continue;
         if (depMin < nw.arrMin + GROUND_MIN && nw.depMin < arrMin + GROUND_MIN) {
@@ -1384,31 +1400,35 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
         }
       }
 
-      const insertResult = await pool.query(`
-        INSERT INTO weekly_schedule
-          (aircraft_id, day_of_week, flight_number, departure_airport, arrival_airport,
-           departure_time, arrival_time, economy_price, business_price, first_price, route_id, service_profile_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-        RETURNING id
-      `, [
-        aircraftId, dow, route.flight_number, route.departure_airport, route.arrival_airport,
-        departure_time, arrTime,
-        parseFloat(economy_price), business_price ?? null, first_price ?? null, route.id,
-        service_profile_id ?? null
-      ]);
-      const entryId = insertResult.rows[0].id;
-
       newBatch.push({ dow, depMin, arrMin });
-      added.push({
-        id: entryId, day_of_week: dow, flight_number: route.flight_number,
-        departure_airport: route.departure_airport, arrival_airport: route.arrival_airport,
-        departure_time, arrival_time: arrTime,
+      prepared.push({
+        dow, route, departure_time, arrTime,
         economy_price: parseFloat(economy_price), business_price: business_price ?? null,
-        first_price: first_price ?? null, route_id: route.id,
-        service_profile_id: service_profile_id ?? null
+        first_price: first_price ?? null, service_profile_id: service_profile_id ?? null
       });
     }
 
+    // ── Batch INSERT all flights in one query ──
+    const values = [];
+    const placeholders = [];
+    let idx = 1;
+    for (const p of prepared) {
+      placeholders.push(`($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`);
+      values.push(aircraftId, p.dow, p.route.flight_number, p.route.departure_airport, p.route.arrival_airport,
+        p.departure_time, p.arrTime, p.economy_price, p.business_price, p.first_price, p.route.id, p.service_profile_id);
+    }
+    const insertResult = await pool.query(`
+      INSERT INTO weekly_schedule
+        (aircraft_id, day_of_week, flight_number, departure_airport, arrival_airport,
+         departure_time, arrival_time, economy_price, business_price, first_price, route_id, service_profile_id)
+      VALUES ${placeholders.join(', ')}
+      RETURNING id, day_of_week, flight_number, departure_airport, arrival_airport,
+                departure_time, arrival_time, economy_price, business_price, first_price, route_id, service_profile_id
+    `, values);
+
+    const added = insertResult.rows;
+
+    // ── Sync route prices (once per unique route) ──
     const seenRoutes = new Set();
     for (const f of added) {
       if (!seenRoutes.has(f.route_id)) {

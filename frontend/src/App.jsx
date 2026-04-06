@@ -1150,7 +1150,7 @@ function App() {
                   {/* Routes map — full width below both columns */}
                   <div style={{ background: '#fff', borderTop: '1px solid #F0F0F0', overflow: 'hidden' }}>
                     <div className="hp-it-section-label" style={{ padding: '6px 1.1rem' }}>Routes</div>
-                    <RoutePreviewMap routes={activeRoutes} />
+                    <RoutePreviewMap routes={activeRoutes} hubs={airlineStats.hubs} />
                   </div>
 
                 </div>

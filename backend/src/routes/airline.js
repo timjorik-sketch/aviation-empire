@@ -360,12 +360,12 @@ router.get('/stats', authMiddleware, async (req, res) => {
 
     // Expansion airports (formerly hubs)
     const hubResult = await pool.query(`
-      SELECT e.airport_code, ap.name FROM airport_expansions e
+      SELECT e.airport_code, ap.name, ap.latitude, ap.longitude FROM airport_expansions e
       LEFT JOIN airports ap ON ap.iata_code = e.airport_code
       WHERE e.airline_id = $1 AND e.expansion_level > 0
       ORDER BY e.airport_code
     `, [req.airlineId]);
-    const hubs = hubResult.rows.map(r => ({ code: r.airport_code, name: r.name }));
+    const hubs = hubResult.rows.map(r => ({ code: r.airport_code, name: r.name, lat: r.latitude, lng: r.longitude }));
 
     // Weekly revenue (last 7 days by arrival_time)
     const revResult = await pool.query(`

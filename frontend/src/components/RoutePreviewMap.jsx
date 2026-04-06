@@ -88,7 +88,7 @@ function badgeIcon(code) {
 // dep / arr: { iata, name, lat, lng } or null  — single route with markers
 // routes: [{ depLat, depLng, arrLat, arrLng }]  — multiple routes, no markers
 // containerStyle: optional override for the container div style
-export default function RoutePreviewMap({ dep, arr, routes, containerStyle }) {
+export default function RoutePreviewMap({ dep, arr, routes, hubs, containerStyle }) {
   const containerRef = useRef(null);
 
   useEffect(() => {
@@ -125,6 +125,21 @@ export default function RoutePreviewMap({ dep, arr, routes, containerStyle }) {
         );
       });
       if (allPoints.length > 0) networkBounds = L.latLngBounds(allPoints);
+
+      // Hub dots
+      if (hubs && hubs.length > 0) {
+        hubs.forEach(h => {
+          if (h.lat == null || h.lng == null) return;
+          L.circleMarker([h.lat, h.lng], {
+            radius: 4,
+            color: '#1a6dc4',
+            fillColor: '#26A9F0',
+            fillOpacity: 1,
+            weight: 1.5,
+          }).bindTooltip(h.code, { permanent: false, direction: 'top', offset: [0, -6] })
+            .addTo(map);
+        });
+      }
     }
 
     // Single route mode (Route Map page — line only, no markers)

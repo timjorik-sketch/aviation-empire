@@ -97,11 +97,13 @@ export default function RoutePreviewMap({ dep, arr, routes, containerStyle }) {
 
     delete container._leaflet_id;
 
+    const isMulti = routes && routes.length > 0;
+
     const map = L.map(container, {
-      dragging: false, scrollWheelZoom: false,
-      doubleClickZoom: false, boxZoom: false,
-      keyboard: false, touchZoom: false,
-      zoomControl: false,
+      dragging: isMulti, scrollWheelZoom: isMulti,
+      doubleClickZoom: isMulti, boxZoom: isMulti,
+      keyboard: false, touchZoom: isMulti,
+      zoomControl: isMulti,
       zoomSnap: 0.1,
     });
 
@@ -110,14 +112,19 @@ export default function RoutePreviewMap({ dep, arr, routes, containerStyle }) {
       { attribution: '© OpenStreetMap contributors © CARTO', maxZoom: 19, subdomains: 'abcd' }
     ).addTo(map);
 
+    let networkBounds = null;
+
     // Multiple routes mode (dashboard overview — no markers)
-    if (routes && routes.length > 0) {
+    if (isMulti) {
+      const allPoints = [];
       routes.forEach(({ depLat, depLng, arrLat, arrLng }) => {
         const arc = greatCirclePoints(depLat, depLng, arrLat, arrLng);
+        allPoints.push(...arc);
         splitAtAntimeridian(arc).forEach(seg =>
           L.polyline(seg, { color: '#26A9F0', weight: 1, opacity: 0.85 }).addTo(map)
         );
       });
+      if (allPoints.length > 0) networkBounds = L.latLngBounds(allPoints);
     }
 
     // Single route mode (Route Map page — line only, no markers)
@@ -130,13 +137,17 @@ export default function RoutePreviewMap({ dep, arr, routes, containerStyle }) {
 
     const fit = () => {
       map.invalidateSize();
-      map.fitBounds(WORLD_BOUNDS, { padding: [0, 0], animate: false });
+      if (networkBounds) {
+        map.fitBounds(networkBounds, { padding: [24, 24], animate: false });
+      } else {
+        map.fitBounds(WORLD_BOUNDS, { padding: [0, 0], animate: false });
+      }
     };
 
     setTimeout(fit, 100);
 
-    // Refit whenever the container is resized (e.g. responsive layout changes)
-    const ro = new ResizeObserver(fit);
+    // Refit on resize only for single-route (multi is interactive)
+    const ro = new ResizeObserver(() => { if (!isMulti) fit(); });
     ro.observe(container);
 
     return () => { ro.disconnect(); map.remove(); };

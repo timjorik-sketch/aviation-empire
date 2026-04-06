@@ -442,7 +442,7 @@ function App() {
   const [airportReturnPage, setAirportReturnPage] = useState('routes');
   const [hubsBackPage, setHubsBackPage] = useState('dashboard');
   const [loading, setLoading] = useState(true);
-  const [airlineStats, setAirlineStats] = useState({ destinations_count: 0, hubs: [], weekly_revenue: 0, avg_satisfaction: null, daily_passengers: 0, total_passengers: 0 });
+  const [airlineStats, setAirlineStats] = useState({ destinations_count: 0, hubs: [], home_airport: null, weekly_revenue: 0, avg_satisfaction: null, daily_passengers: 0, total_passengers: 0 });
   const [departures, setDepartures] = useState([]);
   const [arrivals, setArrivals] = useState([]);
   const [fleetSummary, setFleetSummary] = useState([]);
@@ -492,7 +492,7 @@ function App() {
         setArrivals([]);
         setFleetSummary([]);
         setActiveRoutes([]);
-        setAirlineStats({ destinations_count: 0, hubs: [], weekly_revenue: 0, avg_satisfaction: null, daily_passengers: 0, total_passengers: 0 });
+        setAirlineStats({ destinations_count: 0, hubs: [], home_airport: null, weekly_revenue: 0, avg_satisfaction: null, daily_passengers: 0, total_passengers: 0 });
         setCurrentPage('dashboard');
         await fetchAllAirlines();
       }
@@ -569,7 +569,7 @@ function App() {
   }, [activeAirline?.id]);
 
   useEffect(() => {
-    if (!activeAirline) { setDepartures([]); setArrivals([]); setFleetSummary([]); setAirlineStats({ destinations_count: 0, hubs: [], weekly_revenue: 0, avg_satisfaction: null, daily_passengers: 0, total_passengers: 0 }); setActiveRoutes([]); return; }
+    if (!activeAirline) { setDepartures([]); setArrivals([]); setFleetSummary([]); setAirlineStats({ destinations_count: 0, hubs: [], home_airport: null, weekly_revenue: 0, avg_satisfaction: null, daily_passengers: 0, total_passengers: 0 }); setActiveRoutes([]); return; }
     const token = localStorage.getItem('token');
     const h = { 'Authorization': `Bearer ${token}` };
     Promise.all([
@@ -582,7 +582,7 @@ function App() {
       setDepartures(dep.flights || []);
       setArrivals(arr.flights || []);
       setFleetSummary(fleet.fleet || []);
-      setAirlineStats({ destinations_count: stats.destinations_count || 0, hubs: stats.hubs || [], weekly_revenue: stats.weekly_revenue || 0, avg_satisfaction: stats.avg_satisfaction ?? null, daily_passengers: stats.daily_passengers || 0, total_passengers: stats.total_passengers || 0 });
+      setAirlineStats({ destinations_count: stats.destinations_count || 0, hubs: stats.hubs || [], home_airport: stats.home_airport || null, weekly_revenue: stats.weekly_revenue || 0, avg_satisfaction: stats.avg_satisfaction ?? null, daily_passengers: stats.daily_passengers || 0, total_passengers: stats.total_passengers || 0 });
       setActiveRoutes(routesData.routes || []);
     }).catch(() => {});
   }, [activeAirline?.id]);
@@ -1150,7 +1150,7 @@ function App() {
                   {/* Routes map — full width below both columns */}
                   <div style={{ background: '#fff', borderTop: '1px solid #F0F0F0', overflow: 'hidden' }}>
                     <div className="hp-it-section-label" style={{ padding: '6px 1.1rem' }}>Routes</div>
-                    <RoutePreviewMap routes={activeRoutes} hubs={airlineStats.hubs} />
+                    <RoutePreviewMap routes={activeRoutes} hubs={airlineStats.hubs} homeAirport={airlineStats.home_airport} />
                   </div>
 
                 </div>

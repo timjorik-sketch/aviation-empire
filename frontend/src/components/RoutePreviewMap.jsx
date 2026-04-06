@@ -88,7 +88,7 @@ function badgeIcon(code) {
 // dep / arr: { iata, name, lat, lng } or null  — single route with markers
 // routes: [{ depLat, depLng, arrLat, arrLng }]  — multiple routes, no markers
 // containerStyle: optional override for the container div style
-export default function RoutePreviewMap({ dep, arr, routes, hubs, containerStyle }) {
+export default function RoutePreviewMap({ dep, arr, routes, hubs, homeAirport, containerStyle }) {
   const containerRef = useRef(null);
 
   useEffect(() => {
@@ -139,6 +139,18 @@ export default function RoutePreviewMap({ dep, arr, routes, hubs, containerStyle
           }).bindTooltip(h.code, { permanent: false, direction: 'top', offset: [0, -6] })
             .addTo(map);
         });
+      }
+
+      // Home base dot
+      if (homeAirport && homeAirport.lat != null) {
+        L.circleMarker([homeAirport.lat, homeAirport.lng], {
+          radius: 5,
+          color: '#1a6dc4',
+          fillColor: '#26A9F0',
+          fillOpacity: 1,
+          weight: 2,
+        }).bindTooltip(`${homeAirport.code} (Home-Base)`, { permanent: false, direction: 'top', offset: [0, -7] })
+          .addTo(map);
       }
     }
 

@@ -392,7 +392,17 @@ router.get('/stats', authMiddleware, async (req, res) => {
     `, [req.airlineId]);
     const total_passengers = parseInt(totalPaxResult.rows[0].coalesce) || 0;
 
-    res.json({ destinations_count, hubs, weekly_revenue, avg_satisfaction, daily_passengers, total_passengers });
+    // Home airport coordinates
+    const homeResult = await pool.query(`
+      SELECT ap.iata_code, ap.name, ap.latitude, ap.longitude
+      FROM airlines al JOIN airports ap ON ap.iata_code = al.home_airport_code
+      WHERE al.id = $1
+    `, [req.airlineId]);
+    const homeAirport = homeResult.rows[0]
+      ? { code: homeResult.rows[0].iata_code, name: homeResult.rows[0].name, lat: homeResult.rows[0].latitude, lng: homeResult.rows[0].longitude }
+      : null;
+
+    res.json({ destinations_count, hubs, home_airport: homeAirport, weekly_revenue, avg_satisfaction, daily_passengers, total_passengers });
   } catch (error) {
     console.error('Airline stats error:', error);
     res.status(500).json({ error: 'Server error' });

@@ -2138,9 +2138,19 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     {isCompleted && (() => {
                       const distKm = f.distance_km || 0;
                       const loadFactor = f.total_seats > 0 ? (f.seats_sold ?? 0) / f.total_seats : 0;
-                      const distMult = distKm >= 3000 ? 2.0 : distKm >= 1000 ? 1.5 : 1.0;
-                      const loadMult = loadFactor >= 0.9 ? 1.2 : loadFactor >= 0.8 ? 1.1 : loadFactor >= 0.7 ? 1.0 : 0.8;
-                      const xp = Math.round(50 * distMult * loadMult);
+                      const loadMult = loadFactor >= 1.0 ? 1.0
+                        : loadFactor >= 0.95 ? 0.95
+                        : loadFactor >= 0.90 ? 0.9
+                        : loadFactor >= 0.85 ? 0.85
+                        : loadFactor >= 0.80 ? 0.8
+                        : loadFactor >= 0.75 ? 0.75
+                        : loadFactor >= 0.70 ? 0.7
+                        : loadFactor >= 0.60 ? 0.6
+                        : loadFactor >= 0.50 ? 0.5
+                        : loadFactor >= 0.40 ? 0.3
+                        : loadFactor >= 0.20 ? 0.05
+                        : 0.0;
+                      const xp = Math.floor(distKm / 20 * loadMult);
                       return (
                         <tr>
                           <td style={{ color: '#444' }}>Points</td>

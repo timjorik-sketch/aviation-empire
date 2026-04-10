@@ -576,7 +576,7 @@
   padding: 5px 1.1rem !important;
 }
 
-/* Logo hover upload overlay (Airline Information Test box) */
+/* Logo hover upload overlay (Airline Information box) */
 .ait-logo-hover-overlay {
   position: absolute;
   inset: 0;
@@ -877,7 +877,7 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
   color: #2C2C2C;
 }
 .hp-fleet-table tr:last-child td { border-bottom: none; }
-.hp-fleet-table tbody tr:hover td { background: #FAFAFA; }
+.hp-fleet-table tbody tr:hover td { background: transparent; }
 
 .hp-fleet-img {
   width: 100px;

@@ -966,10 +966,10 @@ function App() {
               {/* Left: map + boards */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
-                {/* Airline Information Test */}
+                {/* Airline Information */}
                 <div className="hp-sidebar-card">
                   <div className="hp-sidebar-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span>Airline Information Test</span>
+                    <span>Airline Information</span>
                     <button
                       onClick={() => setCurrentPage('flight-schedule')}
                       style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.3)', color: 'rgba(255,255,255,0.7)', padding: '0.22rem 0.65rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', letterSpacing: '0.03em' }}

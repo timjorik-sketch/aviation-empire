@@ -881,7 +881,7 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
 
 .hp-fleet-img {
   width: 100px;
-  aspect-ratio: 10/3;
+  aspect-ratio: 1000/333;
   object-fit: cover;
   border-radius: 3px;
   background: #F5F5F5;

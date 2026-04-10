@@ -387,7 +387,7 @@ async function initDatabase() {
 
   await safeQuery(`SELECT setval('service_item_types_id_seq', COALESCE((SELECT MAX(id) FROM service_item_types), 1))`, null, 'setval sit');
 
-  // ── SEED additional aircraft types (IDs 15-61) ───────────────────────────────
+  // ── SEED additional aircraft types (IDs 15-64) ───────────────────────────────
   await safeQuery(`
     INSERT INTO aircraft_types (id, manufacturer, model, full_name, max_passengers, range_km, cruise_speed_kmh, min_runway_takeoff_m, min_runway_landing_m, fuel_consumption_empty_per_km, fuel_consumption_full_per_km, wake_turbulence_category, new_price_usd, required_level, required_pilots, image_filename) VALUES
     (15,'Airbus','A319 Neo','Airbus A319 Neo',160,6850,828,1860,1400,0.020,0.025,'M',101500000,8,2,'Aircraft_Airbus_319_Neo.png'),
@@ -438,7 +438,8 @@ async function initDatabase() {
     (60,'Airbus','A350-900 ULR','Airbus A350-900 ULR',440,18000,903,2850,2200,0.033,0.043,'H',370000000,14,2,'Aircraft_Airbus_350-900.png'),
     (61,'Boeing','777-200LR','Boeing 777-200LR',440,17370,892,3100,2100,0.036,0.046,'H',360000000,13,2,'Aircraft_Boeing_777-200.png'),
     (62,'Airbus','A321 XLR','Airbus A321 XLR',206,8700,840,2500,1980,0.022,0.028,'M',142000000,11,2,'Aircraft_Airbus_321_Neo.png'),
-    (63,'Airbus','A320neo','Airbus A320neo',180,6300,840,2100,1540,0.021,0.027,'M',110000000,9,2,'Aircraft_Airbus_320_Neo.png')
+    (63,'Airbus','A320neo','Airbus A320neo',180,6300,840,2100,1540,0.021,0.027,'M',110000000,9,2,'Aircraft_Airbus_320_Neo.png'),
+    (64,'Boeing','747-8','Boeing 747-8',467,14320,920,3300,2200,0.044,0.055,'H',418000000,15,2,'Aircraft_Boeing_747-8.png')
     ON CONFLICT (id) DO NOTHING
   `, null, 'aircraft_types seed');
   await safeQuery(`SELECT setval('aircraft_types_id_seq', COALESCE((SELECT MAX(id) FROM aircraft_types), 1))`, null, 'setval at');

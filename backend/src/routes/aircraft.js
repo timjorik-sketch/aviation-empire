@@ -308,7 +308,7 @@ router.get('/types', authMiddleware, async (req, res) => {
     if (!lvlResult.rows[0]) return res.status(400).json({ error: 'No airline found' });
     const airlineLevel = lvlResult.rows[0].level;
 
-    const result = await pool.query('SELECT id, manufacturer, model, full_name, max_passengers, range_km, cruise_speed_kmh, new_price_usd, required_level, image_filename FROM aircraft_types ORDER BY required_level, new_price_usd');
+    const result = await pool.query('SELECT id, manufacturer, model, full_name, max_passengers, range_km, cruise_speed_kmh, new_price_usd, required_level, image_filename FROM aircraft_types ORDER BY required_level, manufacturer, max_passengers, full_name');
 
     const aircraftTypes = result.rows.map(row => ({
       id: row.id,

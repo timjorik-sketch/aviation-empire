@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import TopBar from '../components/TopBar.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -30,22 +31,34 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState('');
   const [adding, setAdding]     = useState(null);
-  const [popupCode, setPopupCode] = useState(null);
-  const [popupData, setPopupData] = useState(null);
-  const popupCacheRef = useMemo(() => ({}), []);
+  const [hoverCode, setHoverCode] = useState(null);
+  const [hoverData, setHoverData] = useState(null);
+  const [hoverPos, setHoverPos]   = useState(null);
+  const hoverCache = useRef({});
+  const hoverTimer = useRef(null);
 
-  const handleCardClick = useCallback(async (code) => {
-    if (popupCode === code) { setPopupCode(null); return; }
-    setPopupCode(code);
-    if (popupCacheRef[code]) { setPopupData(popupCacheRef[code]); return; }
-    setPopupData(null);
-    try {
-      const res = await fetch(`${API_URL}/api/airports/${code}/hover`);
-      if (res.ok) { const d = await res.json(); popupCacheRef[code] = d; setPopupData(d); }
-    } catch { /* ignore */ }
-  }, [popupCode]);
+  const handleMouseEnter = useCallback((code, e) => {
+    clearTimeout(hoverTimer.current);
+    const rect = e.currentTarget.getBoundingClientRect();
+    hoverTimer.current = setTimeout(async () => {
+      setHoverCode(code);
+      setHoverPos({ top: rect.top, left: rect.right + 12, bottom: rect.bottom });
+      if (hoverCache.current[code]) { setHoverData(hoverCache.current[code]); return; }
+      setHoverData(null);
+      try {
+        const res = await fetch(`${API_URL}/api/airports/${code}/hover`);
+        if (res.ok) { const d = await res.json(); hoverCache.current[code] = d; setHoverData(d); }
+      } catch { /* ignore */ }
+    }, 300);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    clearTimeout(hoverTimer.current);
+    setHoverCode(null);
+  }, []);
 
   const fmtFee = (v) => v != null ? `$${Math.round(v).toLocaleString()}` : '—';
+  const satUrl = (lat, lng) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/13/${Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * 8192)}/${Math.floor((lng + 180) / 360 * 8192)}`;
 
   const [search, setSearch]                   = useState('');
   const [filterContinent, setFilterContinent] = useState(null);
@@ -305,9 +318,12 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
                   <div className="am-mfr-body">
                     <div className="am-grid">
                       {list.map(a => (
-                        <div key={a.iata_code} className="ao-card" onClick={() => handleCardClick(a.iata_code)}>
+                        <div key={a.iata_code} className="ao-card"
+                          onMouseEnter={e => handleMouseEnter(a.iata_code, e)}
+                          onMouseLeave={handleMouseLeave}
+                        >
                           <div className="ao-card-top">
-                            <span className="ao-iata ao-iata-link" onClick={e => { e.stopPropagation(); onNavigateToAirport?.(a.iata_code); }}>{a.iata_code}</span>
+                            <span className="ao-iata ao-iata-link" onClick={() => onNavigateToAirport?.(a.iata_code)}>{a.iata_code}</span>
                             <span className="ao-cat-badge">
                               {a.category} · {CATEGORY_LABELS[a.category] || '—'}
                             </span>
@@ -340,49 +356,61 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
         </div>
       </div>
 
-      {popupCode && (() => {
-        const ap = airports.find(a => a.iata_code === popupCode);
-        if (!ap) return null;
-        return (
-          <div className="ao-popup-backdrop" onClick={() => setPopupCode(null)}>
-            <div className="ao-popup" onClick={e => e.stopPropagation()}>
-              <div className="ao-popup-hero">
+      {hoverCode && hoverPos && createPortal(
+        (() => {
+          const ap = airports.find(a => a.iata_code === hoverCode);
+          if (!ap) return null;
+          // Position: to the right of the card, vertically centered
+          const popH = 480;
+          let top = Math.max(8, hoverPos.top);
+          if (top + popH > window.innerHeight - 8) top = Math.max(8, window.innerHeight - popH - 8);
+          // If no room on right, show on left
+          let left = hoverPos.left;
+          if (left + 400 > window.innerWidth - 8) left = hoverPos.left - 400 - 24;
+          return (
+            <div className="ao-popup" style={{ top, left }} onMouseEnter={() => clearTimeout(hoverTimer.current)} onMouseLeave={handleMouseLeave}>
+              {/* Satellite header */}
+              <div className="ao-popup-hero" style={
+                hoverData?.latitude != null
+                  ? { backgroundImage: `linear-gradient(rgba(0,0,0,0.15), rgba(0,0,0,0.55)), url(https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${hoverData.longitude - 0.04},${hoverData.latitude - 0.02},${hoverData.longitude + 0.04},${hoverData.latitude + 0.02}&size=400,120&f=image&format=jpg)` }
+                  : {}
+              }>
                 <div className="ao-popup-hero-overlay">
                   <span className="ao-popup-code">{ap.iata_code}</span>
                   <span className="ao-popup-name">{ap.name}</span>
                 </div>
               </div>
-              {!popupData ? (
-                <div style={{ padding: '1rem', textAlign: 'center', color: '#999', fontSize: '0.8rem' }}>Loading...</div>
+              {!hoverData ? (
+                <div style={{ padding: '1.2rem', textAlign: 'center', color: '#999', fontSize: '0.82rem' }}>Loading...</div>
               ) : (<>
                 <div className="ao-popup-section">Fees</div>
                 <table className="ao-popup-table">
                   <thead><tr><th></th><th>Landing</th><th>Handling</th></tr></thead>
                   <tbody>
-                    <tr><td className="ao-popup-wake">Light</td><td>{fmtFee(popupData.fees.landing_light)}</td><td>{fmtFee(popupData.fees.handling_light)}</td></tr>
-                    <tr><td className="ao-popup-wake">Medium</td><td>{fmtFee(popupData.fees.landing_medium)}</td><td>{fmtFee(popupData.fees.handling_medium)}</td></tr>
-                    <tr><td className="ao-popup-wake">Heavy</td><td>{fmtFee(popupData.fees.landing_heavy)}</td><td>{fmtFee(popupData.fees.handling_heavy)}</td></tr>
+                    <tr><td className="ao-popup-wake">Light</td><td>{fmtFee(hoverData.fees.landing_light)}</td><td>{fmtFee(hoverData.fees.handling_light)}</td></tr>
+                    <tr><td className="ao-popup-wake">Medium</td><td>{fmtFee(hoverData.fees.landing_medium)}</td><td>{fmtFee(hoverData.fees.handling_medium)}</td></tr>
+                    <tr><td className="ao-popup-wake">Heavy</td><td>{fmtFee(hoverData.fees.landing_heavy)}</td><td>{fmtFee(hoverData.fees.handling_heavy)}</td></tr>
                   </tbody>
                 </table>
                 <div className="ao-popup-section">
-                  Compatible Aircraft ({popupData.aircraft.length})
-                  {popupData.runway_length_m && <span style={{ fontWeight: 400, marginLeft: 6 }}>· {popupData.runway_length_m.toLocaleString()}m</span>}
+                  Compatible Aircraft ({hoverData.aircraft.length})
+                  {hoverData.runway_length_m && <span style={{ fontWeight: 400, marginLeft: 6 }}>· {hoverData.runway_length_m.toLocaleString()}m runway</span>}
                 </div>
                 <div className="ao-popup-ac-list">
-                  {popupData.aircraft.map((ac, i) => (
+                  {hoverData.aircraft.map((ac, i) => (
                     <div key={i} className="ao-popup-ac-row">
                       <img src={`/aircraft-images/${ac.image_filename}`} alt="" className="ao-popup-ac-img" onError={e => { e.target.style.display = 'none'; }} />
                       <span className="ao-popup-ac-name">{ac.full_name}</span>
-                      <span className="ao-popup-ac-pax">{ac.max_passengers}</span>
+                      <span className="ao-popup-ac-pax">{ac.max_passengers} pax</span>
                     </div>
                   ))}
                 </div>
               </>)}
-              <button className="ao-popup-close" onClick={() => setPopupCode(null)}>&times;</button>
             </div>
-          </div>
-        );
-      })()}
+          );
+        })(),
+        document.body
+      )}
 
       <style>{`
         .am-page { min-height: 100vh; background: #F5F5F5; }
@@ -512,42 +540,39 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
         }
         .ao-iata-link:hover { text-decoration-color: #2C2C2C; }
 
-        /* Airport info popup */
-        .ao-popup-backdrop {
-          position: fixed; inset: 0; background: rgba(0,0,0,0.4);
-          display: flex; align-items: center; justify-content: center;
-          z-index: 9999;
-        }
+        /* Airport hover popup */
         .ao-popup {
-          position: relative; width: 360px; max-height: 80vh; overflow-y: auto;
+          position: fixed; width: 380px; max-height: 520px; overflow-y: auto;
           background: #fff; border-radius: 10px;
-          box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+          box-shadow: 0 12px 40px rgba(0,0,0,0.28);
+          z-index: 9999; pointer-events: auto;
         }
         .ao-popup-hero {
-          height: 80px;
-          background: linear-gradient(rgba(0,0,0,0.35), rgba(0,0,0,0.6)),
+          height: 110px;
+          background: linear-gradient(rgba(0,0,0,0.15), rgba(0,0,0,0.55)),
             url('/header-images/Headerimage_Airports.png') center / cover;
+          background-size: cover;
           border-radius: 10px 10px 0 0;
-          display: flex; align-items: flex-end; padding: 8px 12px;
+          display: flex; align-items: flex-end; padding: 10px 14px;
         }
         .ao-popup-hero-overlay { display: flex; align-items: baseline; gap: 8px; }
-        .ao-popup-code { font-family: monospace; font-size: 1.3rem; font-weight: 800; color: #fff; letter-spacing: 0.04em; }
-        .ao-popup-name { font-size: 0.72rem; color: rgba(255,255,255,0.85); font-weight: 500; }
+        .ao-popup-code { font-family: monospace; font-size: 1.5rem; font-weight: 800; color: #fff; letter-spacing: 0.04em; text-shadow: 0 1px 4px rgba(0,0,0,0.4); }
+        .ao-popup-name { font-size: 0.78rem; color: rgba(255,255,255,0.9); font-weight: 500; text-shadow: 0 1px 3px rgba(0,0,0,0.4); }
         .ao-popup-section {
           background: #F0F0F0; color: #666; font-size: 0.65rem; font-weight: 700;
           text-transform: uppercase; letter-spacing: 0.08em; padding: 4px 12px;
         }
-        .ao-popup-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+        .ao-popup-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
         .ao-popup-table th {
-          text-align: left; padding: 4px 12px; font-size: 0.65rem; font-weight: 600;
+          text-align: left; padding: 5px 14px; font-size: 0.68rem; font-weight: 600;
           color: #999; text-transform: uppercase; letter-spacing: 0.05em;
         }
-        .ao-popup-table td { padding: 3px 12px; color: #2C2C2C; border-bottom: 1px solid #F5F5F5; }
-        .ao-popup-wake { font-weight: 600; color: #666; width: 60px; }
-        .ao-popup-ac-list { max-height: 180px; overflow-y: auto; }
+        .ao-popup-table td { padding: 4px 14px; color: #2C2C2C; border-bottom: 1px solid #F5F5F5; }
+        .ao-popup-wake { font-weight: 600; color: #666; width: 65px; }
+        .ao-popup-ac-list { max-height: 240px; overflow-y: auto; }
         .ao-popup-ac-row {
           display: flex; align-items: center; gap: 8px;
-          padding: 3px 12px; border-bottom: 1px solid #F5F5F5;
+          padding: 4px 14px; border-bottom: 1px solid #F5F5F5;
         }
         .ao-popup-ac-row:last-child { border-bottom: none; }
         .ao-popup-ac-img {
@@ -556,14 +581,6 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
         }
         .ao-popup-ac-name { font-size: 0.72rem; font-weight: 500; color: #2C2C2C; flex: 1; }
         .ao-popup-ac-pax { font-size: 0.68rem; color: #888; white-space: nowrap; }
-        .ao-popup-close {
-          position: absolute; top: 6px; right: 8px;
-          background: rgba(0,0,0,0.3); border: none; color: #fff;
-          width: 22px; height: 22px; border-radius: 50%;
-          font-size: 1rem; line-height: 1; cursor: pointer;
-          display: flex; align-items: center; justify-content: center;
-        }
-        .ao-popup-close:hover { background: rgba(0,0,0,0.5); }
       `}</style>
     </div>
   );

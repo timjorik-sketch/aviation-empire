@@ -227,7 +227,7 @@ router.get('/:code/hover', async (req, res) => {
   try {
     const code = req.params.code.toUpperCase();
     const apResult = await pool.query(`
-      SELECT iata_code, name, category, runway_length_m,
+      SELECT iata_code, name, category, runway_length_m, latitude, longitude,
              landing_fee_light, landing_fee_medium, landing_fee_heavy,
              ground_handling_fee_light, ground_handling_fee_medium, ground_handling_fee_heavy
       FROM airports WHERE iata_code = $1
@@ -250,7 +250,7 @@ router.get('/:code/hover', async (req, res) => {
 
     res.json({
       iata_code: ap.iata_code, name: ap.name, category: ap.category,
-      runway_length_m: ap.runway_length_m,
+      runway_length_m: ap.runway_length_m, latitude: ap.latitude, longitude: ap.longitude,
       fees: {
         landing_light: ap.landing_fee_light, landing_medium: ap.landing_fee_medium, landing_heavy: ap.landing_fee_heavy,
         handling_light: ap.ground_handling_fee_light, handling_medium: ap.ground_handling_fee_medium, handling_heavy: ap.ground_handling_fee_heavy,

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import TopBar from '../components/TopBar.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -533,6 +533,19 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
         }
         .ap-hover-ac-name { font-size: 0.72rem; font-weight: 500; color: #2C2C2C; flex: 1; }
         .ap-hover-ac-pax { font-size: 0.68rem; color: #888; white-space: nowrap; }
+        .ap-hover-close {
+          position: absolute; top: 6px; right: 8px;
+          background: rgba(0,0,0,0.3); border: none; color: #fff;
+          width: 22px; height: 22px; border-radius: 50%;
+          font-size: 1rem; line-height: 1; cursor: pointer;
+          display: flex; align-items: center; justify-content: center;
+        }
+        .ap-hover-close:hover { background: rgba(0,0,0,0.5); }
+        .ap-card-iata-link {
+          cursor: pointer; text-decoration: underline;
+          text-decoration-color: #CCC; text-underline-offset: 3px;
+        }
+        .ap-card-iata-link:hover { text-decoration-color: #2C2C2C; }
 
         /* ── Edit modal ── */
         .hd-modal-backdrop {
@@ -721,6 +734,7 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
               opening={opening}
               onOpen={handleOpenDestination}
               onBack={() => setView('list')}
+              onNavigateToAirport={onNavigateToAirport}
             />
           )}
         </div>
@@ -907,7 +921,7 @@ function AddDestinationsView({
   search, onSearchChange,
   filterContinent, onContinentChange,
   filterCountry, onCountryChange, countries,
-  opening, onOpen, onBack
+  opening, onOpen, onBack, onNavigateToAirport
 }) {
   return (
     <div className="hd-card">
@@ -963,6 +977,7 @@ function AddDestinationsView({
                     airport={ap}
                     opening={opening === ap.iata_code}
                     onOpen={onOpen}
+                    onNavigateToAirport={onNavigateToAirport}
                   />
                 ))}
               </div>
@@ -976,50 +991,43 @@ function AddDestinationsView({
 
 // ── Airport Card ───────────────────────────────────────────────────────────────
 
-const hoverCache = {};
+const popupCache = {};
 
-function AirportCard({ airport, opening, onOpen }) {
+function AirportCard({ airport, opening, onOpen, onNavigateToAirport }) {
   const catLabel = CATEGORY_LABELS[airport.category] || `Category ${airport.category}`;
   const catNum = airport.category ? `Cat. ${airport.category}` : '';
-  const [hoverData, setHoverData] = useState(null);
+  const [popupData, setPopupData] = useState(null);
   const [showPopup, setShowPopup] = useState(false);
-  const timerRef = useRef(null);
-  const cardRef = useRef(null);
 
-  const handleMouseEnter = () => {
-    timerRef.current = setTimeout(async () => {
-      setShowPopup(true);
-      if (hoverCache[airport.iata_code]) {
-        setHoverData(hoverCache[airport.iata_code]);
-        return;
+  const handleCardClick = async () => {
+    if (showPopup) { setShowPopup(false); return; }
+    setShowPopup(true);
+    if (popupCache[airport.iata_code]) {
+      setPopupData(popupCache[airport.iata_code]);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/api/airports/${airport.iata_code}/hover`);
+      if (res.ok) {
+        const data = await res.json();
+        popupCache[airport.iata_code] = data;
+        setPopupData(data);
       }
-      try {
-        const res = await fetch(`${API_URL}/api/airports/${airport.iata_code}/hover`);
-        if (res.ok) {
-          const data = await res.json();
-          hoverCache[airport.iata_code] = data;
-          setHoverData(data);
-        }
-      } catch { /* ignore */ }
-    }, 350);
-  };
-
-  const handleMouseLeave = () => {
-    clearTimeout(timerRef.current);
-    setShowPopup(false);
+    } catch { /* ignore */ }
   };
 
   const fmtFee = (v) => v != null ? `$${Math.round(v).toLocaleString()}` : '—';
 
   return (
     <div
-      ref={cardRef}
       className={`ap-card${airport.is_opened ? ' is-opened' : ''}`}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-      style={{ position: 'relative' }}
+      onClick={handleCardClick}
+      style={{ position: 'relative', cursor: 'pointer' }}
     >
-      <span className="ap-card-iata">{airport.iata_code}</span>
+      <span
+        className="ap-card-iata ap-card-iata-link"
+        onClick={e => { e.stopPropagation(); onNavigateToAirport?.(airport.iata_code); }}
+      >{airport.iata_code}</span>
       <div className="ap-card-name">{airport.name}</div>
       <div className="ap-card-cat">{catNum && `${catNum} · `}{catLabel}</div>
       {airport.is_opened ? (
@@ -1027,7 +1035,7 @@ function AirportCard({ airport, opening, onOpen }) {
       ) : (
         <>
           <div style={{ fontSize: 11, color: '#888', marginTop: 6 }}>{fmtCost(OPEN_COST)} to open</div>
-          <button className="ap-card-btn" disabled={opening} onClick={() => onOpen(airport.iata_code)}>
+          <button className="ap-card-btn" disabled={opening} onClick={e => { e.stopPropagation(); onOpen(airport.iata_code); }}>
             {opening ? 'Opening...' : 'Open Destination'}
           </button>
         </>
@@ -1043,7 +1051,7 @@ function AirportCard({ airport, opening, onOpen }) {
             </div>
           </div>
 
-          {!hoverData ? (
+          {!popupData ? (
             <div style={{ padding: '1rem', textAlign: 'center', color: '#999', fontSize: '0.8rem' }}>Loading...</div>
           ) : (
             <>
@@ -1054,21 +1062,21 @@ function AirportCard({ airport, opening, onOpen }) {
                   <tr><th></th><th>Landing</th><th>Handling</th></tr>
                 </thead>
                 <tbody>
-                  <tr><td className="ap-hover-wake">Light</td><td>{fmtFee(hoverData.fees.landing_light)}</td><td>{fmtFee(hoverData.fees.handling_light)}</td></tr>
-                  <tr><td className="ap-hover-wake">Medium</td><td>{fmtFee(hoverData.fees.landing_medium)}</td><td>{fmtFee(hoverData.fees.handling_medium)}</td></tr>
-                  <tr><td className="ap-hover-wake">Heavy</td><td>{fmtFee(hoverData.fees.landing_heavy)}</td><td>{fmtFee(hoverData.fees.handling_heavy)}</td></tr>
+                  <tr><td className="ap-hover-wake">Light</td><td>{fmtFee(popupData.fees.landing_light)}</td><td>{fmtFee(popupData.fees.handling_light)}</td></tr>
+                  <tr><td className="ap-hover-wake">Medium</td><td>{fmtFee(popupData.fees.landing_medium)}</td><td>{fmtFee(popupData.fees.handling_medium)}</td></tr>
+                  <tr><td className="ap-hover-wake">Heavy</td><td>{fmtFee(popupData.fees.landing_heavy)}</td><td>{fmtFee(popupData.fees.handling_heavy)}</td></tr>
                 </tbody>
               </table>
 
               {/* Compatible Aircraft */}
               <div className="ap-hover-section-label">
-                Compatible Aircraft ({hoverData.aircraft.length})
-                {hoverData.runway_length_m && <span style={{ fontWeight: 400, marginLeft: 6 }}>· {hoverData.runway_length_m.toLocaleString()}m runway</span>}
+                Compatible Aircraft ({popupData.aircraft.length})
+                {popupData.runway_length_m && <span style={{ fontWeight: 400, marginLeft: 6 }}>· {popupData.runway_length_m.toLocaleString()}m runway</span>}
               </div>
               <div className="ap-hover-aircraft-list">
-                {hoverData.aircraft.length === 0 ? (
+                {popupData.aircraft.length === 0 ? (
                   <div style={{ padding: '0.5rem 0.8rem', color: '#999', fontSize: '0.75rem' }}>No data</div>
-                ) : hoverData.aircraft.map((ac, i) => (
+                ) : popupData.aircraft.map((ac, i) => (
                   <div key={i} className="ap-hover-ac-row">
                     <img src={`/aircraft-images/${ac.image_filename}`} alt="" className="ap-hover-ac-img"
                       onError={e => { e.target.style.display = 'none'; }} />
@@ -1079,6 +1087,7 @@ function AirportCard({ airport, opening, onOpen }) {
               </div>
             </>
           )}
+          <button className="ap-hover-close" onClick={e => { e.stopPropagation(); setShowPopup(false); }}>&times;</button>
         </div>
       )}
     </div>

@@ -899,7 +899,7 @@ function App() {
                     {nextLevelAircraft.map(ac => (
                       <div key={ac.id} style={{ background: '#F5F5F5', borderRadius: 8, overflow: 'hidden', border: '1px solid #E8E8E8' }}>
                         <img src={`/aircraft-images/${ac.image_filename}`} alt=""
-                          style={{ width: '100%', height: 52, objectFit: 'cover', display: 'block', background: '#E8E8E8' }}
+                          style={{ width: '100%', aspectRatio: '1000/333', objectFit: 'cover', display: 'block', background: '#E8E8E8' }}
                           onError={e => { e.target.style.background='#E0E0E0'; e.target.style.display='block'; e.target.src=''; }} />
                         <div style={{ padding: '6px 8px' }}>
                           <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#2C2C2C', lineHeight: 1.2 }}>{ac.full_name}</div>

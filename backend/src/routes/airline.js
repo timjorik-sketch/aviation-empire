@@ -76,6 +76,73 @@ router.get('/', authMiddleware, async (req, res) => {
   }
 });
 
+// GET /api/airline/public/:code — public profile of any airline (for other players to view)
+router.get('/public/:code', authMiddleware, async (req, res) => {
+  try {
+    const code = req.params.code.toUpperCase();
+    // Look up airline by code
+    const alResult = await pool.query(
+      `SELECT al.id, al.name, al.airline_code, al.home_airport_code, al.logo_filename,
+              ap.name AS home_airport_name, ap.latitude AS home_lat, ap.longitude AS home_lng
+       FROM airlines al
+       LEFT JOIN airports ap ON ap.iata_code = al.home_airport_code
+       WHERE al.airline_code = $1`, [code]
+    );
+    if (alResult.rows.length === 0) return res.status(404).json({ error: 'Airline not found' });
+    const al = alResult.rows[0];
+    const alId = al.id;
+
+    // Run remaining queries in parallel
+    const [totalPaxResult, destResult, hubResult, fleetResult, routeResult] = await Promise.all([
+      pool.query(`SELECT COALESCE(SUM(seats_sold), 0) AS total FROM flights WHERE airline_id = $1 AND status = 'completed'`, [alId]),
+      pool.query(`SELECT COUNT(*) FROM (
+        SELECT ws.departure_airport AS airport FROM weekly_schedule ws JOIN aircraft ac ON ac.id = ws.aircraft_id WHERE ac.airline_id = $1 AND ac.is_active = 1
+        UNION
+        SELECT ws.arrival_airport AS airport FROM weekly_schedule ws JOIN aircraft ac ON ac.id = ws.aircraft_id WHERE ac.airline_id = $1 AND ac.is_active = 1
+      ) sub`, [alId]),
+      pool.query(`SELECT e.airport_code, ap.name, ap.latitude, ap.longitude FROM airport_expansions e
+        LEFT JOIN airports ap ON ap.iata_code = e.airport_code
+        WHERE e.airline_id = $1 AND e.expansion_level > 0 ORDER BY e.airport_code`, [alId]),
+      pool.query(`SELECT at.full_name, at.image_filename, COUNT(*) AS count, at.manufacturer, at.max_passengers
+        FROM aircraft ac JOIN aircraft_types at ON ac.aircraft_type_id = at.id
+        WHERE ac.airline_id = $1
+        GROUP BY ac.aircraft_type_id, at.full_name, at.image_filename, at.manufacturer, at.max_passengers
+        ORDER BY at.manufacturer ASC, at.max_passengers ASC, at.full_name ASC`, [alId]),
+      pool.query(`SELECT DISTINCT ws.departure_airport, ws.arrival_airport,
+          dep_ap.latitude AS dep_lat, dep_ap.longitude AS dep_lng,
+          arr_ap.latitude AS arr_lat, arr_ap.longitude AS arr_lng
+        FROM weekly_schedule ws
+        JOIN aircraft ac ON ac.id = ws.aircraft_id
+        JOIN airports dep_ap ON dep_ap.iata_code = ws.departure_airport
+        JOIN airports arr_ap ON arr_ap.iata_code = ws.arrival_airport
+        WHERE ac.airline_id = $1 AND ac.is_active = 1
+          AND dep_ap.latitude IS NOT NULL AND arr_ap.latitude IS NOT NULL`, [alId]),
+    ]);
+
+    const hubs = hubResult.rows.map(r => ({ code: r.airport_code, name: r.name, lat: r.latitude, lng: r.longitude }));
+    const fleet = fleetResult.rows.map(r => ({ full_name: r.full_name, image_filename: r.image_filename, count: parseInt(r.count), manufacturer: r.manufacturer }));
+    const routes = routeResult.rows.map(r => ({ dep: r.departure_airport, arr: r.arrival_airport, depLat: r.dep_lat, depLng: r.dep_lng, arrLat: r.arr_lat, arrLng: r.arr_lng }));
+
+    res.json({
+      profile: {
+        name: al.name,
+        airline_code: al.airline_code,
+        logo_filename: al.logo_filename,
+        total_passengers: parseInt(totalPaxResult.rows[0].total) || 0,
+        home_airport: { code: al.home_airport_code, name: al.home_airport_name, lat: al.home_lat, lng: al.home_lng },
+        hubs,
+        destinations_count: parseInt(destResult.rows[0].count),
+        fleet_count: fleet.reduce((s, f) => s + f.count, 0),
+        fleet,
+        routes,
+      }
+    });
+  } catch (error) {
+    console.error('Public airline profile error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // GET /api/airline/active-routes — distinct routes on operating aircraft with airport coordinates
 router.get('/active-routes', authMiddleware, async (req, res) => {
   try {

@@ -1857,7 +1857,7 @@ router.get('/market/used', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT u.id, u.registration, u.manufactured_year, u.total_flight_hours, u.current_value, u.listed_at,
-             u.seller_type, COALESCE(al.name, 'AeroTrade International') AS seller_name,
+             u.seller_type, COALESCE(al.name, 'AeroTrade International') AS seller_name, al.airline_code AS seller_airline_code,
              t.id as type_id, t.manufacturer, t.model, t.full_name, t.max_passengers, t.range_km,
              t.cruise_speed_kmh, t.wake_turbulence_category, t.image_filename,
              t.new_price_usd, t.min_runway_takeoff_m, t.min_runway_landing_m, u.location
@@ -1872,7 +1872,7 @@ router.get('/market/used', authMiddleware, async (req, res) => {
       return {
         id: r.id, registration: r.registration, manufactured_year: r.manufactured_year,
         total_flight_hours: r.total_flight_hours, current_value: r.current_value, listed_at: r.listed_at,
-        seller_type: r.seller_type, seller_name: r.seller_name,
+        seller_type: r.seller_type, seller_name: r.seller_name, seller_airline_code: r.seller_airline_code || null,
         age_years: ageYears,
         type_id: r.type_id, manufacturer: r.manufacturer, model: r.model, full_name: r.full_name,
         max_passengers: r.max_passengers, range_km: r.range_km, cruise_speed_kmh: r.cruise_speed_kmh,

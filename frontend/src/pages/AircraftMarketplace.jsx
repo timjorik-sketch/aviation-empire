@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import TopBar from '../components/TopBar.jsx';
 import Toast from '../components/Toast.jsx';
+import AirlineProfilePopup from '../components/AirlineProfilePopup.jsx';
 // aircraftValue utils used via local fmt() helper below
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -77,6 +78,7 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
   const [purchasing, setPurchasing]           = useState(false);
   const [error, setError]   = useState('');
   const [success, setSuccess] = useState('');
+  const [profilePopupCode, setProfilePopupCode] = useState(null);
 
   // Load everything on mount
   useEffect(() => {
@@ -534,7 +536,9 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
                               <span>{fmtAge(l.manufactured_year)}</span>
                               <span>{l.location || '—'}</span>
                               <span style={{ fontSize: '0.78rem', color: l.seller_type === 'player' ? '#2C2C2C' : '#888' }}>
-                                {l.seller_name}
+                                {l.seller_type === 'player' && l.seller_airline_code
+                                  ? <span style={{ textDecoration: 'underline', textDecorationColor: '#CCC', textUnderlineOffset: 2, cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); setProfilePopupCode(l.seller_airline_code); }}>{l.seller_name}</span>
+                                  : l.seller_name}
                               </span>
                               <span className="am-ul-price">{fmt(l.current_value)}</span>
                             </button>
@@ -850,6 +854,10 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
         .am-btn-confirm:hover:not(:disabled) { background: #1a1a1a; }
         .am-btn-confirm:disabled { background: #E0E0E0; color: #999; cursor: not-allowed; }
       `}</style>
+
+      {profilePopupCode && (
+        <AirlineProfilePopup airlineCode={profilePopupCode} onClose={() => setProfilePopupCode(null)} />
+      )}
     </div>
   );
 }

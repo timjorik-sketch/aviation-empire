@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import AirportMap from '../components/AirportMap.jsx';
 import AirportLink from '../components/AirportLink.jsx';
+import AirlineProfilePopup from '../components/AirlineProfilePopup.jsx';
 import TopBar from '../components/TopBar.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -91,21 +92,23 @@ function StatusDots({ cls, label }) {
   );
 }
 
-function AirlineChip({ code, logoFilename, dark = true }) {
+function AirlineChip({ code, logoFilename, dark = true, onClick }) {
+  const style = onClick ? { cursor: 'pointer' } : {};
   if (logoFilename) {
     return (
       <img
         src={logoFilename.startsWith('http') ? logoFilename : `${API_URL}/airline-logos/${logoFilename}`}
         alt={code}
         title={code}
-        style={{ width: 120, height: 30, objectFit: 'contain', display: 'block' }}
+        style={{ width: 120, height: 30, objectFit: 'contain', display: 'block', ...style }}
+        onClick={onClick}
       />
     );
   }
-  return <span className={`ap-chip ${dark ? 'ap-chip-dark' : 'ap-chip-board'}`}>{code}</span>;
+  return <span className={`ap-chip ${dark ? 'ap-chip-dark' : 'ap-chip-board'}`} style={style} onClick={onClick}>{code}</span>;
 }
 
-function BoardTable({ type, flights, now, onNavigateToAirport }) {
+function BoardTable({ type, flights, now, onNavigateToAirport, onAirlineClick }) {
   const isArr = type === 'arrivals';
 
   // Filter and compute statuses
@@ -157,7 +160,7 @@ function BoardTable({ type, flights, now, onNavigateToAirport }) {
           const airportName = isArr ? f.origin_name : f.destination_name;
           return (
             <tr key={f.id}>
-              <td><AirlineChip code={f.airline_code} logoFilename={f.logo_filename} dark={false} /></td>
+              <td><AirlineChip code={f.airline_code} logoFilename={f.logo_filename} dark={false} onClick={onAirlineClick ? () => onAirlineClick(f.airline_code) : undefined} /></td>
               <td className="ap-time">{formatBoardTime(time)}</td>
               <td className="ap-apt-col">
                 <AirportLink code={airportCode} name={airportName || undefined} onNavigate={onNavigateToAirport} />
@@ -234,6 +237,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
   const [lastRefresh, setLastRefresh] = useState(null);
   const [now, setNow] = useState(() => Date.now());
 
+  const [profilePopupCode, setProfilePopupCode] = useState(null);
   const [showCapableModal, setShowCapableModal] = useState(false);
   const [capableAircraft, setCapableAircraft] = useState([]);
   const [capableLoading, setCapableLoading] = useState(false);
@@ -446,7 +450,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
                   <span className="ap-board-title">DEPARTURES</span>
                   <span className="ap-board-ct">{departures.length} shown</span>
                 </div>
-                <BoardTable type="departures" flights={departures} now={now} onNavigateToAirport={onNavigateToAirport} />
+                <BoardTable type="departures" flights={departures} now={now} onNavigateToAirport={onNavigateToAirport} onAirlineClick={setProfilePopupCode} />
               </div>
 
               {/* Arrivals */}
@@ -456,7 +460,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
                   <span className="ap-board-title">ARRIVALS</span>
                   <span className="ap-board-ct">{arrivals.length} shown</span>
                 </div>
-                <BoardTable type="arrivals" flights={arrivals} now={now} onNavigateToAirport={onNavigateToAirport} />
+                <BoardTable type="arrivals" flights={arrivals} now={now} onNavigateToAirport={onNavigateToAirport} onAirlineClick={setProfilePopupCode} />
               </div>
 
             </div>
@@ -474,7 +478,9 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
                     <tbody>
                       {airlines.map((al, i) => (
                         <tr key={i} className={i === airlines.length - 1 ? 'ap-al-last' : ''}>
-                          <td className="ap-al-name">{al.name}</td>
+                          <td className="ap-al-name">
+                            <button className="ap-al-name-link" onClick={() => setProfilePopupCode(al.airline_code)}>{al.name}</button>
+                          </td>
                           <td className="ap-al-ct">{al.weekly_departures} dep/wk</td>
                         </tr>
                       ))}
@@ -975,7 +981,17 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
           padding: 0.12rem 0.4rem; border-radius: 3px;
           letter-spacing: 0.06em; font-family: monospace; flex-shrink: 0;
         }
+        .ap-al-name-link {
+          background: none; border: none; color: #2C2C2C; cursor: pointer;
+          font: inherit; padding: 0; text-decoration: underline;
+          text-decoration-color: #CCC; text-underline-offset: 2px;
+        }
+        .ap-al-name-link:hover { text-decoration-color: #2C2C2C; }
       `}</style>
+
+      {profilePopupCode && (
+        <AirlineProfilePopup airlineCode={profilePopupCode} onClose={() => setProfilePopupCode(null)} />
+      )}
     </div>
   );
 }

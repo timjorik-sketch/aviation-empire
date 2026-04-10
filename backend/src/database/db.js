@@ -420,7 +420,7 @@ async function initDatabase() {
     (42,'Bombardier','CRJ-200','Bombardier CRJ-200',50,3148,786,1510,1463,0.020,0.025,'M',27000000,3,2,'Aircraft_Bombardier_CRJ-200.png'),
     (43,'Bombardier','CRJ-700','Bombardier CRJ-700',78,3620,828,1600,1524,0.021,0.026,'M',36200000,3,2,'Aircraft_Bombardier_CRJ-700.png'),
     (44,'Bombardier','CRJ-900','Bombardier CRJ-900',90,2956,828,1700,1585,0.022,0.027,'M',46300000,4,2,'Aircraft_Bombardier_CRJ-900.png'),
-    (45,'British Aerospace','Jetstream 41','British Aerospace Jetstream 41',29,1482,547,1130,1097,0.018,0.023,'L',8500000,1,2,'Aircraft_British-Aerospace_Jetstream-41.png'),
+    (45,'British Aerospace','Jetstream 41','British Aerospace Jetstream 41',29,1482,547,1130,1097,0.018,0.023,'L',8500000,1,2,'Aircraft_British-Aerospace_Jetstream-41_.png'),
     (46,'COMAC','C909','COMAC C909 (ARJ21)',95,3704,828,1700,1600,0.023,0.029,'M',38000000,5,2,'Aircraft_Comac_909.png'),
     (47,'COMAC','C919','COMAC C919',174,5555,834,2000,1700,0.024,0.030,'M',99000000,8,2,'Aircraft_Comac_919.png'),
     (48,'De Havilland','DHC-8-300','De Havilland DHC-8-300',56,1558,528,1180,1128,0.016,0.020,'M',17500000,1,2,'Aircraft_DeHavilland_DHC-8-300.png'),

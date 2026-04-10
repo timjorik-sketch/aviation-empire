@@ -517,7 +517,7 @@ async function initDatabase() {
     // Image filename corrections
     ["UPDATE aircraft_types SET image_filename='Aircraft_British-Aerospace_Jetstream-41.png' WHERE full_name='British Aerospace Jetstream 41'"],
     ["UPDATE aircraft_types SET image_filename='Aircraft_Boeing_747-800.png' WHERE full_name='Boeing 747-8'"],
-    ["UPDATE aircraft_types SET image_filename='Aircraft_Boeing_787-800.png' WHERE full_name='Boeing 787-8'"],
+    ["UPDATE aircraft_types SET image_filename='Aircraft_Boeing_787-8.png' WHERE full_name='Boeing 787-8'"],
     // Wake turbulence fix
     ["UPDATE aircraft_types SET wake_turbulence_category='H' WHERE wake_turbulence_category='J'"],
     // Level redistribution (15-level system)

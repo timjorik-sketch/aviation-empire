@@ -106,8 +106,8 @@ router.get('/public/:code', authMiddleware, async (req, res) => {
       pool.query(`SELECT at.full_name, at.image_filename, COUNT(*) AS count, at.manufacturer, at.max_passengers
         FROM aircraft ac JOIN aircraft_types at ON ac.aircraft_type_id = at.id
         WHERE ac.airline_id = $1
-        GROUP BY ac.aircraft_type_id, at.full_name, at.image_filename, at.manufacturer, at.max_passengers
-        ORDER BY at.manufacturer ASC, at.max_passengers ASC, at.full_name ASC`, [alId]),
+        GROUP BY ac.aircraft_type_id, at.full_name, at.image_filename, at.manufacturer, at.display_order
+        ORDER BY at.manufacturer ASC, at.display_order ASC, at.full_name ASC`, [alId]),
       pool.query(`SELECT DISTINCT ws.departure_airport, ws.arrival_airport,
           dep_ap.latitude AS dep_lat, dep_ap.longitude AS dep_lng,
           arr_ap.latitude AS arr_lat, arr_ap.longitude AS arr_lng
@@ -388,8 +388,8 @@ router.get('/fleet-summary', authMiddleware, async (req, res) => {
       FROM aircraft ac
       JOIN aircraft_types at ON ac.aircraft_type_id = at.id
       WHERE ac.airline_id = $1
-      GROUP BY ac.aircraft_type_id, at.full_name, at.image_filename, at.manufacturer, at.max_passengers
-      ORDER BY at.manufacturer ASC, at.max_passengers ASC, at.full_name ASC
+      GROUP BY ac.aircraft_type_id, at.full_name, at.image_filename, at.manufacturer, at.display_order
+      ORDER BY at.manufacturer ASC, at.display_order ASC, at.full_name ASC
     `, [req.airlineId]);
     const fleet = result.rows.map(row => ({
       full_name: row.full_name,

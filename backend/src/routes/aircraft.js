@@ -189,7 +189,7 @@ async function getGroupedFleetHandler(req, res) {
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
       WHERE a.airline_id = $1
       GROUP BY t.id, t.manufacturer, t.model, t.full_name, t.max_passengers, t.range_km, t.image_filename
-      ORDER BY t.manufacturer, t.max_passengers, t.full_name
+      ORDER BY t.manufacturer, t.display_order, t.full_name
     `, [airlineId]);
 
     let totalCount = 0;
@@ -308,7 +308,7 @@ router.get('/types', authMiddleware, async (req, res) => {
     if (!lvlResult.rows[0]) return res.status(400).json({ error: 'No airline found' });
     const airlineLevel = lvlResult.rows[0].level;
 
-    const result = await pool.query('SELECT id, manufacturer, model, full_name, max_passengers, range_km, cruise_speed_kmh, new_price_usd, required_level, image_filename FROM aircraft_types ORDER BY required_level, manufacturer, max_passengers, full_name');
+    const result = await pool.query('SELECT id, manufacturer, model, full_name, max_passengers, range_km, cruise_speed_kmh, new_price_usd, required_level, image_filename FROM aircraft_types ORDER BY required_level, manufacturer, display_order, full_name');
 
     const aircraftTypes = result.rows.map(row => ({
       id: row.id,

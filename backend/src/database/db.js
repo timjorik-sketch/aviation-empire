@@ -294,6 +294,7 @@ async function initDatabase() {
     `ALTER TABLE aircraft_types ADD COLUMN IF NOT EXISTS depreciation_age REAL DEFAULT 0.035`,
     `ALTER TABLE aircraft_types ADD COLUMN IF NOT EXISTS depreciation_fh REAL DEFAULT 0.000006`,
     `ALTER TABLE aircraft_types ADD COLUMN IF NOT EXISTS fuel_consumption_per_km REAL DEFAULT 0.028`,
+    `ALTER TABLE aircraft_types ADD COLUMN IF NOT EXISTS display_order INTEGER DEFAULT 0`,
     // airlines table
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS active_airline_id INTEGER REFERENCES airlines(id)`,
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS last_payroll_at TIMESTAMPTZ`,
@@ -536,6 +537,83 @@ async function initDatabase() {
     ["UPDATE aircraft_types SET required_level=13 WHERE full_name IN ('Airbus A350-900','Boeing 787-9','Boeing 787-10','Boeing 777-200','Boeing 777-200LR')"],
     ["UPDATE aircraft_types SET required_level=14 WHERE full_name IN ('Boeing 747-300','Boeing 777-300','Airbus A350-1000','Airbus A350-900 ULR')"],
     ["UPDATE aircraft_types SET required_level=15 WHERE full_name IN ('Boeing 747-400','Airbus A380')"],
+    // Display order — groups aircraft families together within each manufacturer
+    // Airbus: A220=100, A318/A319=200, A320=300, A321=400, A330=500, A340=600, A350=700, A380=800
+    ["UPDATE aircraft_types SET display_order=100 WHERE full_name='Airbus A220-100'"],
+    ["UPDATE aircraft_types SET display_order=101 WHERE full_name='Airbus A220-300'"],
+    ["UPDATE aircraft_types SET display_order=200 WHERE full_name='Airbus A318'"],
+    ["UPDATE aircraft_types SET display_order=210 WHERE full_name='Airbus A319'"],
+    ["UPDATE aircraft_types SET display_order=211 WHERE full_name='Airbus A319 Neo'"],
+    ["UPDATE aircraft_types SET display_order=300 WHERE full_name='Airbus A320'"],
+    ["UPDATE aircraft_types SET display_order=301 WHERE full_name='Airbus A320neo'"],
+    ["UPDATE aircraft_types SET display_order=400 WHERE full_name='Airbus A321'"],
+    ["UPDATE aircraft_types SET display_order=401 WHERE full_name='Airbus A321 Neo'"],
+    ["UPDATE aircraft_types SET display_order=402 WHERE full_name='Airbus A321 XLR'"],
+    ["UPDATE aircraft_types SET display_order=500 WHERE full_name='Airbus A330-200'"],
+    ["UPDATE aircraft_types SET display_order=501 WHERE full_name='Airbus A330-300'"],
+    ["UPDATE aircraft_types SET display_order=502 WHERE full_name='Airbus A330-800 Neo'"],
+    ["UPDATE aircraft_types SET display_order=503 WHERE full_name='Airbus A330-900 Neo'"],
+    ["UPDATE aircraft_types SET display_order=600 WHERE full_name='Airbus A340-300'"],
+    ["UPDATE aircraft_types SET display_order=601 WHERE full_name='Airbus A340-500'"],
+    ["UPDATE aircraft_types SET display_order=602 WHERE full_name='Airbus A340-600'"],
+    ["UPDATE aircraft_types SET display_order=700 WHERE full_name='Airbus A350-900'"],
+    ["UPDATE aircraft_types SET display_order=701 WHERE full_name='Airbus A350-900 ULR'"],
+    ["UPDATE aircraft_types SET display_order=702 WHERE full_name='Airbus A350-1000'"],
+    ["UPDATE aircraft_types SET display_order=800 WHERE full_name='Airbus A380'"],
+    // ATR
+    ["UPDATE aircraft_types SET display_order=100 WHERE full_name='ATR 42'"],
+    ["UPDATE aircraft_types SET display_order=101 WHERE full_name='ATR 72'"],
+    // Avro
+    ["UPDATE aircraft_types SET display_order=100 WHERE full_name='Avro RJ85'"],
+    // Boeing: 737=100, 747=200, 757=300, 777=400, 787=500
+    ["UPDATE aircraft_types SET display_order=100 WHERE full_name='Boeing 737-300'"],
+    ["UPDATE aircraft_types SET display_order=101 WHERE full_name='Boeing 737-400'"],
+    ["UPDATE aircraft_types SET display_order=102 WHERE full_name='Boeing 737-500'"],
+    ["UPDATE aircraft_types SET display_order=103 WHERE full_name='Boeing 737-600'"],
+    ["UPDATE aircraft_types SET display_order=104 WHERE full_name='Boeing 737-800'"],
+    ["UPDATE aircraft_types SET display_order=105 WHERE full_name='Boeing 737-8 Max'"],
+    ["UPDATE aircraft_types SET display_order=106 WHERE full_name='Boeing 737-10 Max'"],
+    ["UPDATE aircraft_types SET display_order=200 WHERE full_name='Boeing 747-300'"],
+    ["UPDATE aircraft_types SET display_order=201 WHERE full_name='Boeing 747-400'"],
+    ["UPDATE aircraft_types SET display_order=202 WHERE full_name='Boeing 747-8'"],
+    ["UPDATE aircraft_types SET display_order=300 WHERE full_name='Boeing 757-200'"],
+    ["UPDATE aircraft_types SET display_order=301 WHERE full_name='Boeing 757-300'"],
+    ["UPDATE aircraft_types SET display_order=400 WHERE full_name='Boeing 777-200'"],
+    ["UPDATE aircraft_types SET display_order=401 WHERE full_name='Boeing 777-200LR'"],
+    ["UPDATE aircraft_types SET display_order=402 WHERE full_name='Boeing 777-300'"],
+    ["UPDATE aircraft_types SET display_order=500 WHERE full_name='Boeing 787-8'"],
+    ["UPDATE aircraft_types SET display_order=501 WHERE full_name='Boeing 787-9'"],
+    ["UPDATE aircraft_types SET display_order=502 WHERE full_name='Boeing 787-10'"],
+    // Bombardier
+    ["UPDATE aircraft_types SET display_order=100 WHERE full_name='Bombardier CRJ-200'"],
+    ["UPDATE aircraft_types SET display_order=101 WHERE full_name='Bombardier CRJ-700'"],
+    ["UPDATE aircraft_types SET display_order=102 WHERE full_name='Bombardier CRJ-900'"],
+    // British Aerospace
+    ["UPDATE aircraft_types SET display_order=100 WHERE full_name='British Aerospace Jetstream 41'"],
+    // COMAC
+    ["UPDATE aircraft_types SET display_order=100 WHERE full_name='COMAC C909 (ARJ21)'"],
+    ["UPDATE aircraft_types SET display_order=101 WHERE full_name='COMAC C919'"],
+    // De Havilland
+    ["UPDATE aircraft_types SET display_order=100 WHERE full_name='De Havilland DHC-8-300'"],
+    ["UPDATE aircraft_types SET display_order=101 WHERE full_name='De Havilland DHC-8-400'"],
+    // Dornier
+    ["UPDATE aircraft_types SET display_order=100 WHERE full_name='Dornier 328-100'"],
+    ["UPDATE aircraft_types SET display_order=101 WHERE full_name='Dornier 328 JET'"],
+    // Embraer: EMB=100, ERJ=200, E-Jets=300, E2=400
+    ["UPDATE aircraft_types SET display_order=100 WHERE full_name='Embraer EMB 120 Brasilia'"],
+    ["UPDATE aircraft_types SET display_order=200 WHERE full_name='Embraer ERJ 135'"],
+    ["UPDATE aircraft_types SET display_order=201 WHERE full_name='Embraer ERJ 140'"],
+    ["UPDATE aircraft_types SET display_order=202 WHERE full_name='Embraer ERJ 145'"],
+    ["UPDATE aircraft_types SET display_order=300 WHERE full_name='Embraer E175'"],
+    ["UPDATE aircraft_types SET display_order=301 WHERE full_name='Embraer E190'"],
+    ["UPDATE aircraft_types SET display_order=302 WHERE full_name='Embraer E195'"],
+    ["UPDATE aircraft_types SET display_order=400 WHERE full_name='Embraer E175-E2'"],
+    ["UPDATE aircraft_types SET display_order=401 WHERE full_name='Embraer E190-E2'"],
+    ["UPDATE aircraft_types SET display_order=402 WHERE full_name='Embraer E195-E2'"],
+    // Saab
+    ["UPDATE aircraft_types SET display_order=100 WHERE full_name='Saab 340'"],
+    // Sukhoi
+    ["UPDATE aircraft_types SET display_order=100 WHERE full_name='Sukhoi Superjet 100'"],
   ];
   await runStatements(fuelCorrections.map(([s]) => s), 'data fixes');
 

@@ -32,7 +32,7 @@ router.get('/', authMiddleware, async (req, res) => {
       FROM airline_cabin_profiles p
       JOIN aircraft_types t ON p.aircraft_type_id = t.id
       WHERE p.airline_id = $1
-      ORDER BY t.manufacturer, t.max_passengers, t.full_name, p.created_at
+      ORDER BY t.manufacturer, t.display_order, t.full_name, p.created_at
     `, [req.airlineId]);
 
     const profiles = result.rows.map(r => ({

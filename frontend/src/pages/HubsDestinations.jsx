@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import TopBar from '../components/TopBar.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -487,6 +487,53 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
           width: 100%; justify-content: center;
         }
 
+        /* ── Airport hover popup ── */
+        .ap-hover-popup {
+          position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+          z-index: 999; width: 320px; max-height: 420px; overflow-y: auto;
+          background: #fff; border-radius: 8px;
+          box-shadow: 0 8px 32px rgba(0,0,0,0.22);
+          margin-top: 6px; pointer-events: auto;
+        }
+        .ap-hover-hero {
+          height: 80px;
+          background: linear-gradient(rgba(0,0,0,0.35), rgba(0,0,0,0.6)),
+            url('/header-images/Headerimage_Airports.png') center / cover;
+          border-radius: 8px 8px 0 0;
+          display: flex; align-items: flex-end; padding: 8px 12px;
+        }
+        .ap-hover-hero-overlay { display: flex; align-items: baseline; gap: 8px; }
+        .ap-hover-hero-code {
+          font-family: monospace; font-size: 1.3rem; font-weight: 800;
+          color: #fff; letter-spacing: 0.04em;
+        }
+        .ap-hover-hero-name { font-size: 0.72rem; color: rgba(255,255,255,0.85); font-weight: 500; }
+        .ap-hover-section-label {
+          background: #F0F0F0; color: #666; font-size: 0.65rem; font-weight: 700;
+          text-transform: uppercase; letter-spacing: 0.08em; padding: 4px 12px;
+        }
+        .ap-hover-table {
+          width: 100%; border-collapse: collapse; font-size: 0.75rem;
+        }
+        .ap-hover-table th {
+          text-align: left; padding: 4px 12px; font-size: 0.65rem; font-weight: 600;
+          color: #999; text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        .ap-hover-table td { padding: 3px 12px; color: #2C2C2C; border-bottom: 1px solid #F5F5F5; }
+        .ap-hover-wake { font-weight: 600; color: #666; width: 60px; }
+        .ap-hover-aircraft-list { max-height: 180px; overflow-y: auto; }
+        .ap-hover-ac-row {
+          display: flex; align-items: center; gap: 8px;
+          padding: 3px 12px; border-bottom: 1px solid #F5F5F5;
+        }
+        .ap-hover-ac-row:last-child { border-bottom: none; }
+        .ap-hover-ac-img {
+          width: 52px; aspect-ratio: 1000/333; object-fit: cover;
+          border-radius: 2px; background: #F5F5F5; flex-shrink: 0;
+        }
+        .ap-hover-ac-name { font-size: 0.72rem; font-weight: 500; color: #2C2C2C; flex: 1; }
+        .ap-hover-ac-pax { font-size: 0.68rem; color: #888; white-space: nowrap; }
+
         /* ── Edit modal ── */
         .hd-modal-backdrop {
           position: fixed; inset: 0; background: rgba(0,0,0,0.4);
@@ -929,12 +976,49 @@ function AddDestinationsView({
 
 // ── Airport Card ───────────────────────────────────────────────────────────────
 
+const hoverCache = {};
+
 function AirportCard({ airport, opening, onOpen }) {
   const catLabel = CATEGORY_LABELS[airport.category] || `Category ${airport.category}`;
   const catNum = airport.category ? `Cat. ${airport.category}` : '';
+  const [hoverData, setHoverData] = useState(null);
+  const [showPopup, setShowPopup] = useState(false);
+  const timerRef = useRef(null);
+  const cardRef = useRef(null);
+
+  const handleMouseEnter = () => {
+    timerRef.current = setTimeout(async () => {
+      setShowPopup(true);
+      if (hoverCache[airport.iata_code]) {
+        setHoverData(hoverCache[airport.iata_code]);
+        return;
+      }
+      try {
+        const res = await fetch(`${API_URL}/api/airports/${airport.iata_code}/hover`);
+        if (res.ok) {
+          const data = await res.json();
+          hoverCache[airport.iata_code] = data;
+          setHoverData(data);
+        }
+      } catch { /* ignore */ }
+    }, 350);
+  };
+
+  const handleMouseLeave = () => {
+    clearTimeout(timerRef.current);
+    setShowPopup(false);
+  };
+
+  const fmtFee = (v) => v != null ? `$${Math.round(v).toLocaleString()}` : '—';
 
   return (
-    <div className={`ap-card${airport.is_opened ? ' is-opened' : ''}`}>
+    <div
+      ref={cardRef}
+      className={`ap-card${airport.is_opened ? ' is-opened' : ''}`}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      style={{ position: 'relative' }}
+    >
       <span className="ap-card-iata">{airport.iata_code}</span>
       <div className="ap-card-name">{airport.name}</div>
       <div className="ap-card-cat">{catNum && `${catNum} · `}{catLabel}</div>
@@ -947,6 +1031,55 @@ function AirportCard({ airport, opening, onOpen }) {
             {opening ? 'Opening...' : 'Open Destination'}
           </button>
         </>
+      )}
+
+      {showPopup && (
+        <div className="ap-hover-popup" onClick={e => e.stopPropagation()}>
+          {/* Header image */}
+          <div className="ap-hover-hero">
+            <div className="ap-hover-hero-overlay">
+              <span className="ap-hover-hero-code">{airport.iata_code}</span>
+              <span className="ap-hover-hero-name">{airport.name}</span>
+            </div>
+          </div>
+
+          {!hoverData ? (
+            <div style={{ padding: '1rem', textAlign: 'center', color: '#999', fontSize: '0.8rem' }}>Loading...</div>
+          ) : (
+            <>
+              {/* Fees */}
+              <div className="ap-hover-section-label">Fees</div>
+              <table className="ap-hover-table">
+                <thead>
+                  <tr><th></th><th>Landing</th><th>Handling</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td className="ap-hover-wake">Light</td><td>{fmtFee(hoverData.fees.landing_light)}</td><td>{fmtFee(hoverData.fees.handling_light)}</td></tr>
+                  <tr><td className="ap-hover-wake">Medium</td><td>{fmtFee(hoverData.fees.landing_medium)}</td><td>{fmtFee(hoverData.fees.handling_medium)}</td></tr>
+                  <tr><td className="ap-hover-wake">Heavy</td><td>{fmtFee(hoverData.fees.landing_heavy)}</td><td>{fmtFee(hoverData.fees.handling_heavy)}</td></tr>
+                </tbody>
+              </table>
+
+              {/* Compatible Aircraft */}
+              <div className="ap-hover-section-label">
+                Compatible Aircraft ({hoverData.aircraft.length})
+                {hoverData.runway_length_m && <span style={{ fontWeight: 400, marginLeft: 6 }}>· {hoverData.runway_length_m.toLocaleString()}m runway</span>}
+              </div>
+              <div className="ap-hover-aircraft-list">
+                {hoverData.aircraft.length === 0 ? (
+                  <div style={{ padding: '0.5rem 0.8rem', color: '#999', fontSize: '0.75rem' }}>No data</div>
+                ) : hoverData.aircraft.map((ac, i) => (
+                  <div key={i} className="ap-hover-ac-row">
+                    <img src={`/aircraft-images/${ac.image_filename}`} alt="" className="ap-hover-ac-img"
+                      onError={e => { e.target.style.display = 'none'; }} />
+                    <span className="ap-hover-ac-name">{ac.full_name}</span>
+                    <span className="ap-hover-ac-pax">{ac.max_passengers} pax</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       )}
     </div>
   );

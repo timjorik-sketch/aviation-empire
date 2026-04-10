@@ -222,6 +222,47 @@ router.get('/:code/capable-aircraft', async (req, res) => {
   }
 });
 
+// GET /api/airports/:code/hover — lightweight data for airport hover popup (fees + capable aircraft)
+router.get('/:code/hover', async (req, res) => {
+  try {
+    const code = req.params.code.toUpperCase();
+    const apResult = await pool.query(`
+      SELECT iata_code, name, category, runway_length_m,
+             landing_fee_light, landing_fee_medium, landing_fee_heavy,
+             ground_handling_fee_light, ground_handling_fee_medium, ground_handling_fee_heavy
+      FROM airports WHERE iata_code = $1
+    `, [code]);
+    if (!apResult.rows[0]) return res.status(404).json({ error: 'Airport not found' });
+    const ap = apResult.rows[0];
+
+    let aircraft = [];
+    if (ap.runway_length_m) {
+      const acResult = await pool.query(`
+        SELECT full_name, max_passengers, image_filename, wake_turbulence_category
+        FROM aircraft_types WHERE min_runway_landing_m <= $1
+        ORDER BY max_passengers DESC
+      `, [ap.runway_length_m]);
+      aircraft = acResult.rows.map(r => ({
+        full_name: r.full_name, max_passengers: r.max_passengers,
+        image_filename: r.image_filename, wake: r.wake_turbulence_category
+      }));
+    }
+
+    res.json({
+      iata_code: ap.iata_code, name: ap.name, category: ap.category,
+      runway_length_m: ap.runway_length_m,
+      fees: {
+        landing_light: ap.landing_fee_light, landing_medium: ap.landing_fee_medium, landing_heavy: ap.landing_fee_heavy,
+        handling_light: ap.ground_handling_fee_light, handling_medium: ap.ground_handling_fee_medium, handling_heavy: ap.ground_handling_fee_heavy,
+      },
+      aircraft,
+    });
+  } catch (error) {
+    console.error('Airport hover error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // GET /api/airports/:code/departures — next 30 departures (next 3 days)
 router.get('/:code/departures', async (req, res) => {
   try {

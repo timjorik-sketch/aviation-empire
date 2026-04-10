@@ -420,7 +420,7 @@ async function initDatabase() {
     (42,'Bombardier','CRJ-200','Bombardier CRJ-200',50,3148,786,1510,1463,0.020,0.025,'M',27000000,3,2,'Aircraft_Bombardier_CRJ-200.png'),
     (43,'Bombardier','CRJ-700','Bombardier CRJ-700',78,3620,828,1600,1524,0.021,0.026,'M',36200000,3,2,'Aircraft_Bombardier_CRJ-700.png'),
     (44,'Bombardier','CRJ-900','Bombardier CRJ-900',90,2956,828,1700,1585,0.022,0.027,'M',46300000,4,2,'Aircraft_Bombardier_CRJ-900.png'),
-    (45,'British Aerospace','Jetstream 41','British Aerospace Jetstream 41',29,1482,547,1130,1097,0.018,0.023,'L',8500000,1,2,'Aircraft_British-Aerospace_Jetstream-41_.png'),
+    (45,'British Aerospace','Jetstream 41','British Aerospace Jetstream 41',29,1482,547,1130,1097,0.018,0.023,'L',8500000,1,2,'Aircraft_British-Aerospace_Jetstream-41.png'),
     (46,'COMAC','C909','COMAC C909 (ARJ21)',95,3704,828,1700,1600,0.023,0.029,'M',38000000,5,2,'Aircraft_Comac_909.png'),
     (47,'COMAC','C919','COMAC C919',174,5555,834,2000,1700,0.024,0.030,'M',99000000,8,2,'Aircraft_Comac_919.png'),
     (48,'De Havilland','DHC-8-300','De Havilland DHC-8-300',56,1558,528,1180,1128,0.016,0.020,'M',17500000,1,2,'Aircraft_DeHavilland_DHC-8-300.png'),
@@ -439,7 +439,7 @@ async function initDatabase() {
     (61,'Boeing','777-200LR','Boeing 777-200LR',440,17370,892,3100,2100,0.036,0.046,'H',360000000,13,2,'Aircraft_Boeing_777-200.png'),
     (62,'Airbus','A321 XLR','Airbus A321 XLR',206,8700,840,2500,1980,0.022,0.028,'M',142000000,11,2,'Aircraft_Airbus_321_Neo.png'),
     (63,'Airbus','A320neo','Airbus A320neo',180,6300,840,2100,1540,0.021,0.027,'M',110000000,9,2,'Aircraft_Airbus_320_Neo.png'),
-    (64,'Boeing','747-8','Boeing 747-8',467,14320,920,3300,2200,0.044,0.055,'H',418000000,15,2,'Aircraft_Boeing_747-8.png')
+    (64,'Boeing','747-8','Boeing 747-8',467,14320,920,3300,2200,0.044,0.055,'H',418000000,15,2,'Aircraft_Boeing_747-800.png')
     ON CONFLICT (id) DO NOTHING
   `, null, 'aircraft_types seed');
   await safeQuery(`SELECT setval('aircraft_types_id_seq', COALESCE((SELECT MAX(id) FROM aircraft_types), 1))`, null, 'setval at');

@@ -305,7 +305,7 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
                   <div className="am-mfr-body">
                     <div className="am-grid">
                       {list.map(a => (
-                        <div key={a.iata_code} className="ao-card" style={{ position: 'relative' }} onClick={() => handleCardClick(a.iata_code)}>
+                        <div key={a.iata_code} className="ao-card" onClick={() => handleCardClick(a.iata_code)}>
                           <div className="ao-card-top">
                             <span className="ao-iata ao-iata-link" onClick={e => { e.stopPropagation(); onNavigateToAirport?.(a.iata_code); }}>{a.iata_code}</span>
                             <span className="ao-cat-badge">
@@ -329,44 +329,6 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
                               </button>
                             )}
                           </div>
-
-                          {popupCode === a.iata_code && (
-                            <div className="ao-popup" onClick={e => e.stopPropagation()}>
-                              <div className="ao-popup-hero">
-                                <div className="ao-popup-hero-overlay">
-                                  <span className="ao-popup-code">{a.iata_code}</span>
-                                  <span className="ao-popup-name">{a.name}</span>
-                                </div>
-                              </div>
-                              {!popupData ? (
-                                <div style={{ padding: '1rem', textAlign: 'center', color: '#999', fontSize: '0.8rem' }}>Loading...</div>
-                              ) : (<>
-                                <div className="ao-popup-section">Fees</div>
-                                <table className="ao-popup-table">
-                                  <thead><tr><th></th><th>Landing</th><th>Handling</th></tr></thead>
-                                  <tbody>
-                                    <tr><td className="ao-popup-wake">Light</td><td>{fmtFee(popupData.fees.landing_light)}</td><td>{fmtFee(popupData.fees.handling_light)}</td></tr>
-                                    <tr><td className="ao-popup-wake">Medium</td><td>{fmtFee(popupData.fees.landing_medium)}</td><td>{fmtFee(popupData.fees.handling_medium)}</td></tr>
-                                    <tr><td className="ao-popup-wake">Heavy</td><td>{fmtFee(popupData.fees.landing_heavy)}</td><td>{fmtFee(popupData.fees.handling_heavy)}</td></tr>
-                                  </tbody>
-                                </table>
-                                <div className="ao-popup-section">
-                                  Compatible Aircraft ({popupData.aircraft.length})
-                                  {popupData.runway_length_m && <span style={{ fontWeight: 400, marginLeft: 6 }}>· {popupData.runway_length_m.toLocaleString()}m</span>}
-                                </div>
-                                <div className="ao-popup-ac-list">
-                                  {popupData.aircraft.map((ac, i) => (
-                                    <div key={i} className="ao-popup-ac-row">
-                                      <img src={`/aircraft-images/${ac.image_filename}`} alt="" className="ao-popup-ac-img" onError={e => { e.target.style.display = 'none'; }} />
-                                      <span className="ao-popup-ac-name">{ac.full_name}</span>
-                                      <span className="ao-popup-ac-pax">{ac.max_passengers}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </>)}
-                              <button className="ao-popup-close" onClick={e => { e.stopPropagation(); setPopupCode(null); }}>&times;</button>
-                            </div>
-                          )}
                         </div>
                       ))}
                     </div>
@@ -377,6 +339,50 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
           </div>
         </div>
       </div>
+
+      {popupCode && (() => {
+        const ap = airports.find(a => a.iata_code === popupCode);
+        if (!ap) return null;
+        return (
+          <div className="ao-popup-backdrop" onClick={() => setPopupCode(null)}>
+            <div className="ao-popup" onClick={e => e.stopPropagation()}>
+              <div className="ao-popup-hero">
+                <div className="ao-popup-hero-overlay">
+                  <span className="ao-popup-code">{ap.iata_code}</span>
+                  <span className="ao-popup-name">{ap.name}</span>
+                </div>
+              </div>
+              {!popupData ? (
+                <div style={{ padding: '1rem', textAlign: 'center', color: '#999', fontSize: '0.8rem' }}>Loading...</div>
+              ) : (<>
+                <div className="ao-popup-section">Fees</div>
+                <table className="ao-popup-table">
+                  <thead><tr><th></th><th>Landing</th><th>Handling</th></tr></thead>
+                  <tbody>
+                    <tr><td className="ao-popup-wake">Light</td><td>{fmtFee(popupData.fees.landing_light)}</td><td>{fmtFee(popupData.fees.handling_light)}</td></tr>
+                    <tr><td className="ao-popup-wake">Medium</td><td>{fmtFee(popupData.fees.landing_medium)}</td><td>{fmtFee(popupData.fees.handling_medium)}</td></tr>
+                    <tr><td className="ao-popup-wake">Heavy</td><td>{fmtFee(popupData.fees.landing_heavy)}</td><td>{fmtFee(popupData.fees.handling_heavy)}</td></tr>
+                  </tbody>
+                </table>
+                <div className="ao-popup-section">
+                  Compatible Aircraft ({popupData.aircraft.length})
+                  {popupData.runway_length_m && <span style={{ fontWeight: 400, marginLeft: 6 }}>· {popupData.runway_length_m.toLocaleString()}m</span>}
+                </div>
+                <div className="ao-popup-ac-list">
+                  {popupData.aircraft.map((ac, i) => (
+                    <div key={i} className="ao-popup-ac-row">
+                      <img src={`/aircraft-images/${ac.image_filename}`} alt="" className="ao-popup-ac-img" onError={e => { e.target.style.display = 'none'; }} />
+                      <span className="ao-popup-ac-name">{ac.full_name}</span>
+                      <span className="ao-popup-ac-pax">{ac.max_passengers}</span>
+                    </div>
+                  ))}
+                </div>
+              </>)}
+              <button className="ao-popup-close" onClick={() => setPopupCode(null)}>&times;</button>
+            </div>
+          </div>
+        );
+      })()}
 
       <style>{`
         .am-page { min-height: 100vh; background: #F5F5F5; }
@@ -461,7 +467,7 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
 
         /* Airport cards */
         .ao-card {
-          background: white; border-radius: 8px; overflow: hidden;
+          background: white; border-radius: 8px;
           border: 1px solid #F0F0F0; display: flex; flex-direction: column;
           padding: 12px 14px 10px; gap: 3px;
           cursor: pointer; transition: box-shadow 0.15s, border-color 0.15s;
@@ -507,17 +513,21 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
         .ao-iata-link:hover { text-decoration-color: #2C2C2C; }
 
         /* Airport info popup */
+        .ao-popup-backdrop {
+          position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+          display: flex; align-items: center; justify-content: center;
+          z-index: 9999;
+        }
         .ao-popup {
-          position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
-          z-index: 999; width: 320px; max-height: 420px; overflow-y: auto;
-          background: #fff; border-radius: 8px;
-          box-shadow: 0 8px 32px rgba(0,0,0,0.22); margin-top: 6px;
+          position: relative; width: 360px; max-height: 80vh; overflow-y: auto;
+          background: #fff; border-radius: 10px;
+          box-shadow: 0 12px 40px rgba(0,0,0,0.25);
         }
         .ao-popup-hero {
           height: 80px;
           background: linear-gradient(rgba(0,0,0,0.35), rgba(0,0,0,0.6)),
             url('/header-images/Headerimage_Airports.png') center / cover;
-          border-radius: 8px 8px 0 0;
+          border-radius: 10px 10px 0 0;
           display: flex; align-items: flex-end; padding: 8px 12px;
         }
         .ao-popup-hero-overlay { display: flex; align-items: baseline; gap: 8px; }

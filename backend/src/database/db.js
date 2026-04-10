@@ -514,6 +514,9 @@ async function initDatabase() {
     ["UPDATE aircraft_types SET list_price=23000000  WHERE full_name='Embraer ERJ 145'"],
     ["UPDATE aircraft_types SET list_price=41000000  WHERE full_name='Bombardier CRJ-700'"],
     ["UPDATE aircraft_types SET list_price=50000000  WHERE full_name='Boeing 737-500'"],
+    // Image filename corrections
+    ["UPDATE aircraft_types SET image_filename='Aircraft_British-Aerospace_Jetstream-41.png' WHERE full_name='British Aerospace Jetstream 41'"],
+    ["UPDATE aircraft_types SET image_filename='Aircraft_Boeing_747-800.png' WHERE full_name='Boeing 747-8'"],
     // Wake turbulence fix
     ["UPDATE aircraft_types SET wake_turbulence_category='H' WHERE wake_turbulence_category='J'"],
     // Level redistribution (15-level system)

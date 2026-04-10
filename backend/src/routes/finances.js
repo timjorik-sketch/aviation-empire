@@ -362,7 +362,8 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     );
     const dailyMap = new Map();
     for (const r of dailyRevResult.rows) {
-      dailyMap.set(r.d.toISOString ? r.d.toISOString().slice(0, 10) : r.d, { date: r.d, revenue: parseFloat(r.rev), costs: 0 });
+      const key = r.d.toISOString ? r.d.toISOString().slice(0, 10) : String(r.d);
+      dailyMap.set(key, { date: key, revenue: parseFloat(r.rev), costs: 0 });
     }
 
     const dailyCostResult = await pool.query(
@@ -370,15 +371,15 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
       [airlineId]
     );
     for (const r of dailyCostResult.rows) {
-      const key = r.d.toISOString ? r.d.toISOString().slice(0, 10) : r.d;
+      const key = r.d.toISOString ? r.d.toISOString().slice(0, 10) : String(r.d);
       if (dailyMap.has(key)) {
         dailyMap.get(key).costs = parseFloat(r.cost);
       } else {
-        dailyMap.set(key, { date: r.d, revenue: 0, costs: parseFloat(r.cost) });
+        dailyMap.set(key, { date: key, revenue: 0, costs: parseFloat(r.cost) });
       }
     }
     const dailyHistory = Array.from(dailyMap.values())
-      .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+      .sort((a, b) => a.date.localeCompare(b.date))
       .map(d => ({ ...d, profit: d.revenue - d.costs }));
 
     // ── Revenue breakdown (this week) ────────────────────────────────────────

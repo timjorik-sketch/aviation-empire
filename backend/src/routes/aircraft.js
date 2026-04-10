@@ -189,7 +189,7 @@ async function getGroupedFleetHandler(req, res) {
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
       WHERE a.airline_id = $1
       GROUP BY t.id, t.manufacturer, t.model, t.full_name, t.max_passengers, t.range_km, t.image_filename
-      ORDER BY t.manufacturer, t.model
+      ORDER BY t.manufacturer, t.max_passengers, t.full_name
     `, [airlineId]);
 
     let totalCount = 0;

@@ -1385,10 +1385,10 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
         }
       }
 
-      // Check overlap with maintenance (including turnaround buffer)
+      // Check overlap with maintenance
       for (const m of (maintByDay.get(dow) || [])) {
-        if (depMin < m.end + GROUND_MIN && m.start < arrMin + GROUND_MIN) {
-          return res.status(400).json({ error: `Flight at ${departure_time} overlaps with a maintenance window (incl. ${GROUND_MIN}min turnaround)` });
+        if (depMin < m.end && m.start < arrMin) {
+          return res.status(400).json({ error: `Flight at ${departure_time} overlaps with a maintenance window` });
         }
       }
 

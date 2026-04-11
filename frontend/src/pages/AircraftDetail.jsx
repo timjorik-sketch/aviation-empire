@@ -1017,7 +1017,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   };
 
   const fillNextDepMaint = (m) => {
-    const rawMin = (m.start_minutes ?? 0) + (m.duration_minutes ?? 0) + groundMin;
+    const rawMin = (m.start_minutes ?? 0) + (m.duration_minutes ?? 0);
     const dayOffset = Math.floor(rawMin / 1440);
     const endMin = rawMin % 1440;
     const newDay = ((m.dayIndex + dayOffset - 1) % 7) + 1; // dayIndex is 1-7

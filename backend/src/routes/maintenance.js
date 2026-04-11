@@ -52,9 +52,6 @@ router.post('/', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Aircraft must be inactive to edit schedule. Deactivate the aircraft first.' });
     }
 
-    const TURNAROUND_BY_CATEGORY = { L: 25, M: 40, H: 60 };
-    const GROUND_MIN = TURNAROUND_BY_CATEGORY[wakeCategory] || 40;
-
     const durationMin = getMaintenanceDuration(maxSeats);
     const endMinutes = startMinutes + durationMin;
 
@@ -69,8 +66,8 @@ router.post('/', authMiddleware, async (req, res) => {
       const [fArrH, fArrM] = row.arrival_time.split(':').map(Number);
       const fDepMin = fDepH * 60 + fDepM;
       const fArrMin = fArrH * 60 + fArrM;
-      if (startMinutes < fArrMin + GROUND_MIN && fDepMin < endMinutes + GROUND_MIN) {
-        return res.status(400).json({ error: `Maintenance overlaps with a scheduled flight (incl. ${GROUND_MIN}min turnaround)` });
+      if (startMinutes < fArrMin && fDepMin < endMinutes) {
+        return res.status(400).json({ error: 'Maintenance overlaps with a scheduled flight' });
       }
     }
 

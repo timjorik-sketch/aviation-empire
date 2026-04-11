@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from 'react';
 import TopBar from '../components/TopBar.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -25,21 +25,44 @@ const CATEGORY_COLORS = {
   8: '#ef4444',
 };
 
-export default function AirportOverview({ airline, onBack, backLabel = 'Flight Operations', onNavigateToAirport, onBalanceUpdate }) {
-  const [airports, setAirports] = useState([]);
-  const [loading, setLoading]   = useState(true);
+export default function AirportOverview({ airline, onBack, backLabel = 'Flight Operations', onNavigateToAirport, onBalanceUpdate, savedState }) {
+  const saved = savedState?.current;
+  const [airports, setAirports] = useState(saved?.airports || []);
+  const [loading, setLoading]   = useState(!saved?.airports);
   const [error, setError]       = useState('');
   const [adding, setAdding]     = useState(null);
 
-  const [search, setSearch]                   = useState('');
-  const [filterContinent, setFilterContinent] = useState(null);
-  const [filterCountry, setFilterCountry]     = useState(null);
-  const [filterCategory, setFilterCategory]   = useState(null);
-  const [continentOpen, setContinentOpen]     = useState(false);
-  const [countryOpen, setCountryOpen]         = useState(false);
-  const [categoryOpen, setCategoryOpen]       = useState(false);
+  const [search, setSearch]                   = useState(saved?.search || '');
+  const [filterContinent, setFilterContinent] = useState(saved?.filterContinent || null);
+  const [filterCountry, setFilterCountry]     = useState(saved?.filterCountry || null);
+  const [filterCategory, setFilterCategory]   = useState(saved?.filterCategory ?? null);
+  const [continentOpen, setContinentOpen]     = useState(saved?.continentOpen || false);
+  const [countryOpen, setCountryOpen]         = useState(saved?.countryOpen || false);
+  const [categoryOpen, setCategoryOpen]       = useState(saved?.categoryOpen || false);
+  const scrollRef = useRef(saved?.scrollY || 0);
+
+  // Restore scroll position after mount
+  useLayoutEffect(() => {
+    if (saved?.scrollY) {
+      window.scrollTo(0, saved.scrollY);
+    }
+  }, []);
+
+  // Save state on unmount
+  useEffect(() => {
+    return () => {
+      if (savedState) {
+        savedState.current = {
+          airports, search, filterContinent, filterCountry, filterCategory,
+          continentOpen, countryOpen, categoryOpen,
+          scrollY: window.scrollY,
+        };
+      }
+    };
+  });
 
   useEffect(() => {
+    if (saved?.airports) return; // already have cached data
     const token = localStorage.getItem('token');
     fetch(`${API_URL}/api/airports/available`, {
       headers: { 'Authorization': `Bearer ${token}` }

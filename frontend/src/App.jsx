@@ -1,4 +1,4 @@
-import { useState, useEffect, Component } from 'react';
+import { useState, useEffect, useRef, Component } from 'react';
 
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { error: null }; }
@@ -440,6 +440,7 @@ function App() {
   const [selectedAircraftId, setSelectedAircraftId] = useState(null);
   const [selectedAirportCode, setSelectedAirportCode] = useState(null);
   const [airportReturnPage, setAirportReturnPage] = useState('routes');
+  const airportOverviewState = useRef(null);
   const [hubsBackPage, setHubsBackPage] = useState('dashboard');
   const [loading, setLoading] = useState(true);
   const [airlineStats, setAirlineStats] = useState({ destinations_count: 0, hubs: [], home_airport: null, weekly_revenue: 0, avg_satisfaction: null, daily_passengers: 0, total_passengers: 0 });
@@ -727,7 +728,7 @@ function App() {
     return <HubsDestinations airline={activeAirline} onBack={() => setCurrentPage(hubsBackPage)} backLabel={PAGE_LABELS[hubsBackPage] || 'Dashboard'} onNavigateToAirport={(code) => navigateToAirport(code, 'hubs')} onBalanceUpdate={handleBalanceUpdate} onNavigate={(page) => navigate(page)} />;
   }
   if (currentPage === 'airport-overview') {
-    return <AirportOverview airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Flight Operations'} onNavigateToAirport={(code) => navigateToAirport(code, 'airport-overview')} onBalanceUpdate={handleBalanceUpdate} />;
+    return <AirportOverview airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Flight Operations'} onNavigateToAirport={(code) => navigateToAirport(code, 'airport-overview')} onBalanceUpdate={handleBalanceUpdate} savedState={airportOverviewState} />;
   }
   if (currentPage === 'personnel') {
     return <Personnel airline={activeAirline} onBack={() => setCurrentPage('dashboard')} />;

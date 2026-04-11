@@ -1,5 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import TopBar from '../components/TopBar.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -31,34 +30,6 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState('');
   const [adding, setAdding]     = useState(null);
-  const [hoverCode, setHoverCode] = useState(null);
-  const [hoverData, setHoverData] = useState(null);
-  const [hoverPos, setHoverPos]   = useState(null);
-  const hoverCache = useRef({});
-  const hoverTimer = useRef(null);
-
-  const handleMouseEnter = useCallback((code, e) => {
-    clearTimeout(hoverTimer.current);
-    const rect = e.currentTarget.getBoundingClientRect();
-    hoverTimer.current = setTimeout(async () => {
-      setHoverCode(code);
-      setHoverPos({ top: rect.top, left: rect.right + 12, bottom: rect.bottom });
-      if (hoverCache.current[code]) { setHoverData(hoverCache.current[code]); return; }
-      setHoverData(null);
-      try {
-        const res = await fetch(`${API_URL}/api/airports/${code}/hover`);
-        if (res.ok) { const d = await res.json(); hoverCache.current[code] = d; setHoverData(d); }
-      } catch { /* ignore */ }
-    }, 300);
-  }, []);
-
-  const handleMouseLeave = useCallback(() => {
-    clearTimeout(hoverTimer.current);
-    setHoverCode(null);
-  }, []);
-
-  const fmtFee = (v) => v != null ? `$${Math.round(v).toLocaleString()}` : '—';
-  const satUrl = (lat, lng) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/13/${Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * 8192)}/${Math.floor((lng + 180) / 360 * 8192)}`;
 
   const [search, setSearch]                   = useState('');
   const [filterContinent, setFilterContinent] = useState(null);
@@ -318,12 +289,9 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
                   <div className="am-mfr-body">
                     <div className="am-grid">
                       {list.map(a => (
-                        <div key={a.iata_code} className="ao-card"
-                          onMouseEnter={e => handleMouseEnter(a.iata_code, e)}
-                          onMouseLeave={handleMouseLeave}
-                        >
+                        <div key={a.iata_code} className="ao-card" onClick={() => onNavigateToAirport?.(a.iata_code)}>
                           <div className="ao-card-top">
-                            <span className="ao-iata ao-iata-link" onClick={() => onNavigateToAirport?.(a.iata_code)}>{a.iata_code}</span>
+                            <span className="ao-iata">{a.iata_code}</span>
                             <span className="ao-cat-badge">
                               {a.category} · {CATEGORY_LABELS[a.category] || '—'}
                             </span>
@@ -355,62 +323,6 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
           </div>
         </div>
       </div>
-
-      {hoverCode && hoverPos && createPortal(
-        (() => {
-          const ap = airports.find(a => a.iata_code === hoverCode);
-          if (!ap) return null;
-          // Position: to the right of the card, vertically centered
-          const popH = 480;
-          let top = Math.max(8, hoverPos.top);
-          if (top + popH > window.innerHeight - 8) top = Math.max(8, window.innerHeight - popH - 8);
-          // If no room on right, show on left
-          let left = hoverPos.left;
-          if (left + 400 > window.innerWidth - 8) left = hoverPos.left - 400 - 24;
-          return (
-            <div className="ao-popup" style={{ top, left }} onMouseEnter={() => clearTimeout(hoverTimer.current)} onMouseLeave={handleMouseLeave}>
-              {/* Satellite header */}
-              <div className="ao-popup-hero" style={
-                hoverData?.latitude != null
-                  ? { backgroundImage: `linear-gradient(rgba(0,0,0,0.15), rgba(0,0,0,0.55)), url(https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${hoverData.longitude - 0.04},${hoverData.latitude - 0.02},${hoverData.longitude + 0.04},${hoverData.latitude + 0.02}&size=400,120&f=image&format=jpg)` }
-                  : {}
-              }>
-                <div className="ao-popup-hero-overlay">
-                  <span className="ao-popup-code">{ap.iata_code}</span>
-                  <span className="ao-popup-name">{ap.name}</span>
-                </div>
-              </div>
-              {!hoverData ? (
-                <div style={{ padding: '1.2rem', textAlign: 'center', color: '#999', fontSize: '0.82rem' }}>Loading...</div>
-              ) : (<>
-                <div className="ao-popup-section">Fees</div>
-                <table className="ao-popup-table">
-                  <thead><tr><th></th><th>Landing</th><th>Handling</th></tr></thead>
-                  <tbody>
-                    <tr><td className="ao-popup-wake">Light</td><td>{fmtFee(hoverData.fees.landing_light)}</td><td>{fmtFee(hoverData.fees.handling_light)}</td></tr>
-                    <tr><td className="ao-popup-wake">Medium</td><td>{fmtFee(hoverData.fees.landing_medium)}</td><td>{fmtFee(hoverData.fees.handling_medium)}</td></tr>
-                    <tr><td className="ao-popup-wake">Heavy</td><td>{fmtFee(hoverData.fees.landing_heavy)}</td><td>{fmtFee(hoverData.fees.handling_heavy)}</td></tr>
-                  </tbody>
-                </table>
-                <div className="ao-popup-section">
-                  Compatible Aircraft ({hoverData.aircraft.length})
-                  {hoverData.runway_length_m && <span style={{ fontWeight: 400, marginLeft: 6 }}>· {hoverData.runway_length_m.toLocaleString()}m runway</span>}
-                </div>
-                <div className="ao-popup-ac-list">
-                  {hoverData.aircraft.map((ac, i) => (
-                    <div key={i} className="ao-popup-ac-row">
-                      <img src={`/aircraft-images/${ac.image_filename}`} alt="" className="ao-popup-ac-img" onError={e => { e.target.style.display = 'none'; }} />
-                      <span className="ao-popup-ac-name">{ac.full_name}</span>
-                      <span className="ao-popup-ac-pax">{ac.max_passengers} pax</span>
-                    </div>
-                  ))}
-                </div>
-              </>)}
-            </div>
-          );
-        })(),
-        document.body
-      )}
 
       <style>{`
         .am-page { min-height: 100vh; background: #F5F5F5; }
@@ -533,54 +445,7 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
           font-weight: 700; cursor: default;
         }
 
-        /* IATA link style */
-        .ao-iata-link {
-          text-decoration: underline; text-decoration-color: #CCC;
-          text-underline-offset: 3px; cursor: pointer;
-        }
-        .ao-iata-link:hover { text-decoration-color: #2C2C2C; }
 
-        /* Airport hover popup */
-        .ao-popup {
-          position: fixed; width: 380px; max-height: 520px; overflow-y: auto;
-          background: #fff; border-radius: 10px;
-          box-shadow: 0 12px 40px rgba(0,0,0,0.28);
-          z-index: 9999; pointer-events: auto;
-        }
-        .ao-popup-hero {
-          height: 110px;
-          background: linear-gradient(rgba(0,0,0,0.15), rgba(0,0,0,0.55)),
-            url('/header-images/Headerimage_Airports.png') center / cover;
-          background-size: cover;
-          border-radius: 10px 10px 0 0;
-          display: flex; align-items: flex-end; padding: 10px 14px;
-        }
-        .ao-popup-hero-overlay { display: flex; align-items: baseline; gap: 8px; }
-        .ao-popup-code { font-family: monospace; font-size: 1.5rem; font-weight: 800; color: #fff; letter-spacing: 0.04em; text-shadow: 0 1px 4px rgba(0,0,0,0.4); }
-        .ao-popup-name { font-size: 0.78rem; color: rgba(255,255,255,0.9); font-weight: 500; text-shadow: 0 1px 3px rgba(0,0,0,0.4); }
-        .ao-popup-section {
-          background: #F0F0F0; color: #666; font-size: 0.65rem; font-weight: 700;
-          text-transform: uppercase; letter-spacing: 0.08em; padding: 4px 12px;
-        }
-        .ao-popup-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
-        .ao-popup-table th {
-          text-align: left; padding: 5px 14px; font-size: 0.68rem; font-weight: 600;
-          color: #999; text-transform: uppercase; letter-spacing: 0.05em;
-        }
-        .ao-popup-table td { padding: 4px 14px; color: #2C2C2C; border-bottom: 1px solid #F5F5F5; }
-        .ao-popup-wake { font-weight: 600; color: #666; width: 65px; }
-        .ao-popup-ac-list { max-height: 240px; overflow-y: auto; }
-        .ao-popup-ac-row {
-          display: flex; align-items: center; gap: 8px;
-          padding: 4px 14px; border-bottom: 1px solid #F5F5F5;
-        }
-        .ao-popup-ac-row:last-child { border-bottom: none; }
-        .ao-popup-ac-img {
-          width: 52px; aspect-ratio: 1000/333; object-fit: cover;
-          border-radius: 2px; background: #F5F5F5; flex-shrink: 0;
-        }
-        .ao-popup-ac-name { font-size: 0.72rem; font-weight: 500; color: #2C2C2C; flex: 1; }
-        .ao-popup-ac-pax { font-size: 0.68rem; color: #888; white-space: nowrap; }
       `}</style>
     </div>
   );

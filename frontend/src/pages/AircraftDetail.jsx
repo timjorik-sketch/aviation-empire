@@ -1017,14 +1017,21 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   };
 
   const fillNextDepMaint = (m) => {
-    const endMin = ((m.start_minutes ?? 0) + (m.duration_minutes ?? 0) + groundMin) % 1440;
-    applyNextDep(m.dayIndex, endMin);
+    const rawMin = (m.start_minutes ?? 0) + (m.duration_minutes ?? 0) + groundMin;
+    const dayOffset = Math.floor(rawMin / 1440);
+    const endMin = rawMin % 1440;
+    const newDay = ((m.dayIndex + dayOffset - 1) % 7) + 1; // dayIndex is 1-7
+    applyNextDep(newDay, endMin);
   };
 
   const fillNextDep = (f, overrideDay) => {
     const arrMin = parseHM(f.arrival_time);
-    const nextMin = (arrMin + groundMin) % 1440;
-    applyNextDep(overrideDay ?? f.dayIndex, nextMin);
+    const rawMin = arrMin + groundMin;
+    const dayOffset = Math.floor(rawMin / 1440);
+    const nextMin = rawMin % 1440;
+    const baseDay = overrideDay ?? f.dayIndex;
+    const newDay = ((baseDay + dayOffset - 1) % 7) + 1; // dayIndex is 1-7
+    applyNextDep(newDay, nextMin);
   };
 
   const openEditModal = (entry) => {

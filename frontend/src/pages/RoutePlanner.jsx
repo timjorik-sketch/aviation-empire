@@ -423,6 +423,12 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
   return (
     <div className="app">
       <style>{`
+        .rp-hdr-btn {
+          background: transparent; border: 1px solid rgba(255,255,255,0.3); color: rgba(255,255,255,0.7);
+          padding: 0.22rem 0.65rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600;
+          cursor: pointer; letter-spacing: 0.03em; transition: all 0.15s;
+        }
+        .rp-hdr-btn:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.5); color: #fff; }
         .rp-table { width:100%; border-collapse:collapse; margin-top:1rem; font-size:0.9rem; }
         .rp-table th { text-align:left; padding:0.6rem 0.75rem; background:#F5F5F5; border-bottom:2px solid #E0E0E0; font-weight:600; color:#2C2C2C; white-space:nowrap; }
         .rp-table td { padding:0.6rem 0.75rem; border-bottom:1px solid #F0F0F0; vertical-align:middle; color:#2C2C2C; }
@@ -514,8 +520,7 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
                 )}
                 <button
                   type="button"
-                  className="btn-secondary"
-                  style={{ padding: '5px 12px', fontSize: '0.78rem' }}
+                  className="rp-hdr-btn"
                   onClick={() => { setCheckMode(m => !m); if (!checkMode) enterCheckMode(); }}
                 >
                   {checkMode ? '← Create Route' : 'Check Route'}

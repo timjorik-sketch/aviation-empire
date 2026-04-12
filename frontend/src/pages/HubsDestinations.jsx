@@ -872,7 +872,7 @@ function DestinationsList({
                       <span className="hd-type-badge" style={meta.dark ? undefined : { background: '#999' }}>{meta.label}</span>
                     </td>
                     <td>
-                      <span className="hd-cat-badge">{d.category} – {CATEGORY_LABELS[d.category] || `Cat. ${d.category}`}</span>
+                      <span className="hd-cat-badge">{d.category}</span>
                     </td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>

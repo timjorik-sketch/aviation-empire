@@ -984,7 +984,7 @@ function App() {
                     </button>
                   </div>
                   {/* Two columns */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1px', background: '#F0F0F0', alignItems: 'stretch' }}>
+                  <div className="hp-info-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1px', background: '#F0F0F0', alignItems: 'stretch' }}>
 
                     {/* Left column: Logo → Passengers + Progression → Finances → Network */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
@@ -1122,8 +1122,8 @@ function App() {
                     </div>
 
                     {/* Right column: Fleet — absolutely positioned so it doesn't affect grid row height */}
-                    <div style={{ position: 'relative', overflow: 'hidden' }}>
-                      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: '#fff' }}>
+                    <div className="hp-fleet-col" style={{ position: 'relative', overflow: 'hidden' }}>
+                      <div className="hp-fleet-inner" style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: '#fff' }}>
                       <div className="hp-it-section-label" style={{ flexShrink: 0 }}>Fleet ({activeAirline.fleet_count})</div>
                       <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
                         {fleetSummary.length === 0 ? (

@@ -753,6 +753,9 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
   .hp-info-strip { padding: 18px 20px; }
 }
 @media (max-width: 480px) {
+  .hp-info-grid { grid-template-columns: 1fr !important; }
+  .hp-fleet-col { position: static !important; overflow: visible !important; }
+  .hp-fleet-inner { position: static !important; inset: auto !important; }
   .hp-fleet-img { width: 60px; }
   .hp-fleet-table td { padding: 0.4rem 0.6rem; }
   .hp-fleet-name { font-size: 0.78rem; }

@@ -852,6 +852,7 @@ function DestinationsList({
             <thead>
               <tr>
                 <th onClick={() => onSort('destination_type')}>Status {sortArrow('destination_type')}</th>
+                <th onClick={() => onSort('category')}>Category {sortArrow('category')}</th>
                 <th onClick={() => onSort('airport')}>Airport {sortArrow('airport')}</th>
                 <th onClick={() => onSort('continent')}>Continent {sortArrow('continent')}</th>
                 <th onClick={() => onSort('country')}>Country {sortArrow('country')}</th>
@@ -869,6 +870,9 @@ function DestinationsList({
                   <tr key={d.id}>
                     <td>
                       <span className="hd-type-badge" style={meta.dark ? undefined : { background: '#999' }}>{meta.label}</span>
+                    </td>
+                    <td>
+                      <span className="hd-cat-badge">{d.category} – {CATEGORY_LABELS[d.category] || `Cat. ${d.category}`}</span>
                     </td>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>

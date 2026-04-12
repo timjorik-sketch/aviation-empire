@@ -836,9 +836,9 @@ async function processBookings() {
       LEFT JOIN airports dep_apt   ON dep_apt.iata_code = COALESCE(r.departure_airport, ws.departure_airport)
       LEFT JOIN airports arr_apt   ON arr_apt.iata_code = COALESCE(r.arrival_airport,   ws.arrival_airport)
       LEFT JOIN aircraft ac        ON f.aircraft_id = ac.id
-      LEFT JOIN airline_cabin_classes eco_cl ON eco_cl.profile_id = ac.airline_cabin_profile_id AND eco_cl.class_type = 'economy'
-      LEFT JOIN airline_cabin_classes biz_cl ON biz_cl.profile_id = ac.airline_cabin_profile_id AND biz_cl.class_type = 'business'
-      LEFT JOIN airline_cabin_classes fir_cl ON fir_cl.profile_id = ac.airline_cabin_profile_id AND fir_cl.class_type = 'first'
+      LEFT JOIN LATERAL (SELECT actual_capacity FROM airline_cabin_classes WHERE profile_id = ac.airline_cabin_profile_id AND class_type = 'economy' LIMIT 1) eco_cl ON true
+      LEFT JOIN LATERAL (SELECT actual_capacity FROM airline_cabin_classes WHERE profile_id = ac.airline_cabin_profile_id AND class_type = 'business' LIMIT 1) biz_cl ON true
+      LEFT JOIN LATERAL (SELECT actual_capacity FROM airline_cabin_classes WHERE profile_id = ac.airline_cabin_profile_id AND class_type = 'first' LIMIT 1) fir_cl ON true
       WHERE f.status IN ('scheduled', 'boarding')
         AND f.departure_time > $1::timestamptz
         AND f.departure_time <= $2::timestamptz

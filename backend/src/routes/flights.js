@@ -651,6 +651,24 @@ function cetToUTC(cetDateStr, cetTimeStr) {
 // Generate flight instances from weekly_schedule templates for active aircraft (next 72h)
 async function generateFlights() {
   try {
+    // Clean up duplicate flights (same aircraft + flight_number + departure date, keep lowest id)
+    await pool.query(`
+      DELETE FROM flights WHERE id IN (
+        SELECT f.id FROM flights f
+        JOIN (
+          SELECT aircraft_id, flight_number, departure_time::date as dep_date, MIN(id) as keep_id
+          FROM flights
+          WHERE status IN ('scheduled', 'boarding')
+          GROUP BY aircraft_id, flight_number, departure_time::date
+          HAVING COUNT(*) > 1
+        ) dups ON f.aircraft_id = dups.aircraft_id
+              AND f.flight_number = dups.flight_number
+              AND f.departure_time::date = dups.dep_date
+              AND f.id != dups.keep_id
+              AND f.status IN ('scheduled', 'boarding')
+      )
+    `).catch(e => console.error('Duplicate cleanup error:', e.message));
+
     const now = new Date();
     const horizon = new Date(now.getTime() + 72 * 60 * 60 * 1000);
 
@@ -733,8 +751,9 @@ async function generateFlights() {
 
           const utcDateStr = depDT.toISOString().slice(0, 10);
           const dupResult = await pool.query(
-            "SELECT id FROM flights WHERE aircraft_id = $1 AND weekly_schedule_id = $2 AND departure_time::date = $3::date",
-            [ac.id, entry.id, utcDateStr]
+            `SELECT id FROM flights WHERE aircraft_id = $1 AND departure_time::date = $2::date
+             AND (weekly_schedule_id = $3 OR flight_number = $4)`,
+            [ac.id, utcDateStr, entry.id, entry.flight_number]
           );
           if (dupResult.rows[0]) continue;
 

@@ -103,6 +103,30 @@ function ServiceProfiles({ airline, onBack, backLabel = 'Dashboard' }) {
     }
   };
 
+  const startCopy = async (profileId) => {
+    setError('');
+    setSuccess('');
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch(`${API_URL}/api/service-profiles/${profileId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load profile');
+
+      setEditingId(null); // null = create new
+      setProfileName(data.profile.name + ' (Copy)');
+
+      const set = new Set(
+        data.selected_items.map(i => `${i.item_type_id}|${i.cabin_class}`)
+      );
+      setSelectedItems(set);
+      setView('edit');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   // ── Delete modal state ───────────────────────────────────────────────────
   const [deleteModal, setDeleteModal] = useState(null);
   // { profileId, profileName, inUse, routeCount, scheduleCount, replacementId }
@@ -300,6 +324,9 @@ function ServiceProfiles({ airline, onBack, backLabel = 'Dashboard' }) {
                         <td>${p.business_cost.toFixed(2)} / pax</td>
                         <td>${p.first_cost.toFixed(2)} / pax</td>
                         <td className="sp-td-actions">
+                          <button className="sp-btn-edit" onClick={() => startCopy(p.id)}>
+                            Copy
+                          </button>
                           <button className="sp-btn-edit" onClick={() => startEdit(p.id)}>
                             Edit
                           </button>

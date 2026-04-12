@@ -121,16 +121,6 @@ export default function AirlineProfilePopup({ airlineCode, onClose }) {
                 </tbody>
               </table>
 
-              {/* Routes map */}
-              <div style={{ borderTop: '1px solid #F0F0F0', overflow: 'hidden' }}>
-                <div className="hp-it-section-label" style={{ padding: '6px 1.1rem' }}>Routes</div>
-                <RoutePreviewMap
-                  routes={profile.routes}
-                  hubs={profile.hubs}
-                  homeAirport={profile.home_airport}
-                />
-              </div>
-
               {/* Fleet */}
               <div style={{ borderTop: '1px solid #F0F0F0' }}>
                 <div className="hp-it-section-label">Fleet ({profile.fleet_count})</div>
@@ -155,6 +145,16 @@ export default function AirlineProfilePopup({ airlineCode, onClose }) {
                     </tbody>
                   </table>
                 )}
+              </div>
+
+              {/* Routes map */}
+              <div style={{ borderTop: '1px solid #F0F0F0', overflow: 'hidden' }}>
+                <div className="hp-it-section-label" style={{ padding: '6px 1.1rem' }}>Routes</div>
+                <RoutePreviewMap
+                  routes={profile.routes}
+                  hubs={profile.hubs}
+                  homeAirport={profile.home_airport}
+                />
               </div>
             </>
           )}

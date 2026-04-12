@@ -477,7 +477,15 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
           font-weight: 700; cursor: default;
         }
 
-
+        @media (max-width: 480px) {
+          .am-hero { height: 180px; }
+          .am-hero-overlay h1 { font-size: 1.6rem; }
+          .am-hero-overlay p { font-size: 0.85rem; }
+          .am-container { padding: 1rem 0.75rem; }
+          .am-layout { grid-template-columns: 1fr; }
+          .am-sidebar { position: static; max-height: none; }
+          .am-mfr-body { padding: 0.75rem; }
+        }
       `}</style>
     </div>
   );

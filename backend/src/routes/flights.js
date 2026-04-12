@@ -707,7 +707,7 @@ async function generateFlights() {
 
       if (!entries.length) continue;
 
-      for (let d = 0; d < 3; d++) {
+      for (let d = 0; d < 4; d++) {
         const dayUTC = new Date(now.getTime() + d * 86400000);
 
         const cetDateStr = new Intl.DateTimeFormat('en-CA', {

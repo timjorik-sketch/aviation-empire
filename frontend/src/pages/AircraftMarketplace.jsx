@@ -162,7 +162,7 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
     } catch { setCabinProfiles([]); }
   }, [airline]);
 
-  const closeModal = () => { setModal(null); setSelectedUsedListing(null); setError(''); };
+  const closeModal = () => { setModal(null); setSelectedUsedListing(null); setError(''); setSuccess(''); };
 
   // Used listings for the aircraft type currently in the modal
   const modalUsedListings = useMemo(() => {
@@ -174,6 +174,7 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
     if (!modal) return;
     const totalCost = modal.new_price_usd * quantity;
     if (airline.balance < totalCost) { setError('Insufficient funds'); return; }
+    setSuccess('');
     setPurchasing(true);
     const token = localStorage.getItem('token');
     try {
@@ -188,8 +189,8 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Purchase failed');
       setSuccess(data.message);
+      setError('');
       onBalanceUpdate(data.new_balance);
-      closeModal();
     } catch(e) { setError(e.message); }
     finally { setPurchasing(false); }
   };
@@ -197,6 +198,7 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
   const handlePurchaseUsed = async () => {
     if (!selectedUsedListing) return;
     if (airline.balance < selectedUsedListing.current_value) { setError('Insufficient funds'); return; }
+    setSuccess('');
     setPurchasing(true);
     const token = localStorage.getItem('token');
     try {
@@ -211,10 +213,11 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Purchase failed');
       setSuccess(data.message);
+      setError('');
       onBalanceUpdate(data.new_balance);
       // Remove bought listing
       setUsedListings(prev => prev.filter(l => l.id !== selectedUsedListing.id));
-      closeModal();
+      setSelectedUsedListing(null);
     } catch(e) { setError(e.message); }
     finally { setPurchasing(false); }
   };
@@ -590,10 +593,11 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
               )}
 
               {error && <div className="am-msg am-msg--error" style={{ margin:'0.5rem 0 0' }}>{error}</div>}
+              {success && <div className="am-msg am-msg--success" style={{ margin:'0.5rem 0 0' }}>{success}</div>}
             </div>
 
             <div className="am-modal-foot">
-              <button className="am-btn-cancel" onClick={closeModal}>Cancel</button>
+              <button className="am-btn-cancel" onClick={closeModal}>Close</button>
               <button
                 className="am-btn-confirm"
                 disabled={!canConfirm || purchasing}

@@ -38,6 +38,7 @@ import EditProfile from './pages/EditProfile';
 import RouteMap from './pages/RouteMap';
 import AirportLink from './components/AirportLink.jsx';
 import RoutePreviewMap from './components/RoutePreviewMap.jsx';
+import Leaderboards from './pages/Leaderboards';
 import SatisfactionRating, { getSatColor, scoreToRating } from './components/SatisfactionRating.jsx';
 import './App.css';
 
@@ -623,6 +624,7 @@ function App() {
     personnel: 'Staff & Crew',
     marketplace: 'Marketplace',
     'airport-overview': 'Airport Overview',
+    leaderboards: 'Leaderboards',
   };
 
   const navigate = (page) => {
@@ -750,6 +752,9 @@ function App() {
         onBack={() => setCurrentPage('dashboard')}
       />
     );
+  }
+  if (currentPage === 'leaderboards') {
+    return <Leaderboards airline={activeAirline} onBack={() => setCurrentPage('dashboard')} />;
   }
 
   const closeChangeModal = () => { setShowChangeModal(false); setShowCreateForm(false); };
@@ -1170,6 +1175,22 @@ function App() {
                       { label: 'Flight Operations', page: 'flights'   },
                       { label: 'Finances',          page: 'finances'  },
                       { label: 'Staff & Crew',      page: 'personnel' },
+                    ].map(({ label, page }) => (
+                      <button key={page} className="fo-nav-btn" onClick={() => setCurrentPage(page)}>
+                        {label}
+                        <span className="fo-nav-arrow">›</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="info-card" style={{ padding: 0, overflow: 'hidden', marginBottom: 0 }}>
+                  <div style={{ background: '#2C2C2C', padding: '14px 20px', borderRadius: '8px 8px 0 0' }}>
+                    <span className="card-header-bar-title">Discover</span>
+                  </div>
+                  <div className="fo-nav-list">
+                    {[
+                      { label: 'Leaderboards', page: 'leaderboards' },
                     ].map(({ label, page }) => (
                       <button key={page} className="fo-nav-btn" onClick={() => setCurrentPage(page)}>
                         {label}

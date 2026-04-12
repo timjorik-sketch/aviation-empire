@@ -463,7 +463,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         textColor: flightTextColor,
       };
     });
-  }, [schedule, isActive]);
+  }, [schedule, isActive, groundMin]);
 
   const conflictIds = useMemo(() => {
     const ids = new Set();

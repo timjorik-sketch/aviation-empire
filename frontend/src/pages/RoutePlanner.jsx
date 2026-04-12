@@ -489,6 +489,12 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
           .rp-table { font-size:0.8rem; }
           .rp-table th, .rp-table td { padding:0.5rem; }
         }
+        @media (max-width:480px) {
+          .rp-table { font-size:0.74rem; }
+          .rp-table th, .rp-table td { padding:0.35rem 0.4rem; }
+          .ma-class-grid { grid-template-columns:1fr; }
+          .ma-analysis-item { padding:10px 12px; }
+        }
       `}</style>
 
       <div className="page-hero" style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.4), rgba(0,0,0,0.6)), url('/header-images/Headerimage_Routes.png')" }}>

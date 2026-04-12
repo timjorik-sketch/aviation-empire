@@ -182,6 +182,23 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
         .fs-reg:hover { color: #666; }
 
         .fs-empty { color: #AAA; font-style: italic; font-size: 0.85rem; padding: 2rem 1.5rem; }
+
+        @media (max-width: 480px) {
+          .fs-row {
+            grid-template-columns: 60px 38px 1fr;
+            gap: 6px 8px;
+            padding: 8px 12px;
+          }
+          .fs-regs { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px; }
+          .fs-reg { font-size: 10px; }
+          .fs-fn { font-size: 0.75rem; }
+          .fs-dest-link { font-size: 0.75rem; }
+          .fs-day-lbl { min-width: 46px; font-size: 10px; }
+          .fs-pill { font-size: 10px; padding: 1px 4px; }
+          .fs-apt-hd { padding: 7px 12px; gap: 8px; }
+          .fs-apt-iata { font-size: 0.82rem; }
+          .fs-apt-name { font-size: 0.72rem; }
+        }
       `}</style>
 
       <div className="page-hero" style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.4), rgba(0,0,0,0.6)), url('/header-images/Headerimage_opertaions.png')" }}>

@@ -436,6 +436,18 @@ function FlightOperations({ airline, onBalanceUpdate, onBack, onNavigateToAirpor
           font-size: 0.75rem; color: #7F1D1D; font-style: italic; line-height: 1.4;
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
+
+        @media (max-width: 480px) {
+          .fo-layout { flex-direction: column; }
+          .fo-main { flex: none; width: 100%; }
+          .fo-sidebar-col { flex: none; width: 100%; }
+          .fo-grid { grid-template-columns: 1fr; padding: 0.75rem; gap: 0.65rem; }
+          .fo-fp-route { gap: 4px; }
+          .fo-fp-code { font-size: 1.1rem; }
+          .fo-fp-apt-name { max-width: 80px; font-size: 9px; }
+          .fo-fb-msg { white-space: normal; }
+          .fo-fb-hd { flex-wrap: wrap; }
+        }
       `}</style>
 
     </div>

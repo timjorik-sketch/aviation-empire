@@ -179,6 +179,17 @@ export default function Personnel({ airline, onBack }) {
         }
         .per-dismiss-btn:hover:not(:disabled) { background: #F5F5F5; border-color: #ccc; color: #2C2C2C; }
         .per-dismiss-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        @media (max-width: 480px) {
+          .per-table { font-size: 0.78rem; }
+          .per-table th { padding: 0.45rem 0.6rem; font-size: 0.62rem; }
+          .per-table td { padding: 0.5rem 0.6rem; }
+          .per-section-row td { padding: 0.25rem 0.6rem; }
+          .per-total-row td { padding: 0.6rem; }
+          .per-table th:nth-child(4) { display: none; }
+          .per-table td:nth-child(4) { display: none; }
+          .per-dismiss-btn { font-size: 0.62rem; padding: 1px 5px; }
+        }
       `}</style>
     </div>
   );

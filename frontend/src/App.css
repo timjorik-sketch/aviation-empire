@@ -752,6 +752,13 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
   .hp-logo-code { font-size: 3rem; }
   .hp-info-strip { padding: 18px 20px; }
 }
+@media (max-width: 480px) {
+  .hp-fleet-img { width: 60px; }
+  .hp-fleet-table td { padding: 0.4rem 0.6rem; }
+  .hp-fleet-name { font-size: 0.78rem; }
+  .hp-fleet-count { font-size: 0.88rem; }
+  .hp-info-table td { padding: 0.4rem 0.7rem; font-size: 0.82rem; }
+}
 
 /* ── Homepage flight boards ─────────────────────────────── */
 

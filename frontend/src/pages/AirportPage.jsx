@@ -1020,6 +1020,32 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
           text-decoration-color: #CCC; text-underline-offset: 2px;
         }
         .ap-al-name-link:hover { text-decoration-color: #2C2C2C; }
+
+        @media (max-width: 480px) {
+          .ap-hero { height: 160px; padding: 0.75rem 1rem; }
+          .ap-container { padding: 16px 10px 32px; }
+          .ap-info-strip { padding: 16px; flex-direction: column; align-items: flex-start; gap: 1rem; }
+          .ap-iata { font-size: 2.4rem; }
+          .ap-airport-name { font-size: 1rem; }
+          .ap-strip-right { width: 100%; }
+          .ap-map-row { grid-template-columns: 1fr; gap: 1rem; margin-top: 1rem; }
+          .ap-map-col { height: 250px; }
+          .ap-info-table td { padding: 0.4rem 0.6rem; font-size: 0.8rem; }
+          .ap-main { grid-template-columns: 1fr; gap: 1rem; margin-top: 1rem; }
+          .ap-board-table th { padding: 0.35rem 0.5rem; font-size: 0.58rem; }
+          .ap-board-table td { padding: 2px 0.5rem; font-size: 0.7rem; }
+          .ap-fn { font-size: 0.78rem; }
+          .ap-apt-col, .ap-apt-col button { font-size: 0.78rem; }
+          .ap-time { font-size: 0.78rem !important; }
+          .ap-board-wrap { border-radius: 6px; }
+          .ap-sidebar-card { border-radius: 6px; }
+          .ap-al-table td { padding: 0.4rem 0.7rem; font-size: 0.8rem; }
+          .ap-modal { max-width: 100%; }
+          .ap-capable-table th { padding: 0.35rem 0.5rem; }
+          .ap-capable-table td { padding: 0.4rem 0.5rem; font-size: 0.78rem; }
+          .ap-capable-img { width: 44px; }
+          .ap-capable-name { gap: 0.4rem; }
+        }
       `}</style>
 
       {profilePopupCode && (

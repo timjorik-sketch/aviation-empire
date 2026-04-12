@@ -450,6 +450,9 @@ export default function Finances({ airline, onBack, onNavigateToAirport }) {
           @media (max-width: 700px) {
             .fn-kpi-row { flex-direction: column !important; }
           }
+          @media (max-width: 480px) {
+            .fn-3col { gap: 0.5rem !important; }
+          }
         `}</style>
       </div>
     </div>

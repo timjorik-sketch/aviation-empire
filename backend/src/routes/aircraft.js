@@ -1590,22 +1590,6 @@ router.get('/:id/flights', authMiddleware, async (req, res) => {
     const acResult = await pool.query('SELECT id FROM aircraft WHERE id = $1 AND airline_id = $2', [aircraftId, airlineId]);
     if (!acResult.rows[0]) return res.status(404).json({ error: 'Aircraft not found' });
 
-    // Clean up duplicate flights across ALL aircraft for this airline
-    await pool.query(`
-      DELETE FROM flights WHERE id IN (
-        SELECT f.id FROM flights f
-        JOIN (
-          SELECT aircraft_id, flight_number, departure_time::date as dep_date, MIN(id) as keep_id
-          FROM flights WHERE airline_id = $1 AND status IN ('scheduled', 'boarding')
-          GROUP BY aircraft_id, flight_number, departure_time::date
-          HAVING COUNT(*) > 1
-        ) dups ON f.aircraft_id = dups.aircraft_id
-              AND f.flight_number = dups.flight_number
-              AND f.departure_time::date = dups.dep_date
-              AND f.id != dups.keep_id
-              AND f.status IN ('scheduled', 'boarding')
-      )
-    `, [airlineId]).catch(() => {});
 
     const now = new Date();
     // Start of yesterday (00:00 local = UTC midnight-ish; use 48h back to always include full previous day)

@@ -22,11 +22,12 @@ export default function AirlineProfilePopup({ airlineCode, onClose }) {
   }, [airlineCode]);
 
   return (
-    <div style={{
+    <div className="hp-popup-backdrop" style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+      padding: '0.5rem'
     }} onClick={onClose}>
-      <div style={{
+      <div className="hp-popup-card" style={{
         background: '#fff', borderRadius: 12, width: '100%', maxWidth: 580,
         maxHeight: '85vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
         boxShadow: '0 8px 32px rgba(0,0,0,0.2)'

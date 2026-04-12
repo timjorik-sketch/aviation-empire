@@ -710,6 +710,29 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
         .am-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
         @media (max-width: 1300px) { .am-grid { grid-template-columns: repeat(2, 1fr); } }
         @media (max-width: 900px)  { .am-grid { grid-template-columns: 1fr; } }
+        @media (max-width: 480px) {
+          .am-hero { height: 180px; }
+          .am-hero-overlay h1 { font-size: 1.6rem; }
+          .am-hero-overlay p { font-size: 0.85rem; }
+          .am-container { padding: 1rem 0.75rem; }
+          .am-layout { grid-template-columns: 1fr; }
+          .am-sidebar { position: static; }
+          .am-mfr-body { padding: 0.75rem; }
+          .am-card-body { padding: 0.7rem 0.8rem; }
+          .am-modal { max-width: 100%; border-radius: 8px; max-height: 95vh; }
+          .am-modal-head { padding: 1rem; border-radius: 8px 8px 0 0; }
+          .am-modal-body { padding: 1rem; }
+          .am-modal-foot { padding: 0.75rem 1rem; flex-direction: column; }
+          .am-modal-foot .am-btn-cancel,
+          .am-modal-foot .am-btn-confirm { width: 100%; text-align: center; }
+          .am-ul-header { display: none; }
+          .am-used-listing {
+            grid-template-columns: 1fr 1fr;
+            gap: 4px 8px; padding: 0.6rem;
+          }
+          .am-used-listing > *:nth-child(3) { grid-column: 1 / -1; }
+          .am-used-listing > *:nth-child(4) { grid-column: 1 / -1; }
+        }
 
         /* Empty state */
         .am-empty {

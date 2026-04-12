@@ -297,7 +297,7 @@ router.post('/',
   }
 );
 
-// GET /api/airline/departures — next 10 upcoming departures for the active airline
+// GET /api/airline/departures — upcoming departures (next 48h) for the active airline
 router.get('/departures', authMiddleware, async (req, res) => {
   try {
     if (!req.airlineId) return res.json({ flights: [] });
@@ -315,8 +315,8 @@ router.get('/departures', authMiddleware, async (req, res) => {
       LEFT JOIN airports ap_dep ON ap_dep.iata_code = r.departure_airport
       LEFT JOIN airports ap_arr ON ap_arr.iata_code = r.arrival_airport
       WHERE f.airline_id = $1 AND f.status IN ('scheduled', 'boarding', 'in-flight')
+        AND f.departure_time <= NOW() + INTERVAL '48 hours'
       ORDER BY f.departure_time ASC
-      LIMIT 30
     `, [req.airlineId]);
     const flights = result.rows.map(row => ({
       flight_number: row.flight_number,
@@ -338,7 +338,7 @@ router.get('/departures', authMiddleware, async (req, res) => {
   }
 });
 
-// GET /api/airline/arrivals — next 10 upcoming arrivals for the active airline
+// GET /api/airline/arrivals — upcoming arrivals (next 48h) for the active airline
 router.get('/arrivals', authMiddleware, async (req, res) => {
   try {
     if (!req.airlineId) return res.json({ flights: [] });
@@ -356,8 +356,8 @@ router.get('/arrivals', authMiddleware, async (req, res) => {
       LEFT JOIN airports ap_dep ON ap_dep.iata_code = r.departure_airport
       LEFT JOIN airports ap_arr ON ap_arr.iata_code = r.arrival_airport
       WHERE f.airline_id = $1 AND f.status IN ('scheduled', 'boarding', 'in-flight')
+        AND f.arrival_time <= NOW() + INTERVAL '48 hours'
       ORDER BY f.arrival_time ASC
-      LIMIT 30
     `, [req.airlineId]);
     const flights = result.rows.map(row => ({
       flight_number: row.flight_number,

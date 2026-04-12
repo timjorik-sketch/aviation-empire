@@ -232,9 +232,8 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
   const [arrivals, setArrivals] = useState([]);
   const [airlines, setAirlines] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [boardsLoading, setBoardsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [lastRefresh, setLastRefresh] = useState(null);
+
   const [now, setNow] = useState(() => Date.now());
 
   const [profilePopupCode, setProfilePopupCode] = useState(null);
@@ -243,9 +242,9 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
   const [capableLoading, setCapableLoading] = useState(false);
 
   const [destStatus, setDestStatus] = useState(null); // { is_opened, destination_type, effective_type, weekly_flights }
+  const [addingDest, setAddingDest] = useState(false);
 
   const fetchBoards = useCallback(() => {
-    setBoardsLoading(true);
     Promise.all([
       fetch(`${API_URL}/api/airports/${code}/departures`).then(r => r.json()),
       fetch(`${API_URL}/api/airports/${code}/arrivals`).then(r => r.json()),
@@ -254,8 +253,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
       setDepartures(depData.flights || []);
       setArrivals(arrData.flights || []);
       setAirlines(airlinesData.airlines || []);
-      setLastRefresh(new Date());
-    }).catch(() => {}).finally(() => setBoardsLoading(false));
+    }).catch(() => {});
   }, [code]);
 
   const openCapableModal = useCallback(() => {
@@ -288,6 +286,32 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
       })
       .catch(() => { setError('Failed to load airport'); setLoading(false); });
   }, [code]);
+
+  const handleAddDestination = useCallback(async () => {
+    if (!airline || addingDest) return;
+    setAddingDest(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/api/destinations/open`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ airport_code: code, destination_type: 'destination' }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error);
+      if (onBalanceUpdate && json.new_balance != null) onBalanceUpdate(json.new_balance);
+      // Refresh destination status
+      const statusRes = await fetch(`${API_URL}/api/airports/${code}/airline-status`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const statusJson = await statusRes.json();
+      setDestStatus(statusJson);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setAddingDest(false);
+    }
+  }, [airline, code, addingDest, onBalanceUpdate]);
 
   // Auto-refresh boards every 30 seconds
   useEffect(() => {
@@ -336,20 +360,17 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
               </div>
             </div>
 
-            {/* Right: refresh */}
+            {/* Right: actions */}
             <div className="ap-strip-right">
               <div className="ap-strip-actions">
-                <button
-                  className="ap-btn-refresh"
-                  onClick={fetchBoards}
-                  disabled={boardsLoading}
-                >
-                  {boardsLoading ? '↻' : '↺'} Refresh
-                </button>
-                {lastRefresh && (
-                  <span className="ap-refresh-time">
-                    Updated {lastRefresh.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Europe/Berlin' })} CET
-                  </span>
+                {airline && destStatus && !destStatus.is_opened && (
+                  <button
+                    className="ap-btn-add-dest"
+                    onClick={handleAddDestination}
+                    disabled={addingDest}
+                  >
+                    {addingDest ? 'Opening…' : '+ Add as Destination'}
+                  </button>
                 )}
               </div>
             </div>
@@ -574,7 +595,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
             </div>
             <div className="ap-modal-footer">
               <span className="ap-modal-count">{capableAircraft.length} aircraft type{capableAircraft.length !== 1 ? 's' : ''} compatible</span>
-              <button className="ap-btn-refresh" onClick={() => setShowCapableModal(false)}>Close</button>
+              <button className="ap-btn-close" onClick={() => setShowCapableModal(false)}>Close</button>
             </div>
           </div>
         </div>
@@ -807,7 +828,21 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
           gap: 6px;
           padding-top: 2px;
         }
-        .ap-btn-refresh {
+        .ap-btn-add-dest {
+          background: #2C2C2C;
+          color: #fff;
+          border: none;
+          padding: 0.4rem 0.85rem;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 0.82rem;
+          font-weight: 600;
+          white-space: nowrap;
+          transition: all 0.15s;
+        }
+        .ap-btn-add-dest:hover:not(:disabled) { background: #444; }
+        .ap-btn-add-dest:disabled { opacity: 0.5; cursor: not-allowed; }
+        .ap-btn-close {
           background: transparent;
           border: 1px solid #E0E0E0;
           padding: 0.4rem 0.85rem;
@@ -818,9 +853,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
           white-space: nowrap;
           transition: all 0.15s;
         }
-        .ap-btn-refresh:hover:not(:disabled) { background: #F5F5F5; border-color: #AAAAAA; }
-        .ap-btn-refresh:disabled { opacity: 0.5; cursor: not-allowed; }
-        .ap-refresh-time { font-size: 0.7rem; color: #AAAAAA; padding-left: 2px; }
+        .ap-btn-close:hover { background: #F5F5F5; border-color: #AAAAAA; }
 
         /* ── Map + Info row ── */
         .ap-map-row {

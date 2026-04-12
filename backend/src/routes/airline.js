@@ -315,6 +315,7 @@ router.get('/departures', authMiddleware, async (req, res) => {
       LEFT JOIN airports ap_dep ON ap_dep.iata_code = r.departure_airport
       LEFT JOIN airports ap_arr ON ap_arr.iata_code = r.arrival_airport
       WHERE f.airline_id = $1 AND f.status IN ('scheduled', 'boarding', 'in-flight')
+        AND f.departure_time >= NOW() - INTERVAL '2 hours'
       ORDER BY f.departure_time ASC
       LIMIT 30
     `, [req.airlineId]);

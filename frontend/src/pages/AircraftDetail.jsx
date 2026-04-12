@@ -1056,7 +1056,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     const rawMin = (m.start_minutes ?? 0) + (m.duration_minutes ?? 0);
     const dayOffset = Math.floor(rawMin / 1440);
     const endMin = rawMin % 1440;
-    const newDay = ((m.dayIndex + dayOffset - 1) % 7) + 1; // dayIndex is 1-7
+    const newDay = (m.dayIndex + dayOffset) % 7; // dayIndex is 0-6
     applyNextDep(newDay, endMin);
   };
 
@@ -1066,7 +1066,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     const dayOffset = Math.floor(rawMin / 1440);
     const nextMin = rawMin % 1440;
     const baseDay = overrideDay ?? f.dayIndex;
-    const newDay = ((baseDay + dayOffset - 1) % 7) + 1; // dayIndex is 1-7
+    const newDay = (baseDay + dayOffset) % 7; // dayIndex is 0-6
     applyNextDep(newDay, nextMin);
   };
 

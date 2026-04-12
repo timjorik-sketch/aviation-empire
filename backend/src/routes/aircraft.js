@@ -1455,22 +1455,29 @@ router.patch('/:id/schedule/:entryId', authMiddleware, async (req, res) => {
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
-    const acResult = await pool.query('SELECT id, is_active FROM aircraft WHERE id = $1 AND airline_id = $2', [aircraftId, airlineId]);
+    const acResult = await pool.query(`
+      SELECT a.id, a.is_active, t.wake_turbulence_category
+      FROM aircraft a JOIN aircraft_types t ON a.aircraft_type_id = t.id
+      WHERE a.id = $1 AND a.airline_id = $2
+    `, [aircraftId, airlineId]);
     if (!acResult.rows[0]) return res.status(404).json({ error: 'Aircraft not found' });
-    const isOpForEdit = acResult.rows[0].is_active;
+    const { is_active: isOpForEdit, wake_turbulence_category: wakeCategory } = acResult.rows[0];
 
     if (isOpForEdit) {
       return res.status(400).json({ error: 'Aircraft must be inactive to edit schedule. Deactivate the aircraft first.' });
     }
 
-    const entryResult = await pool.query('SELECT id, route_id FROM weekly_schedule WHERE id = $1 AND aircraft_id = $2', [entryId, aircraftId]);
+    const entryResult = await pool.query('SELECT id, route_id, day_of_week, departure_time, arrival_time FROM weekly_schedule WHERE id = $1 AND aircraft_id = $2', [entryId, aircraftId]);
     if (!entryResult.rows[0]) return res.status(404).json({ error: 'Schedule entry not found' });
-    const existingRouteId = entryResult.rows[0].route_id;
+    const existing = entryResult.rows[0];
+    const existingRouteId = existing.route_id;
 
     const { day_of_week, departure_time, economy_price, business_price, first_price, service_profile_id } = req.body;
     const dow = day_of_week !== undefined ? parseInt(day_of_week) : null;
 
     let arrTime = null;
+    let newDepMin = null;
+    let newArrMin = null;
     if (departure_time) {
       const routeId = existingRouteId;
       let distKm = 0;
@@ -1480,11 +1487,63 @@ router.patch('/:id/schedule/:entryId', authMiddleware, async (req, res) => {
       }
       const durationMin = distKm ? calculateFlightDuration(distKm) : 0;
       const [depH, depM] = departure_time.split(':').map(Number);
-      const depMin = depH * 60 + depM;
-      const arrMin = depMin + durationMin;
-      const arrH = Math.floor(arrMin % 1440 / 60);
-      const arrMM = arrMin % 60;
+      newDepMin = depH * 60 + depM;
+      newArrMin = newDepMin + durationMin;
+      const arrH = Math.floor(newArrMin % 1440 / 60);
+      const arrMM = newArrMin % 60;
       arrTime = `${String(arrH).padStart(2, '0')}:${String(arrMM).padStart(2, '0')}`;
+    }
+
+    // Turnaround overlap validation when day or time changes
+    const timeOrDayChanged = dow !== null || departure_time;
+    if (timeOrDayChanged) {
+      const TURNAROUND_PATCH = { L: 25, M: 40, H: 60 };
+      const GROUND_MIN = TURNAROUND_PATCH[wakeCategory] || 40;
+
+      // Resolve the effective day/time for the edited entry
+      const effectiveDow = dow !== null ? dow : existing.day_of_week;
+      let effectiveDepMin, effectiveArrMin;
+      if (newDepMin !== null) {
+        effectiveDepMin = newDepMin;
+        effectiveArrMin = newArrMin;
+      } else {
+        const [eH, eM] = existing.departure_time.split(':').map(Number);
+        const [aH, aM] = existing.arrival_time.split(':').map(Number);
+        effectiveDepMin = eH * 60 + eM;
+        effectiveArrMin = aH * 60 + aM;
+        if (effectiveArrMin <= effectiveDepMin) effectiveArrMin += 1440;
+      }
+
+      // Check against other schedule entries (excluding this one)
+      const otherEntries = await pool.query(
+        'SELECT id, day_of_week, departure_time, arrival_time FROM weekly_schedule WHERE aircraft_id = $1 AND id != $2',
+        [aircraftId, entryId]
+      );
+      for (const row of otherEntries.rows) {
+        if (row.day_of_week !== effectiveDow) continue;
+        const [oDepH, oDepM] = row.departure_time.split(':').map(Number);
+        const [oArrH, oArrM] = row.arrival_time.split(':').map(Number);
+        let oDepMin = oDepH * 60 + oDepM;
+        let oArrMin = oArrH * 60 + oArrM;
+        if (oArrMin <= oDepMin) oArrMin += 1440;
+        if (effectiveDepMin < oArrMin + GROUND_MIN && oDepMin < effectiveArrMin + GROUND_MIN) {
+          return res.status(400).json({ error: `Edit would overlap with flight on day ${effectiveDow} (incl. ${GROUND_MIN}min turnaround)` });
+        }
+      }
+
+      // Check against maintenance
+      const maintEntries = await pool.query(
+        'SELECT day_of_week, start_minutes, duration_minutes FROM maintenance_schedule WHERE aircraft_id = $1 AND airline_id = $2',
+        [aircraftId, airlineId]
+      );
+      for (const row of maintEntries.rows) {
+        if (row.day_of_week !== effectiveDow) continue;
+        const mStart = row.start_minutes;
+        const mEnd = mStart + row.duration_minutes;
+        if (effectiveDepMin < mEnd && mStart < effectiveArrMin) {
+          return res.status(400).json({ error: 'Edit would overlap with a maintenance window' });
+        }
+      }
     }
 
     const updates = [];

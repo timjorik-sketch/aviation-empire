@@ -455,6 +455,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         overflowHeight:   crossesMidnight ? Math.max(arrMin * PX_PER_MIN, 14) : 0,
         groundDayIndex:   crossesMidnight ? (entry.day_of_week + 1) % 7 : entry.day_of_week,
         groundTop: arrMin * PX_PER_MIN,
+        groundCrossesMidnight: arrMin + groundMin > 1440,
+        groundOverflowDayIndex: arrMin + groundMin > 1440 ? ((crossesMidnight ? (entry.day_of_week + 1) % 7 : entry.day_of_week) + 1) % 7 : null,
+        groundOverflowHeight: arrMin + groundMin > 1440 ? (arrMin + groundMin - 1440) * PX_PER_MIN : 0,
+        groundSeg1Height: arrMin + groundMin > 1440 ? (1440 - arrMin) * PX_PER_MIN : groundMin * PX_PER_MIN,
         color:    flightColor,
         textColor: flightTextColor,
       };
@@ -463,19 +467,36 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
   const conflictIds = useMemo(() => {
     const ids = new Set();
-    for (let i = 0; i < flightBars.length; i++) {
-      for (let j = i + 1; j < flightBars.length; j++) {
-        const a = flightBars[i], b = flightBars[j];
-        if (a.dayIndex !== b.dayIndex) continue;
-        const aDepMin = parseHM(a.departure_time), aArrMin = parseHM(a.arrival_time);
-        const bDepMin = parseHM(b.departure_time), bArrMin = parseHM(b.arrival_time);
-        if (aDepMin < bArrMin + groundMin && bDepMin < aArrMin + groundMin) {
-          ids.add(a.id); ids.add(b.id);
+    // Build intervals with absolute minutes: each flight spans [depMin, arrMin+groundMin)
+    // For midnight-crossing flights, arrMin is the raw depMin + duration (can exceed 1440)
+    const intervals = flightBars.map(f => {
+      const dep = parseHM(f.departure_time);
+      let arr = parseHM(f.arrival_time);
+      if (arr <= dep) arr += 1440; // crosses midnight
+      return { id: f.id, day: f.dayIndex, dep, arr };
+    });
+    for (let i = 0; i < intervals.length; i++) {
+      for (let j = i + 1; j < intervals.length; j++) {
+        const a = intervals[i], b = intervals[j];
+        // Same day: direct overlap check with turnaround
+        if (a.day === b.day) {
+          if (a.dep < b.arr + groundMin && b.dep < a.arr + groundMin) {
+            ids.add(a.id); ids.add(b.id);
+          }
+        }
+        // Cross-day: flight A's turnaround spills into flight B's day (next day)
+        if ((a.day + 1) % 7 === b.day && a.arr + groundMin > 1440) {
+          const aSpill = a.arr + groundMin - 1440; // minutes into next day
+          if (b.dep < aSpill) { ids.add(a.id); ids.add(b.id); }
+        }
+        if ((b.day + 1) % 7 === a.day && b.arr + groundMin > 1440) {
+          const bSpill = b.arr + groundMin - 1440;
+          if (a.dep < bSpill) { ids.add(a.id); ids.add(b.id); }
         }
       }
     }
     return ids;
-  }, [flightBars]);
+  }, [flightBars, groundMin]);
 
   const maintBars = useMemo(() => maintenance.map(m => {
     const crossesMidnight = m.start_minutes + m.duration_minutes > 1440;
@@ -563,14 +584,29 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
   const seriesHasConflict = useMemo(() => {
     return seriesPreview.some(pf => {
-      const pfDep = parseHM(pf.dep), pfArr = parseHM(pf.arr);
+      const pfDep = parseHM(pf.dep);
+      let pfArr = parseHM(pf.arr);
+      if (pfArr <= pfDep) pfArr += 1440;
       return schedule.some(ef => {
-        if (ef.day_of_week !== pf.day) return false;
-        const efDep = parseHM(ef.departure_time), efArr = parseHM(ef.arrival_time);
-        return pfDep < efArr + groundMin && efDep < pfArr + groundMin;
+        const efDep = parseHM(ef.departure_time);
+        let efArr = parseHM(ef.arrival_time);
+        if (efArr <= efDep) efArr += 1440;
+        // Same day
+        if (ef.day_of_week === pf.day) {
+          if (pfDep < efArr + groundMin && efDep < pfArr + groundMin) return true;
+        }
+        // Preview flight turnaround spills into existing flight's day
+        if ((pf.day + 1) % 7 === ef.day_of_week && pfArr + groundMin > 1440) {
+          if (efDep < pfArr + groundMin - 1440) return true;
+        }
+        // Existing flight turnaround spills into preview flight's day
+        if ((ef.day_of_week + 1) % 7 === pf.day && efArr + groundMin > 1440) {
+          if (pfDep < efArr + groundMin - 1440) return true;
+        }
+        return false;
       });
     });
-  }, [seriesPreview, schedule]);
+  }, [seriesPreview, schedule, groundMin]);
 
   // How many round trips fit in a full week (7 × 1440 min) with current settings.
   // Simulates the actual chain (same snap logic as seriesPreview) starting from 0
@@ -1441,6 +1477,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                 const bars             = flightBars.filter(f => f.dayIndex === di);
                 const overflowBars     = flightBars.filter(f => f.overflowDayIndex === di);
                 const groundBars       = flightBars.filter(f => f.groundDayIndex === di);
+                const groundOverflowBars = flightBars.filter(f => f.groundOverflowDayIndex === di);
                 const mBars            = maintBars.filter(m => m.dayIndex === di);
                 const mOverflowBars    = maintBars.filter(m => m.overflowDayIndex === di);
                 return (
@@ -1484,11 +1521,23 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                       <div key={`g-${f.id}`} className="ad-grid-ground"
                         style={{
                           top: f.groundTop,
-                          height: groundMin * PX_PER_MIN,
+                          height: f.groundSeg1Height,
                           backgroundImage: `repeating-linear-gradient(-45deg, ${f.color} 0px, ${f.color} 2px, transparent 2px, transparent 7px)`,
                           border: `1px solid ${f.color}`,
                           borderTop: 'none',
                           boxSizing: 'border-box',
+                        }} />
+                    ))}
+                    {groundOverflowBars.map(f => (
+                      <div key={`gov-${f.id}`} className="ad-grid-ground"
+                        style={{
+                          top: 0,
+                          height: f.groundOverflowHeight,
+                          backgroundImage: `repeating-linear-gradient(-45deg, ${f.color} 0px, ${f.color} 2px, transparent 2px, transparent 7px)`,
+                          border: `1px solid ${f.color}`,
+                          borderTop: 'none',
+                          boxSizing: 'border-box',
+                          opacity: 0.85,
                         }} />
                     ))}
                     {bars.map(f => (

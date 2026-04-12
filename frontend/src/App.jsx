@@ -822,7 +822,7 @@ function App() {
     const arr = new Date(f.arrival_time).getTime();
     const diffToArr = (arr - now) / 60000;
     if (dep && now < dep)   return { label: 'Scheduled', cls: 'sched' };
-    if (diffToArr > 5)      return { label: 'In Flight', cls: 'sched' };
+    if (diffToArr > 5)      return { label: 'In Flight', cls: 'ontime' };
     if (diffToArr >= 0)     return { label: 'Approach',  cls: 'board' };
     if (diffToArr >= -1)    return { label: 'Landed',    cls: 'arr' };
     return null;

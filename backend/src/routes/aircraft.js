@@ -1033,6 +1033,8 @@ router.delete('/:id/weekly-schedule/:entryId', authMiddleware, async (req, res) 
       return res.status(400).json({ error: 'Aircraft must be inactive to edit schedule. Deactivate the aircraft first.' });
     }
 
+    // Detach any existing flights from this schedule entry so they still run but don't block deletion
+    await pool.query('UPDATE flights SET weekly_schedule_id = NULL WHERE weekly_schedule_id = $1', [entryId]);
     await pool.query('DELETE FROM weekly_schedule WHERE id = $1 AND aircraft_id = $2', [entryId, aircraftId]);
 
     res.json({ message: 'Weekly schedule entry deleted' });

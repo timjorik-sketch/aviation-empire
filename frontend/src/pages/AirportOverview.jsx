@@ -62,8 +62,17 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
   });
 
   useEffect(() => {
-    if (saved?.airports) return; // already have cached data
     const token = localStorage.getItem('token');
+    if (saved?.airports) {
+      // Cached: show immediately but refresh destination status in background
+      fetch(`${API_URL}/api/airports/available`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+        .then(r => r.json())
+        .then(d => { if (d.airports) setAirports(d.airports); })
+        .catch(() => {});
+      return;
+    }
     fetch(`${API_URL}/api/airports/available`, {
       headers: { 'Authorization': `Bearer ${token}` }
     })

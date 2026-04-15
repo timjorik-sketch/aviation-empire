@@ -786,7 +786,6 @@ INSERT OR IGNORE INTO airports (iata_code, name, country, registration_prefix, c
 ('TGM', 'Targu Mures Vidrasau Airport',                   'Romania',               'YR', 2, 'Europe', 2100,  46.4678,  24.4125),
 ('TAY', 'Tartu Airport',                                  'Estonia',               'ES', 1, 'Europe', 2400,  58.3075,  26.6903),
 ('MME', 'Durham Tees Valley Airport',                     'United Kingdom',        'G',  3, 'Europe', 2290,  54.5092,  -1.4294),
-('TEN', 'Tenerife Norte Airport',                         'Spain',                 'EC', 4, 'Europe', 2800,  28.4827, -16.3415),
 ('TFS', 'Tenerife Sur Airport',                           'Spain',                 'EC', 5, 'Europe', 3200,  28.0445, -16.5725),
 ('TIA', 'Tirana International Airport',                   'Albania',               'ZA', 4, 'Europe', 2750,  41.4147,  19.7206),
 ('TIV', 'Tivat Airport',                                  'Montenegro',            '4O', 3, 'Europe', 2500,  42.4047,  18.7233),

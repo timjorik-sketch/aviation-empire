@@ -268,7 +268,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [transferCountry, setTransferCountry]     = useState('');
   const [transferAirport, setTransferAirport]     = useState('');
-  const [transferDate, setTransferDate]           = useState('');
+  const [transferDay, setTransferDay]             = useState('0');
   const [transferTimeH, setTransferTimeH]         = useState('08');
   const [transferTimeM, setTransferTimeM]         = useState('00');
   const [transferSubmitting, setTransferSubmitting] = useState(false);
@@ -851,14 +851,18 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
   const handleTransferSubmit = async () => {
     if (!transferAirport) { setError('Select a destination airport'); return; }
-    if (!transferDate)    { setError('Select a departure date'); return; }
-    const depISO = `${transferDate}T${transferTimeH.padStart(2,'0')}:${transferTimeM.padStart(2,'0')}:00`;
+    const hh = clampHour(transferTimeH).padStart(2, '0');
+    const mm = clampMinute(transferTimeM).padStart(2, '0');
     setTransferSubmitting(true);
     setError('');
     try {
       const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/transfer`, {
         method: 'POST', headers: jsonHeaders,
-        body: JSON.stringify({ destination_airport: transferAirport, departure_time: depISO }),
+        body: JSON.stringify({
+          destination_airport: transferAirport,
+          day_of_week: parseInt(transferDay),
+          departure_time: `${hh}:${mm}`,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -869,6 +873,22 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       fetchScheduledFlights();
     } catch (err) { setError(err.message); }
     finally { setTransferSubmitting(false); }
+  };
+
+  const handleCancelTransfer = async (transferRowId) => {
+    const realId = String(transferRowId).replace(/^transfer_/, '');
+    if (!confirm('Cancel this transfer flight? The cost will be refunded.')) return;
+    setError('');
+    try {
+      const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/transfer/${realId}`, {
+        method: 'DELETE', headers,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setSuccess(data.message);
+      if (data.new_balance != null) airline && (airline.balance = data.new_balance);
+      fetchScheduledFlights();
+    } catch (err) { setError(err.message); }
   };
 
   const handleToggleActive = async () => {
@@ -1985,7 +2005,14 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                           <td className="ad-sf-pax" style={{ color: '#9ca3af' }}>—</td>
                           <td className="ad-sf-rev" style={{ color: '#dc2626', fontWeight: 600 }}>–$500K</td>
                           <td className="ad-sf-show-cell"></td>
-                          <td className="ad-sf-cancel-cell"></td>
+                          <td className="ad-sf-cancel-cell">
+                            {f.status === 'scheduled' && (
+                              <button className="ad-sf-cancel-btn" onClick={() => handleCancelTransfer(f.id)}
+                                title="Cancel transfer and refund cost">
+                                Cancel
+                              </button>
+                            )}
+                          </td>
                         </tr>
                       );
                     } else {
@@ -2658,15 +2685,21 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                   </select>
                 </div>
                 <div className="sched-form-row">
-                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#666', marginBottom: 6 }}>Departure Date &amp; Time</label>
+                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#666', marginBottom: 6 }}>Departure Day &amp; Time</label>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <input type="date" value={transferDate} min={today} onChange={e => setTransferDate(e.target.value)}
-                      style={{ flex: 1, padding: '0.48rem 0.5rem', border: '1px solid #E0E0E0', borderRadius: 6, fontSize: '0.88rem', color: '#2C2C2C' }} />
-                    <input type="number" className="sched-time-inp" value={transferTimeH} min={0} max={23}
-                      onChange={e => setTransferTimeH(clampHour(e.target.value))} />
+                    <select value={transferDay} onChange={e => setTransferDay(e.target.value)}
+                      style={{ flex: 1, padding: '0.48rem 0.5rem', border: '1px solid #E0E0E0', borderRadius: 6, fontSize: '0.88rem', color: '#2C2C2C', background: 'white' }}>
+                      {DAY_FULL.map((label, i) => <option key={i} value={String(i)}>{label}</option>)}
+                    </select>
+                    <input type="number" className="sched-time-inp" min="0" max="23" placeholder="HH"
+                      value={transferTimeH}
+                      onChange={e => setTransferTimeH(e.target.value)}
+                      onBlur={e => setTransferTimeH(clampHour(e.target.value))} />
                     <span className="sched-time-sep">:</span>
-                    <input type="number" className="sched-time-inp" value={transferTimeM} min={0} max={59} step={5}
-                      onChange={e => setTransferTimeM(clampMinute(e.target.value))} />
+                    <input type="number" className="sched-time-inp" min="0" max="59" placeholder="MM"
+                      value={transferTimeM}
+                      onChange={e => setTransferTimeM(e.target.value)}
+                      onBlur={e => setTransferTimeM(clampMinute(e.target.value))} />
                   </div>
                 </div>
                 <div style={{ fontSize: '0.76rem', color: '#888', marginTop: '1rem', lineHeight: 1.5 }}>
@@ -2678,7 +2711,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                 <button
                   className="sched-btn-submit"
                   onClick={handleTransferSubmit}
-                  disabled={transferSubmitting || !transferAirport || !transferDate}
+                  disabled={transferSubmitting || !transferAirport}
                 >
                   {transferSubmitting ? 'Scheduling…' : 'Schedule Transfer'}
                 </button>

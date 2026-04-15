@@ -1760,15 +1760,52 @@ router.get('/:id/flights', authMiddleware, async (req, res) => {
   }
 });
 
+// Compute next UTC occurrence of (day_of_week 0=Mon..6=Sun, HH:MM) interpreted in Europe/Berlin
+function nextBerlinOccurrence(dayOfWeek, hhmm) {
+  const getBerlinOffsetMin = (utcDate) => {
+    const berlin = new Date(utcDate.toLocaleString('en-US', { timeZone: 'Europe/Berlin' }));
+    const utc = new Date(utcDate.toLocaleString('en-US', { timeZone: 'UTC' }));
+    return Math.round((berlin - utc) / 60000);
+  };
+  const now = new Date();
+  for (let offset = 0; offset < 8; offset++) {
+    const dayUTC = new Date(now.getTime() + offset * 86400000);
+    const cetDateStr = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(dayUTC);
+    const noonUTC = new Date(`${cetDateStr}T12:00:00Z`);
+    const jsDay = noonUTC.getUTCDay();
+    const ourDay = (jsDay + 6) % 7;
+    if (ourDay !== dayOfWeek) continue;
+    const approxUTC = new Date(`${cetDateStr}T${hhmm}:00Z`);
+    const off = getBerlinOffsetMin(approxUTC);
+    const depUTC = new Date(approxUTC.getTime() - off * 60000);
+    if (depUTC > now) return depUTC;
+  }
+  return null;
+}
+
 // POST /:id/transfer — schedule a one-time positioning/transfer flight
 router.post('/:id/transfer', authMiddleware, async (req, res) => {
   if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
   const aircraftId = parseInt(req.params.id);
-  const { destination_airport, departure_time } = req.body;
+  const { destination_airport, day_of_week, departure_time } = req.body;
 
-  if (!destination_airport || !departure_time) {
-    return res.status(400).json({ error: 'destination_airport and departure_time are required' });
+  if (!destination_airport || day_of_week == null || !departure_time) {
+    return res.status(400).json({ error: 'destination_airport, day_of_week and departure_time are required' });
   }
+  const dow = parseInt(day_of_week);
+  if (!Number.isInteger(dow) || dow < 0 || dow > 6) {
+    return res.status(400).json({ error: 'day_of_week must be 0 (Mon) .. 6 (Sun)' });
+  }
+  if (!/^\d{1,2}:\d{2}$/.test(departure_time)) {
+    return res.status(400).json({ error: 'departure_time must be HH:MM' });
+  }
+  const [hh, mm] = departure_time.split(':').map(Number);
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) {
+    return res.status(400).json({ error: 'Invalid time' });
+  }
+  const hhmm = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
 
   try {
     const airlineId = req.airlineId;
@@ -1819,9 +1856,8 @@ router.post('/:id/transfer', authMiddleware, async (req, res) => {
     const speed = cruiseSpeed || 850;
     const flightMinutes = Math.round((distanceKm / speed) * 60) + 30;
 
-    const depDt = new Date(departure_time);
-    if (isNaN(depDt.getTime())) return res.status(400).json({ error: 'Invalid departure_time' });
-    if (depDt < new Date()) return res.status(400).json({ error: 'Departure time must be in the future' });
+    const depDt = nextBerlinOccurrence(dow, hhmm);
+    if (!depDt) return res.status(400).json({ error: 'Could not compute departure time' });
 
     const arrDt = new Date(depDt.getTime() + flightMinutes * 60000);
     const depISO = depDt.toISOString();
@@ -1871,6 +1907,39 @@ router.post('/:id/transfer', authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error('Transfer flight error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// DELETE /:id/transfer/:transferId — cancel a scheduled transfer flight and refund cost
+router.delete('/:id/transfer/:transferId', authMiddleware, async (req, res) => {
+  if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
+  const aircraftId  = parseInt(req.params.id);
+  const transferId  = parseInt(req.params.transferId);
+  const airlineId   = req.airlineId;
+  try {
+    const trResult = await pool.query(
+      'SELECT id, cost, status FROM transfer_flights WHERE id = $1 AND aircraft_id = $2 AND airline_id = $3',
+      [transferId, aircraftId, airlineId]
+    );
+    if (!trResult.rows[0]) return res.status(404).json({ error: 'Transfer flight not found' });
+    const { cost, status } = trResult.rows[0];
+    if (status !== 'scheduled') {
+      return res.status(400).json({ error: 'Only scheduled transfer flights can be cancelled' });
+    }
+    await pool.query('DELETE FROM transfer_flights WHERE id = $1', [transferId]);
+    const refund = Math.round(cost || 0);
+    if (refund > 0) {
+      await pool.query('UPDATE airlines SET balance = balance + $1 WHERE id = $2', [refund, airlineId]);
+    }
+    const balResult = await pool.query('SELECT balance FROM airlines WHERE id = $1', [airlineId]);
+    res.json({
+      message: `Transfer flight cancelled. Refunded $${refund.toLocaleString()}.`,
+      refund,
+      new_balance: balResult.rows[0]?.balance ?? null,
+    });
+  } catch (error) {
+    console.error('Delete transfer flight error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });

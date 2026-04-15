@@ -834,6 +834,39 @@ async function initDatabase() {
   // BJS → PEK rename (Beijing city code → actual airport code)
   await safeQuery(`UPDATE airports SET iata_code='PEK', name='Beijing Capital International Airport' WHERE iata_code='BJS'`, null, 'BJS→PEK rename');
 
+  // TEN → TFN consolidation (TEN was an incorrect duplicate for Tenerife Norte)
+  {
+    const { rows: tenRows } = await safeQuery(`SELECT 1 FROM airports WHERE iata_code='TEN'`, null, 'check TEN');
+    if (tenRows.length) {
+      const { rows: tfnRows } = await safeQuery(`SELECT 1 FROM airports WHERE iata_code='TFN'`, null, 'check TFN');
+      if (!tfnRows.length) {
+        await safeQuery(`UPDATE airports SET iata_code='TFN' WHERE iata_code='TEN'`, null, 'TEN→TFN rename');
+      } else {
+        const reassign = [
+          ['aircraft', 'home_airport'],
+          ['aircraft', 'current_location'],
+          ['routes', 'departure_airport'],
+          ['routes', 'arrival_airport'],
+          ['weekly_schedule', 'departure_airport'],
+          ['weekly_schedule', 'arrival_airport'],
+          ['airline_destinations', 'airport_code'],
+          ['personnel', 'airport_code'],
+          ['airport_slots', 'airport_code'],
+          ['slot_usage', 'airport_code'],
+          ['transfer_flights', 'departure_airport'],
+          ['transfer_flights', 'arrival_airport'],
+          ['airport_expansions', 'airport_code'],
+          ['expansion_usage', 'airport_code'],
+          ['used_aircraft_market', 'location'],
+        ];
+        for (const [tbl, col] of reassign) {
+          await safeQuery(`UPDATE ${tbl} SET ${col}='TFN' WHERE ${col}='TEN'`, null, `TEN→TFN ${tbl}.${col}`);
+        }
+        await safeQuery(`DELETE FROM airports WHERE iata_code='TEN'`, null, 'delete TEN');
+      }
+    }
+  }
+
   // ── AIRPORT FEE SEED (runs after coordinate seed so category is correct) ─────
   const CAT_FEES = {
     8:[850,2900,7300,600,1200,2150], 7:[700,2400,5900,550,1075,1825],

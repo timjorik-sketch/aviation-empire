@@ -377,18 +377,33 @@ router.delete('/:id', authMiddleware, async (req, res) => {
     }
     const flightNumber = routeResult.rows[0].flight_number;
 
-    // Block deletion if route is used in any aircraft schedule
+    // Block deletion if route is used in any aircraft schedule (by route_id or flight_number)
     const schedResult = await pool.query(`
-      SELECT ac.registration FROM weekly_schedule ws
+      SELECT DISTINCT ac.registration FROM weekly_schedule ws
       JOIN aircraft ac ON ws.aircraft_id = ac.id
-      WHERE ws.flight_number = $1 AND ac.airline_id = $2
-      GROUP BY ac.registration
-    `, [flightNumber, airlineId]);
+      WHERE ac.airline_id = $1 AND (ws.route_id = $2 OR ws.flight_number = $3)
+    `, [airlineId, routeId, flightNumber]);
     const usedBy = schedResult.rows.map(r => r.registration);
 
     if (usedBy.length > 0) {
       return res.status(400).json({
         error: `Route ${flightNumber} is scheduled on aircraft: ${usedBy.join(', ')}. Remove it from those flight plans first.`
+      });
+    }
+
+    // Block deletion if any pending flights still reference this route
+    const pendingResult = await pool.query(`
+      SELECT COUNT(*)::int AS cnt,
+             COALESCE(SUM(booked_economy + booked_business + booked_first), 0)::int AS booked
+      FROM flights
+      WHERE status IN ('scheduled','boarding','in-flight')
+        AND (route_id = $1 OR weekly_schedule_id IN (SELECT id FROM weekly_schedule WHERE route_id = $1))
+    `, [routeId]);
+    const pendingCnt = pendingResult.rows[0]?.cnt ?? 0;
+    const pendingBooked = pendingResult.rows[0]?.booked ?? 0;
+    if (pendingCnt > 0) {
+      return res.status(400).json({
+        error: `Route ${flightNumber} has ${pendingCnt} pending flight(s)${pendingBooked > 0 ? ` with ${pendingBooked} booked passenger(s)` : ''}. Cancel or wait for them to complete before deleting.`
       });
     }
 

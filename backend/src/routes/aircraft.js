@@ -47,24 +47,26 @@ function randUMDigits(n) {
   return Array.from({length: n}, () => Math.floor(Math.random() * 10)).join('');
 }
 
-async function genRegForPrefix(prefix) {
-  const fmt = AIRPORT_PREFIX_FORMAT[prefix];
-  if (!fmt) {
-    for (let i = 0; i < 30; i++) {
-      const reg = prefix + '-' + randUMLetters(3);
-      const r1 = await pool.query('SELECT id FROM aircraft WHERE registration = $1', [reg]);
-      const r2 = await pool.query('SELECT id FROM used_aircraft_market WHERE registration = $1', [reg]);
-      if (!r1.rows[0] && !r2.rows[0]) return reg;
-    }
-    return prefix + '-' + randUMLetters(3) + randUMDigits(2);
-  }
-  for (let i = 0; i < 30; i++) {
-    const reg = fmt();
+async function genRegForPrefix(prefix, usedSet = null) {
+  const isFree = async (reg) => {
+    if (usedSet) return !usedSet.has(reg);
     const r1 = await pool.query('SELECT id FROM aircraft WHERE registration = $1', [reg]);
+    if (r1.rows[0]) return false;
     const r2 = await pool.query('SELECT id FROM used_aircraft_market WHERE registration = $1', [reg]);
-    if (!r1.rows[0] && !r2.rows[0]) return reg;
+    return !r2.rows[0];
+  };
+  const fmt = AIRPORT_PREFIX_FORMAT[prefix];
+  const build = fmt || (() => prefix + '-' + randUMLetters(3));
+  for (let i = 0; i < 30; i++) {
+    const reg = build();
+    if (await isFree(reg)) {
+      if (usedSet) usedSet.add(reg);
+      return reg;
+    }
   }
-  return prefix + '-' + randUMLetters(3) + randUMDigits(2);
+  const fallback = prefix + '-' + randUMLetters(3) + randUMDigits(2);
+  if (usedSet) usedSet.add(fallback);
+  return fallback;
 }
 
 async function genRegForLocation(iataCode) {
@@ -94,6 +96,12 @@ export async function fillUsedMarket() {
     const countMap = {};
     for (const r of countResult.rows) countMap[String(r.aircraft_type_id)] = parseInt(r.cnt);
 
+    const usedRegs = new Set();
+    const regA = await pool.query('SELECT registration FROM aircraft');
+    for (const r of regA.rows) if (r.registration) usedRegs.add(r.registration);
+    const regM = await pool.query('SELECT registration FROM used_aircraft_market');
+    for (const r of regM.rows) if (r.registration) usedRegs.add(r.registration);
+
     const currentYear = new Date().getFullYear();
     let total = 0;
     for (const t of types) {
@@ -106,7 +114,7 @@ export async function fillUsedMarket() {
         const totalFh = Math.round(ageYears * (400 + Math.random() * 800));
         const airport = airports.length ? airports[Math.floor(Math.random() * airports.length)] : null;
         const location = airport ? airport.code : null;
-        const reg = airport ? await genRegForPrefix(airport.prefix) : await genRegForPrefix('D');
+        const reg = airport ? await genRegForPrefix(airport.prefix, usedRegs) : await genRegForPrefix('D', usedRegs);
         const val = Math.round(calcUsedValue(t.newPrice, t.kAge, t.kFh, ageYears, totalFh));
         await pool.query(
           "INSERT INTO used_aircraft_market (aircraft_type_id, registration, manufactured_year, total_flight_hours, current_value, location, seller_type) VALUES ($1, $2, $3, $4, $5, $6, 'system')",

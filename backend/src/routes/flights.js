@@ -666,6 +666,14 @@ async function generateFlights() {
       max_passengers: r.max_passengers, condition: r.condition ?? 100
     }));
 
+    const airportCatMap = new Map();
+    try {
+      const aptResult = await pool.query('SELECT iata_code, category FROM airports');
+      for (const row of aptResult.rows) {
+        airportCatMap.set(row.iata_code, row.category || 4);
+      }
+    } catch (e) { /* fall back to defaults below */ }
+
     let generated = 0;
 
     for (const ac of aircraft) {
@@ -744,14 +752,8 @@ async function generateFlights() {
           const firstPrice = entry.first_price ?? ecoPrice;
           const distKm     = entry.distance_km || 1000;
 
-          let depCat = 4, arrCat = 4;
-          try {
-            const catResult = await pool.query('SELECT iata_code, category FROM airports WHERE iata_code IN ($1, $2)', [entry.dep_airport, entry.arr_airport]);
-            for (const cr of catResult.rows) {
-              if (cr.iata_code === entry.dep_airport) depCat = cr.category || 4;
-              else arrCat = cr.category || 4;
-            }
-          } catch (e) { /* use defaults */ }
+          const depCat = airportCatMap.get(entry.dep_airport) ?? 4;
+          const arrCat = airportCatMap.get(entry.arr_airport) ?? 4;
 
           const mp = calcMarketPrices(distKm, depCat, arrCat);
           const atcFee = Math.round(distKm * ATC_RATE_PER_KM);
@@ -866,6 +868,15 @@ async function processBookings() {
       }
     }
 
+    const svcFactorCache = {};
+    const getSvc = async (spId, cls) => {
+      const key = `${spId || 0}:${cls}`;
+      if (!(key in svcFactorCache)) {
+        svcFactorCache[key] = await calcServiceFactor(spId, cls);
+      }
+      return svcFactorCache[key];
+    };
+
     let totalNewPax = 0, totalRevenue = 0;
     const airlineTotals = {};
 
@@ -879,9 +890,9 @@ async function processBookings() {
 
       const baseDemand = calcBaseDemandPerHour(f.dep_cat, f.arr_cat);
       const condFactor = calcConditionFactor(f.condition);
-      const svcEco  = await calcServiceFactor(f.service_profile_id, 'economy');
-      const svcBiz  = await calcServiceFactor(f.service_profile_id, 'business');
-      const svcFir  = await calcServiceFactor(f.service_profile_id, 'first');
+      const svcEco  = await getSvc(f.service_profile_id, 'economy');
+      const svcBiz  = await getSvc(f.service_profile_id, 'business');
+      const svcFir  = await getSvc(f.service_profile_id, 'first');
       const satMult = airlineSatMultipliers[f.airline_id] || 1.0;
 
       let newEco = 0, newBiz = 0, newFir = 0, addedRev = 0;
@@ -969,30 +980,49 @@ async function patchNullSatisfactionScores() {
     distance_km: r.distance_km || 1000
   }));
 
+  const acIds = [...new Set(toFix.map(f => f.aircraft_id).filter(Boolean))];
+  const acMap = new Map();
+  const classMap = new Map();
+  if (acIds.length) {
+    const acBulk = await pool.query(`
+      SELECT ac.id, ac.airline_cabin_profile_id, ac.condition, at.max_passengers
+      FROM aircraft ac JOIN aircraft_types at ON ac.aircraft_type_id = at.id
+      WHERE ac.id = ANY($1::int[])
+    `, [acIds]);
+    for (const r of acBulk.rows) {
+      acMap.set(r.id, {
+        cabinProfileId: r.airline_cabin_profile_id,
+        condition: r.condition ?? 100,
+        maxPax: r.max_passengers ?? 100,
+      });
+    }
+    const profileIds = [...new Set([...acMap.values()].map(a => a.cabinProfileId).filter(Boolean))];
+    if (profileIds.length) {
+      const clBulk = await pool.query(
+        'SELECT profile_id, class_type, actual_capacity, seat_type FROM airline_cabin_classes WHERE profile_id = ANY($1::int[])',
+        [profileIds]
+      );
+      for (const cr of clBulk.rows) {
+        if (!classMap.has(cr.profile_id)) classMap.set(cr.profile_id, []);
+        classMap.get(cr.profile_id).push(cr);
+      }
+    }
+  }
+
   for (const f of toFix) {
     let ecoSeats = 0, bizSeats = 0, firstSeats = 0;
     let ecoSeatType = 'economy', bizSeatType = 'business', firstSeatType = 'first';
     let condition = 100;
 
     if (f.aircraft_id) {
-      const acResult = await pool.query(`
-        SELECT ac.airline_cabin_profile_id, ac.condition, at.max_passengers
-        FROM aircraft ac JOIN aircraft_types at ON ac.aircraft_type_id = at.id
-        WHERE ac.id = $1
-      `, [f.aircraft_id]);
-      let cabinProfileId = null, maxPax = 100;
-      if (acResult.rows[0]) {
-        cabinProfileId = acResult.rows[0].airline_cabin_profile_id;
-        condition = acResult.rows[0].condition ?? 100;
-        maxPax = acResult.rows[0].max_passengers ?? 100;
-      }
+      const ac = acMap.get(f.aircraft_id);
+      const cabinProfileId = ac?.cabinProfileId ?? null;
+      const maxPax = ac?.maxPax ?? 100;
+      condition = ac?.condition ?? 100;
 
       if (cabinProfileId) {
-        const clResult = await pool.query(
-          'SELECT class_type, actual_capacity, seat_type FROM airline_cabin_classes WHERE profile_id = $1',
-          [cabinProfileId]
-        );
-        for (const cr of clResult.rows) {
+        const classes = classMap.get(cabinProfileId) || [];
+        for (const cr of classes) {
           if (cr.class_type === 'economy')       { ecoSeats = cr.actual_capacity; if (cr.seat_type) ecoSeatType = cr.seat_type; }
           else if (cr.class_type === 'business') { bizSeats = cr.actual_capacity; if (cr.seat_type) bizSeatType = cr.seat_type; }
           else if (cr.class_type === 'first')    { firstSeats = cr.actual_capacity; if (cr.seat_type) firstSeatType = cr.seat_type; }
@@ -1049,23 +1079,38 @@ async function processFlights() {
       start_minutes: r.start_minutes, duration_minutes: r.duration_minutes, airline_id: r.airline_id
     }));
 
+    const maintAcMap = new Map();
+    const dueAcIds = [...new Set(
+      pendingMaint
+        .filter(m => currentWeekMin >= m.day_of_week * 1440 + m.start_minutes + m.duration_minutes)
+        .map(m => m.aircraft_id)
+        .filter(Boolean)
+    )];
+    if (dueAcIds.length) {
+      const acBulk = await pool.query(`
+        SELECT a.id, a.condition, t.wake_turbulence_category, a.registration, a.home_airport
+        FROM aircraft a
+        JOIN aircraft_types t ON a.aircraft_type_id = t.id
+        WHERE a.id = ANY($1::int[])
+      `, [dueAcIds]);
+      for (const ar of acBulk.rows) {
+        maintAcMap.set(ar.id, {
+          condition:    ar.condition ?? 100,
+          wakeCategory: ar.wake_turbulence_category ?? 'M',
+          registration: ar.registration ?? '',
+          homeAirport:  ar.home_airport ?? '',
+        });
+      }
+    }
+
     for (const m of pendingMaint) {
       const maintWeekMin = m.day_of_week * 1440 + m.start_minutes + m.duration_minutes;
       if (currentWeekMin >= maintWeekMin) {
-        const acInfoResult = await pool.query(`
-          SELECT a.condition, t.wake_turbulence_category, a.registration, a.home_airport
-          FROM aircraft a
-          JOIN aircraft_types t ON a.aircraft_type_id = t.id
-          WHERE a.id = $1
-        `, [m.aircraft_id]);
-        let condition = 100, wakeCategory = 'M', registration = '', homeAirport = '';
-        if (acInfoResult.rows[0]) {
-          const ar = acInfoResult.rows[0];
-          condition    = ar.condition ?? 100;
-          wakeCategory = ar.wake_turbulence_category ?? 'M';
-          registration = ar.registration ?? '';
-          homeAirport  = ar.home_airport ?? '';
-        }
+        const info = maintAcMap.get(m.aircraft_id) || {};
+        const condition    = info.condition    ?? 100;
+        const wakeCategory = info.wakeCategory ?? 'M';
+        const registration = info.registration ?? '';
+        const homeAirport  = info.homeAirport  ?? '';
 
         await pool.query('UPDATE aircraft SET condition = 100 WHERE id = $1', [m.aircraft_id]);
 
@@ -1277,11 +1322,16 @@ async function processFlights() {
           const flightHours = flight.departure_time && flight.arrival_time
             ? (new Date(flight.arrival_time) - new Date(flight.departure_time)) / 3600000
             : 0;
+          const rate = CONDITION_RATE[flight.wake_cat] ?? CONDITION_RATE.M;
+          const condLoss = parseFloat(((flightHours * rate) + 0.15).toFixed(4));
           await pool.query(
-            'UPDATE aircraft SET current_location = $1, total_flight_hours = total_flight_hours + $2 WHERE id = $3',
-            [flight.arrival_airport || null, flightHours, flight.aircraft_id]
+            `UPDATE aircraft SET
+               current_location = $1,
+               total_flight_hours = total_flight_hours + $2,
+               condition = GREATEST(0, ROUND((condition - $3)::numeric, 2))
+             WHERE id = $4`,
+            [flight.arrival_airport || null, flightHours, condLoss, flight.aircraft_id]
           );
-          await degradeCondition(flight.aircraft_id, flightHours, flight.wake_cat);
         }
 
         if (totalCosts > 0) {
@@ -1304,11 +1354,16 @@ async function processFlights() {
           const flightHours = flight.departure_time && flight.arrival_time
             ? (new Date(flight.arrival_time) - new Date(flight.departure_time)) / 3600000
             : 0;
+          const rate = CONDITION_RATE[flight.wake_cat] ?? CONDITION_RATE.M;
+          const condLoss = parseFloat(((flightHours * rate) + 0.15).toFixed(4));
           await pool.query(
-            'UPDATE aircraft SET current_location = $1, total_flight_hours = total_flight_hours + $2 WHERE id = $3',
-            [flight.arrival_airport || null, flightHours, flight.aircraft_id]
+            `UPDATE aircraft SET
+               current_location = $1,
+               total_flight_hours = total_flight_hours + $2,
+               condition = GREATEST(0, ROUND((condition - $3)::numeric, 2))
+             WHERE id = $4`,
+            [flight.arrival_airport || null, flightHours, condLoss, flight.aircraft_id]
           );
-          await degradeCondition(flight.aircraft_id, flightHours, flight.wake_cat);
         }
 
         await pool.query('UPDATE airlines SET balance = balance + $1 WHERE id = $2', [netRevenue, flight.airline_id]);
@@ -1355,20 +1410,8 @@ async function processFlights() {
   }
 }
 
-// Degrade aircraft condition after landing
+// Condition loss rate per flight hour, by wake category
 const CONDITION_RATE = { L: 0.20, M: 0.25, H: 0.30 };
-async function degradeCondition(aircraftId, flightHours, wakeCategory) {
-  try {
-    const rate = CONDITION_RATE[wakeCategory] ?? CONDITION_RATE.M;
-    const loss = parseFloat(((flightHours * rate) + 0.15).toFixed(4));
-    await pool.query(
-      'UPDATE aircraft SET condition = GREATEST(0, ROUND((condition - $1)::numeric, 2)) WHERE id = $2',
-      [loss, aircraftId]
-    );
-  } catch (err) {
-    console.error('degradeCondition error:', err);
-  }
-}
 
 // Backfill fuel price history if fewer than 24 entries exist
 async function backfillFuelPrices() {

@@ -255,7 +255,7 @@ async function getMarketHandler(req, res) {
     if (conditions.length > 0) {
       query += ' WHERE ' + conditions.join(' AND ');
     }
-    query += ' ORDER BY new_price_usd ASC';
+    query += ' ORDER BY manufacturer ASC, display_order ASC, full_name ASC';
 
     const result = await pool.query(query, params);
     const aircraftTypes = result.rows.map(row => ({
@@ -2180,7 +2180,7 @@ router.get('/types/available', authMiddleware, async (req, res) => {
              min_runway_takeoff_m, min_runway_landing_m, wake_turbulence_category, required_level
       FROM aircraft_types
       WHERE required_level <= $1
-      ORDER BY required_level ASC, range_km ASC
+      ORDER BY manufacturer ASC, display_order ASC, full_name ASC
     `, [airlineLevel]);
 
     const types = result.rows.map(r => ({
@@ -2206,7 +2206,7 @@ router.get('/types', authMiddleware, async (req, res) => {
     const level = parseInt(req.query.level) || 1;
     const result = await pool.query(`
       SELECT id, full_name, max_passengers, range_km, image_filename, required_level
-      FROM aircraft_types WHERE required_level = $1 ORDER BY max_passengers ASC
+      FROM aircraft_types WHERE required_level = $1 ORDER BY manufacturer ASC, display_order ASC, full_name ASC
     `, [level]);
     const types = result.rows.map(r => ({
       id: r.id, full_name: r.full_name, max_passengers: r.max_passengers,

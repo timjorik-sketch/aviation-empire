@@ -205,7 +205,7 @@ router.get('/:code/capable-aircraft', async (req, res) => {
              min_runway_landing_m, wake_turbulence_category, image_filename
       FROM aircraft_types
       WHERE min_runway_landing_m <= $1
-      ORDER BY min_runway_landing_m DESC, max_passengers DESC
+      ORDER BY manufacturer ASC, display_order ASC, full_name ASC
     `, [runway]);
 
     const aircraft = result.rows.map(r => ({
@@ -240,7 +240,7 @@ router.get('/:code/hover', async (req, res) => {
       const acResult = await pool.query(`
         SELECT full_name, max_passengers, image_filename, wake_turbulence_category
         FROM aircraft_types WHERE min_runway_landing_m <= $1
-        ORDER BY max_passengers DESC
+        ORDER BY manufacturer ASC, display_order ASC, full_name ASC
       `, [ap.runway_length_m]);
       aircraft = acResult.rows.map(r => ({
         full_name: r.full_name, max_passengers: r.max_passengers,

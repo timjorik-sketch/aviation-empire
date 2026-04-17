@@ -2784,6 +2784,10 @@ INSERT OR IGNORE INTO airports (iata_code, name, country, registration_prefix, c
 ('ZCL',  'Zacatecas General Leobardo C. Ruiz Airport',    'Mexico',  'XA',   3, 'North America', 3000,  22.8972, -102.6869),
 ('TOA',  'Torrance Zamperini Field',                      'USA',     'N',    1, 'North America', 1524,  33.8033, -118.3397);
 
+-- Asia airports (additions)
+INSERT OR IGNORE INTO airports (iata_code, name, country, registration_prefix, category, continent, runway_length_m, latitude, longitude) VALUES
+('GAN', 'Gan International Airport', 'Maldives', '8Q', 3, 'Asia', 3000, -0.6933, 73.1556);
+
 -- Seed aircraft types
 -- (id, manufacturer, model, full_name, max_passengers, range_km, cruise_speed_kmh,
 --  min_runway_takeoff_m, min_runway_landing_m, fuel_consumption_empty_per_km,

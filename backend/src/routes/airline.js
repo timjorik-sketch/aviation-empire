@@ -302,22 +302,25 @@ router.get('/departures', authMiddleware, async (req, res) => {
   try {
     if (!req.airlineId) return res.json({ flights: [] });
     const result = await pool.query(`
-      SELECT f.flight_number, r.departure_airport, r.arrival_airport,
+      SELECT f.flight_number,
+             COALESCE(r.departure_airport, ws.departure_airport) AS departure_airport,
+             COALESCE(r.arrival_airport,   ws.arrival_airport)   AS arrival_airport,
              f.departure_time, f.arrival_time, f.status,
              at.image_filename, at.model,
              ap_dep.name AS departure_airport_name,
              ap_arr.name AS arrival_airport_name,
              f.satisfaction_score
       FROM flights f
-      JOIN routes r ON f.route_id = r.id
+      LEFT JOIN routes r           ON f.route_id           = r.id
+      LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
       JOIN aircraft ac ON f.aircraft_id = ac.id
       JOIN aircraft_types at ON ac.aircraft_type_id = at.id
-      LEFT JOIN airports ap_dep ON ap_dep.iata_code = r.departure_airport
-      LEFT JOIN airports ap_arr ON ap_arr.iata_code = r.arrival_airport
+      LEFT JOIN airports ap_dep ON ap_dep.iata_code = COALESCE(r.departure_airport, ws.departure_airport)
+      LEFT JOIN airports ap_arr ON ap_arr.iata_code = COALESCE(r.arrival_airport,   ws.arrival_airport)
       WHERE f.airline_id = $1 AND f.status IN ('scheduled', 'boarding', 'in-flight')
         AND f.departure_time >= NOW() - INTERVAL '2 hours'
       ORDER BY f.departure_time ASC
-      LIMIT 30
+      LIMIT 200
     `, [req.airlineId]);
     const flights = result.rows.map(row => ({
       flight_number: row.flight_number,
@@ -344,21 +347,24 @@ router.get('/arrivals', authMiddleware, async (req, res) => {
   try {
     if (!req.airlineId) return res.json({ flights: [] });
     const result = await pool.query(`
-      SELECT f.flight_number, r.departure_airport, r.arrival_airport,
+      SELECT f.flight_number,
+             COALESCE(r.departure_airport, ws.departure_airport) AS departure_airport,
+             COALESCE(r.arrival_airport,   ws.arrival_airport)   AS arrival_airport,
              f.departure_time, f.arrival_time, f.status,
              at.image_filename, at.model,
              ap_dep.name AS departure_airport_name,
              ap_arr.name AS arrival_airport_name,
              f.satisfaction_score
       FROM flights f
-      JOIN routes r ON f.route_id = r.id
+      LEFT JOIN routes r           ON f.route_id           = r.id
+      LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
       JOIN aircraft ac ON f.aircraft_id = ac.id
       JOIN aircraft_types at ON ac.aircraft_type_id = at.id
-      LEFT JOIN airports ap_dep ON ap_dep.iata_code = r.departure_airport
-      LEFT JOIN airports ap_arr ON ap_arr.iata_code = r.arrival_airport
+      LEFT JOIN airports ap_dep ON ap_dep.iata_code = COALESCE(r.departure_airport, ws.departure_airport)
+      LEFT JOIN airports ap_arr ON ap_arr.iata_code = COALESCE(r.arrival_airport,   ws.arrival_airport)
       WHERE f.airline_id = $1 AND f.status IN ('scheduled', 'boarding', 'in-flight')
       ORDER BY f.arrival_time ASC
-      LIMIT 30
+      LIMIT 200
     `, [req.airlineId]);
     const flights = result.rows.map(row => ({
       flight_number: row.flight_number,

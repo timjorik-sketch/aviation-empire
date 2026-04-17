@@ -1055,7 +1055,10 @@ async function patchNullSatisfactionScores() {
 }
 
 // Process flights - update statuses and calculate revenue
+let _processingFlights = false;
 async function processFlights() {
+  if (_processingFlights) return;      // skip if previous cycle still running
+  _processingFlights = true;
   try {
     await patchNullSatisfactionScores();
 
@@ -1131,64 +1134,7 @@ async function processFlights() {
       }
     }
 
-    // Scheduled → Boarding (15 min before departure)
-    const boardingCandidatesResult = await pool.query(`
-      SELECT
-        f.id, f.flight_number, f.airline_id, f.aircraft_id,
-        COALESCE(r.departure_airport, ws.departure_airport) AS dep_airport,
-        COALESCE(f.booked_economy,  0) AS booked_eco,
-        COALESCE(f.booked_business, 0) AS booked_biz,
-        COALESCE(f.booked_first,    0) AS booked_fir,
-        COALESCE(f.economy_price,   0) AS eco_price,
-        COALESCE(f.business_price,  0) AS biz_price,
-        COALESCE(f.first_price,     0) AS fir_price,
-        COALESCE(f.booking_revenue_collected, 0) AS rev_collected,
-        ac.current_location
-      FROM flights f
-      LEFT JOIN routes r           ON f.route_id           = r.id
-      LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
-      LEFT JOIN aircraft ac        ON f.aircraft_id        = ac.id
-      WHERE f.status = 'scheduled'
-        AND f.departure_time <= $1::timestamptz + INTERVAL '15 minutes'
-    `, [now.toISOString()]);
-
-    const boardingCandidates = boardingCandidatesResult.rows.map(r => ({
-      id: r.id, flight_number: r.flight_number, airline_id: r.airline_id, aircraft_id: r.aircraft_id,
-      dep_airport: r.dep_airport,
-      booked_eco: r.booked_eco, booked_biz: r.booked_biz, booked_fir: r.booked_fir,
-      eco_price: r.eco_price, biz_price: r.biz_price, fir_price: r.fir_price,
-      rev_collected: r.rev_collected,
-      current_location: r.current_location,
-    }));
-
-    for (const f of boardingCandidates) {
-      if (f.current_location !== null && f.current_location !== f.dep_airport) {
-        let penalty = 0;
-        if (f.rev_collected) {
-          penalty += f.booked_eco * f.eco_price * 1.2;
-          penalty += f.booked_biz * (f.biz_price || f.eco_price) * 1.2;
-          penalty += f.booked_fir * (f.fir_price || f.eco_price) * 1.2;
-        }
-        penalty = Math.round(penalty);
-
-        await pool.query("UPDATE flights SET status = 'cancelled' WHERE id = $1", [f.id]);
-
-        if (penalty > 0) {
-          await pool.query('UPDATE airlines SET balance = balance - $1 WHERE id = $2', [penalty, f.airline_id]);
-          await pool.query(
-            "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
-            [f.airline_id, -penalty, `Flight ${f.flight_number} cancelled - aircraft not at ${f.dep_airport} (at ${f.current_location})`]
-          );
-        }
-
-        console.log(`[FlightProc] ${f.flight_number} CANCELLED - not at ${f.dep_airport}, at ${f.current_location}, penalty $${penalty}`);
-        continue;
-      }
-
-      await pool.query("UPDATE flights SET status = 'boarding' WHERE id = $1", [f.id]);
-    }
-
-    // Boarding → In-Flight
+    // Boarding → In-Flight (process departures BEFORE boarding check so locations are up-to-date)
     const boardingReadyResult = await pool.query(`
       SELECT f.id, f.flight_number,
              COALESCE(r.distance_km, ws_r.distance_km, 0) as distance_km,
@@ -1405,8 +1351,69 @@ async function processFlights() {
     } catch (err) {
       console.error('Transfer flight processing error:', err);
     }
+
+    // Scheduled → Boarding (15 min before departure)
+    // NOTE: This runs AFTER flight completions and transfer completions
+    // so that aircraft current_location is up-to-date before checking.
+    const boardingCandidatesResult = await pool.query(`
+      SELECT
+        f.id, f.flight_number, f.airline_id, f.aircraft_id,
+        COALESCE(r.departure_airport, ws.departure_airport) AS dep_airport,
+        COALESCE(f.booked_economy,  0) AS booked_eco,
+        COALESCE(f.booked_business, 0) AS booked_biz,
+        COALESCE(f.booked_first,    0) AS booked_fir,
+        COALESCE(f.economy_price,   0) AS eco_price,
+        COALESCE(f.business_price,  0) AS biz_price,
+        COALESCE(f.first_price,     0) AS fir_price,
+        COALESCE(f.booking_revenue_collected, 0) AS rev_collected,
+        ac.current_location
+      FROM flights f
+      LEFT JOIN routes r           ON f.route_id           = r.id
+      LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
+      LEFT JOIN aircraft ac        ON f.aircraft_id        = ac.id
+      WHERE f.status = 'scheduled'
+        AND f.departure_time <= $1::timestamptz + INTERVAL '15 minutes'
+    `, [now.toISOString()]);
+
+    const boardingCandidates = boardingCandidatesResult.rows.map(r => ({
+      id: r.id, flight_number: r.flight_number, airline_id: r.airline_id, aircraft_id: r.aircraft_id,
+      dep_airport: r.dep_airport,
+      booked_eco: r.booked_eco, booked_biz: r.booked_biz, booked_fir: r.booked_fir,
+      eco_price: r.eco_price, biz_price: r.biz_price, fir_price: r.fir_price,
+      rev_collected: r.rev_collected,
+      current_location: r.current_location,
+    }));
+
+    for (const f of boardingCandidates) {
+      if (f.current_location !== null && f.current_location !== f.dep_airport) {
+        let penalty = 0;
+        if (f.rev_collected) {
+          penalty += f.booked_eco * f.eco_price * 1.2;
+          penalty += f.booked_biz * (f.biz_price || f.eco_price) * 1.2;
+          penalty += f.booked_fir * (f.fir_price || f.eco_price) * 1.2;
+        }
+        penalty = Math.round(penalty);
+
+        await pool.query("UPDATE flights SET status = 'cancelled' WHERE id = $1", [f.id]);
+
+        if (penalty > 0) {
+          await pool.query('UPDATE airlines SET balance = balance - $1 WHERE id = $2', [penalty, f.airline_id]);
+          await pool.query(
+            "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
+            [f.airline_id, -penalty, `Flight ${f.flight_number} cancelled - aircraft not at ${f.dep_airport} (at ${f.current_location})`]
+          );
+        }
+
+        console.log(`[FlightProc] ${f.flight_number} CANCELLED - not at ${f.dep_airport}, at ${f.current_location}, penalty $${penalty}`);
+        continue;
+      }
+
+      await pool.query("UPDATE flights SET status = 'boarding' WHERE id = $1", [f.id]);
+    }
   } catch (error) {
     console.error('Process flights error:', error);
+  } finally {
+    _processingFlights = false;
   }
 }
 

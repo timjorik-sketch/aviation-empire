@@ -320,7 +320,7 @@ router.get('/departures', authMiddleware, async (req, res) => {
       WHERE f.airline_id = $1 AND f.status IN ('scheduled', 'boarding', 'in-flight')
         AND f.departure_time >= NOW() - INTERVAL '2 hours'
       ORDER BY f.departure_time ASC
-      LIMIT 200
+      LIMIT 30
     `, [req.airlineId]);
     const flights = result.rows.map(row => ({
       flight_number: row.flight_number,
@@ -364,7 +364,7 @@ router.get('/arrivals', authMiddleware, async (req, res) => {
       LEFT JOIN airports ap_arr ON ap_arr.iata_code = COALESCE(r.arrival_airport,   ws.arrival_airport)
       WHERE f.airline_id = $1 AND f.status IN ('scheduled', 'boarding', 'in-flight')
       ORDER BY f.arrival_time ASC
-      LIMIT 200
+      LIMIT 30
     `, [req.airlineId]);
     const flights = result.rows.map(row => ({
       flight_number: row.flight_number,

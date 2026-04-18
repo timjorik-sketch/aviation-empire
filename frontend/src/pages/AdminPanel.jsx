@@ -116,8 +116,8 @@ export default function AdminPanel({ airline, onBack }) {
           </div>
         )}
 
-        {/* Generate new code */}
-        <div style={{ background: 'white', borderRadius: 8, padding: 24, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', marginBottom: 24 }}>
+        {/* Invite codes management */}
+        <div style={{ background: 'white', borderRadius: 8, padding: 24, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
           <h3 style={{ margin: '0 0 16px', color: '#2C2C2C' }}>Generate New Invite Code</h3>
           <form onSubmit={handleCreate} style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 240px' }}>
@@ -137,10 +137,9 @@ export default function AdminPanel({ airline, onBack }) {
               {creating ? 'Generating…' : 'Generate Code'}
             </button>
           </form>
-        </div>
 
-        {/* Codes list */}
-        <div style={{ background: 'white', borderRadius: 8, padding: 24, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
+          <hr style={{ border: 'none', borderTop: '1px solid #E0E0E0', margin: '24px 0' }} />
+
           <h3 style={{ margin: '0 0 16px', color: '#2C2C2C' }}>
             Invite Codes ({codes.length})
           </h3>

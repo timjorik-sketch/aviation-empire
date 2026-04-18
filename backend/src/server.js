@@ -56,16 +56,16 @@ app.use('/api/fleet', aircraftRoutes);
 app.use('/api/aircraft-market', aircraftRoutes);
 
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    message: 'Apron Empire Backend is running!',
-    timestamp: new Date().toISOString() 
+  res.json({
+    status: 'OK',
+    message: 'Apron Empire backend is running',
+    timestamp: new Date().toISOString()
   });
 });
 
 app.get('/', (req, res) => {
-  res.json({ 
-    message: '✈️ Welcome to Apron Empire API!',
+  res.json({
+    message: 'Welcome to Apron Empire API',
     version: '1.0.0'
   });
 });
@@ -83,25 +83,14 @@ app.use((err, req, res, next) => {
 
 // Bind to PORT immediately so Railway health checks pass
 app.listen(PORT, () => {
-  console.log(`🚀 Apron Empire Backend running on port ${PORT}`);
-  console.log(`📊 Environment: ${process.env.NODE_ENV}`);
-  console.log(`🔗 API: http://localhost:${PORT}`);
+  console.log(`Apron Empire backend listening on port ${PORT} (${process.env.NODE_ENV || 'development'})`);
 
   // Init DB in background — don't block startup
   initDatabase().then(() => {
-    console.log('✅ Database initialized');
-
     startFlightProcessor();
-    console.log('✈️ Flight processor started');
-
     startMarketRefreshScheduler();
-    console.log('🛒 Used aircraft market scheduler started');
-
     startPayrollProcessor();
-    console.log('💰 Payroll processor started');
-
     startMarketAnalysesProcessor();
-    console.log('📊 Market analyses processor started');
   }).catch(err => {
     console.error('DB init failed (server still running):', err);
   });

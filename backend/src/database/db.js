@@ -92,7 +92,7 @@ async function runStatements(stmts, context = '') {
     } catch (e) {
       const msg = e.message || '';
       // Ignore "already exists" type errors — expected for idempotent init
-      if (msg.includes('already exists') || msg.includes('duplicate key')) continue;
+      if (msg.includes('already exists') || msg.includes('duplicate key') || msg.includes('cannot affect row a second time')) continue;
       // Log other errors but don't crash
       console.warn(`[db init${context ? ' ' + context : ''}] ${msg.substring(0, 120)}`);
     }
@@ -111,7 +111,7 @@ async function safeQuery(sql, params, label) {
 async function initDatabase() {
   // Test connection
   await pool.query('SELECT 1');
-  console.log('✅ PostgreSQL connected');
+  console.log('PostgreSQL connected');
 
   // Read and transform schema
   const rawSchema = fs.readFileSync(SCHEMA_PATH, 'utf-8');
@@ -931,7 +931,7 @@ async function initDatabase() {
       AND EXISTS (SELECT 1 FROM airlines WHERE user_id = users.id)
   `, null, 'active airline');
 
-  console.log('✅ Schema and seed data applied');
+  console.log('Schema and seed data applied');
 }
 
 // No-op for backwards compatibility — PostgreSQL doesn't need file persistence

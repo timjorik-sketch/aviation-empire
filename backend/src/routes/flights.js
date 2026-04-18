@@ -1270,14 +1270,18 @@ async function processFlights() {
             : 0;
           const rate = CONDITION_RATE[flight.wake_cat] ?? CONDITION_RATE.M;
           const condLoss = parseFloat(((flightHours * rate) + 0.15).toFixed(4));
-          await pool.query(
-            `UPDATE aircraft SET
-               current_location = $1,
-               total_flight_hours = total_flight_hours + $2,
-               condition = GREATEST(0, ROUND((condition - $3)::numeric, 2))
-             WHERE id = $4`,
-            [flight.arrival_airport || null, flightHours, condLoss, flight.aircraft_id]
-          );
+          try {
+            await pool.query(
+              `UPDATE aircraft SET
+                 current_location = $1,
+                 total_flight_hours = total_flight_hours + $2::float8,
+                 condition = GREATEST(0, ROUND((condition - $3::float8)::numeric, 2))
+               WHERE id = $4`,
+              [flight.arrival_airport || null, flightHours, condLoss, flight.aircraft_id]
+            );
+          } catch (err) {
+            console.error(`[FlightProc] aircraft update failed for flight ${flight.id} (ac ${flight.aircraft_id}):`, err.message);
+          }
         }
 
         if (totalCosts > 0) {
@@ -1302,14 +1306,18 @@ async function processFlights() {
             : 0;
           const rate = CONDITION_RATE[flight.wake_cat] ?? CONDITION_RATE.M;
           const condLoss = parseFloat(((flightHours * rate) + 0.15).toFixed(4));
-          await pool.query(
-            `UPDATE aircraft SET
-               current_location = $1,
-               total_flight_hours = total_flight_hours + $2,
-               condition = GREATEST(0, ROUND((condition - $3)::numeric, 2))
-             WHERE id = $4`,
-            [flight.arrival_airport || null, flightHours, condLoss, flight.aircraft_id]
-          );
+          try {
+            await pool.query(
+              `UPDATE aircraft SET
+                 current_location = $1,
+                 total_flight_hours = total_flight_hours + $2::float8,
+                 condition = GREATEST(0, ROUND((condition - $3::float8)::numeric, 2))
+               WHERE id = $4`,
+              [flight.arrival_airport || null, flightHours, condLoss, flight.aircraft_id]
+            );
+          } catch (err) {
+            console.error(`[FlightProc] aircraft update failed for flight ${flight.id} (ac ${flight.aircraft_id}):`, err.message);
+          }
         }
 
         await pool.query('UPDATE airlines SET balance = balance + $1 WHERE id = $2', [netRevenue, flight.airline_id]);

@@ -718,7 +718,7 @@ function App() {
     );
   }
   if (currentPage === 'finances') {
-    return <Finances airline={activeAirline} onBack={() => setCurrentPage('dashboard')} onNavigateToAirport={(code) => navigateToAirport(code, 'finances')} />;
+    return <Finances airline={activeAirline} onBack={() => setCurrentPage('dashboard')} onNavigateToAirport={(code) => navigateToAirport(code, 'finances')} onNavigateToAircraft={(id) => { setPreviousPage('finances'); setSelectedAircraftId(id); setCurrentPage('aircraft-detail'); }} />;
   }
   if (currentPage === 'service-profiles') {
     return <ServiceProfiles airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Dashboard'} />;

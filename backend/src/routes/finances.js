@@ -500,6 +500,74 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
   }
 });
 
+// Top/Bottom 10 most/least profitable aircraft (7-day avg daily profit)
+router.get('/aircraft-profitability', authMiddleware, async (req, res) => {
+  try {
+    const airlineId = req.airlineId;
+    if (!airlineId) return res.status(400).json({ error: 'No active airline' });
+
+    const result = await pool.query(`
+      WITH flight_profit AS (
+        SELECT f.aircraft_id,
+               COUNT(*) as flight_count,
+               COALESCE(SUM(
+                 COALESCE(f.revenue,0)
+                 - COALESCE(f.fuel_cost,0)
+                 - COALESCE(f.atc_fee,0)
+                 - COALESCE(f.catering_cost,0)
+                 - COALESCE(f.landing_fee,0)
+                 - COALESCE(f.ground_handling_cost,0)
+               ), 0) as total_flight_profit
+        FROM flights f
+        WHERE f.airline_id = $1
+          AND f.status = 'completed'
+          AND f.arrival_time >= NOW() - INTERVAL '7 days'
+        GROUP BY f.aircraft_id
+      ),
+      maint AS (
+        SELECT SUBSTRING(t.description FROM '^Maintenance - ([^ ]+)') as registration,
+               COALESCE(SUM(ABS(t.amount)), 0) as total_maint
+        FROM transactions t
+        WHERE t.airline_id = $1
+          AND t.type = 'maintenance'
+          AND t.created_at >= NOW() - INTERVAL '7 days'
+        GROUP BY registration
+      )
+      SELECT
+        a.id,
+        a.registration,
+        at.full_name as type,
+        a.is_active,
+        COALESCE(fp.flight_count, 0)::int as flight_count,
+        (COALESCE(fp.total_flight_profit, 0) - COALESCE(m.total_maint, 0)) / 7.0 as avg_daily_profit
+      FROM aircraft a
+      JOIN aircraft_types at ON a.aircraft_type_id = at.id
+      LEFT JOIN flight_profit fp ON a.id = fp.aircraft_id
+      LEFT JOIN maint m ON a.registration = m.registration
+      WHERE a.airline_id = $1
+        AND (COALESCE(fp.flight_count, 0) > 0 OR COALESCE(m.total_maint, 0) > 0)
+    `, [airlineId]);
+
+    const rows = result.rows.map(r => ({
+      id: r.id,
+      registration: r.registration,
+      type: r.type,
+      is_active: r.is_active === 1 || r.is_active === true,
+      flight_count: parseInt(r.flight_count) || 0,
+      avg_daily_profit: parseFloat(r.avg_daily_profit) || 0,
+    }));
+
+    const sortedDesc = [...rows].sort((a, b) => b.avg_daily_profit - a.avg_daily_profit);
+    const top = sortedDesc.slice(0, 10);
+    const bottom = [...rows].sort((a, b) => a.avg_daily_profit - b.avg_daily_profit).slice(0, 10);
+
+    res.json({ top, bottom });
+  } catch (error) {
+    console.error('Get aircraft profitability error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Get fuel price history (last 24 hours, public — no auth needed)
 router.get('/fuel-price-history', async (req, res) => {
   try {

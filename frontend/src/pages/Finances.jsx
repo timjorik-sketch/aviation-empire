@@ -185,15 +185,17 @@ function BRow({ label, value, sub, bold, divider }) {
 }
 
 // ── Main component ───────────────────────────────────────────────────────────
-export default function Finances({ airline, onBack, onNavigateToAirport }) {
+export default function Finances({ airline, onBack, onNavigateToAirport, onNavigateToAircraft }) {
   const [data, setData]           = useState(null);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState('');
   const [fuelHistory, setFuelHistory] = useState({ prices: [], currentPrice: 0 });
+  const [profitability, setProfitability] = useState({ top: [], bottom: [] });
 
   useEffect(() => {
     fetchDashboard();
     fetchFuelHistory();
+    fetchProfitability();
   }, []);
 
   const fetchDashboard = async () => {
@@ -208,6 +210,15 @@ export default function Finances({ airline, onBack, onNavigateToAirport }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchProfitability = async () => {
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch(`${API_URL}/api/finances/aircraft-profitability`, { headers: { Authorization: `Bearer ${token}` } });
+      const json = await res.json();
+      if (res.ok) setProfitability({ top: json.top || [], bottom: json.bottom || [] });
+    } catch { /* ignore */ }
   };
 
   const fetchFuelHistory = async () => {
@@ -397,6 +408,57 @@ export default function Finances({ airline, onBack, onNavigateToAirport }) {
           </div>
         </div>
 
+        {/* ── Aircraft Profitability (7-day avg) ── */}
+        <div className="info-card" style={{ marginBottom: '20px' }}>
+          <div className="card-header-bar">
+            <span className="card-header-bar-title">Aircraft Profitability — 7-Day Avg / Day</span>
+          </div>
+          <div className="fn-prof-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', padding: '16px 20px' }}>
+            {[
+              { title: 'Top 10 Most Profitable', rows: profitability.top },
+              { title: 'Bottom 10 Least Profitable', rows: profitability.bottom },
+            ].map(({ title, rows }) => (
+              <div key={title}>
+                <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', marginBottom: '10px' }}>
+                  {title}
+                </div>
+                {rows.length === 0 ? (
+                  <span style={{ fontSize: '0.82rem', color: '#BBB', fontStyle: 'italic' }}>No aircraft activity in the last 7 days</span>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {rows.map(ac => {
+                      const clickable = !!onNavigateToAircraft;
+                      const profitColor = ac.avg_daily_profit >= 0 ? '#22c55e' : '#ef4444';
+                      return (
+                        <button
+                          key={ac.id}
+                          onClick={() => clickable && onNavigateToAircraft(ac.id)}
+                          disabled={!clickable}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: '8px',
+                            background: 'white', border: '1px solid #E8E8E8', borderRadius: '6px',
+                            padding: '6px 12px', fontSize: '0.82rem',
+                            cursor: clickable ? 'pointer' : 'default',
+                            textAlign: 'left', fontFamily: 'inherit', width: '100%',
+                          }}
+                          title={clickable ? `Open ${ac.registration}` : ac.registration}
+                        >
+                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: ac.is_active ? '#22c55e' : '#ef4444', flexShrink: 0 }} />
+                          <span style={{ fontWeight: 700, fontFamily: 'monospace' }}>{ac.registration}</span>
+                          <span style={{ color: '#666', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ac.type}</span>
+                          <span style={{ color: profitColor, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                            {ac.avg_daily_profit > 0 ? '+' : ''}{fmt(ac.avg_daily_profit)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* ── Transactions Table ── */}
         <div className="info-card" style={{ marginBottom: '20px' }}>
           <div className="card-header-bar">
@@ -446,6 +508,7 @@ export default function Finances({ airline, onBack, onNavigateToAirport }) {
         <style>{`
           @media (max-width: 900px) {
             .fn-3col { grid-template-columns: 1fr !important; }
+            .fn-prof-grid { grid-template-columns: 1fr !important; }
           }
           @media (max-width: 700px) {
             .fn-kpi-row { flex-direction: column !important; }

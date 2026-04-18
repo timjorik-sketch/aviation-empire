@@ -1192,7 +1192,11 @@ async function processFlights() {
              COALESCE(f.booked_economy, f.seats_sold, 0)  as booked_eco,
              COALESCE(f.booked_business, 0) as booked_biz,
              COALESCE(f.booked_first, 0)    as booked_fir,
-             COALESCE(at.max_passengers, 100) as total_capacity
+             COALESCE(
+               (SELECT SUM(actual_capacity) FROM airline_cabin_classes WHERE profile_id = ac.airline_cabin_profile_id),
+               at.max_passengers,
+               100
+             ) as total_capacity
       FROM flights f
       LEFT JOIN routes r ON f.route_id = r.id
       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id

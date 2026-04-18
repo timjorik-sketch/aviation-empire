@@ -1189,7 +1189,7 @@ function App() {
             </div>
 
             {/* Departures + Arrivals boards — full width below the content row */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '1.5rem' }}>
+            <div className="hp-boards-grid">
               <div className="hp-board-wrap">
                 <div className="hp-board-titlebar hp-board-dep">
                   <img src="/icon/icon_departures.png" alt="" style={{ width: 18, height: 18, objectFit: 'contain', flexShrink: 0 }} />

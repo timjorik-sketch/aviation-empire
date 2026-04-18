@@ -765,6 +765,16 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
 
 /* ── Homepage flight boards ─────────────────────────────── */
 
+.hp-boards-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+@media (max-width: 768px) {
+  .hp-boards-grid { grid-template-columns: 1fr; }
+}
+
 .hp-board-wrap {
   background: #0D1117;
   border-radius: 8px;

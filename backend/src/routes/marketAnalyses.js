@@ -24,12 +24,43 @@ function getRating(actual, market) {
 }
 
 // Market price formula (mirrors flights.js calcMarketPrices)
+const BASE_RATE_ANCHORS = [
+  { km: 0,     v: 0.22 },
+  { km: 500,   v: 0.22 },
+  { km: 1500,  v: 0.13 },
+  { km: 3000,  v: 0.085 },
+  { km: 6000,  v: 0.068 },
+  { km: 10000, v: 0.060 },
+  { km: 15000, v: 0.050 },
+];
+const BUSINESS_MULT_ANCHORS = [
+  { km: 0,    v: 2.5 },
+  { km: 1000, v: 2.5 },
+  { km: 3000, v: 3.0 },
+  { km: 6000, v: 4.0 },
+];
+const FIRST_MULT_ANCHORS = [
+  { km: 0,    v: 5.0 },
+  { km: 1000, v: 5.0 },
+  { km: 3000, v: 7.0 },
+  { km: 6000, v: 10.0 },
+];
+
+function interpolateAnchors(km, anchors) {
+  if (km <= anchors[0].km) return anchors[0].v;
+  if (km >= anchors[anchors.length - 1].km) return anchors[anchors.length - 1].v;
+  for (let i = 0; i < anchors.length - 1; i++) {
+    const lo = anchors[i], hi = anchors[i + 1];
+    if (km >= lo.km && km <= hi.km) {
+      const p = (km - lo.km) / (hi.km - lo.km);
+      return lo.v + p * (hi.v - lo.v);
+    }
+  }
+  return anchors[anchors.length - 1].v;
+}
+
 function calcBaseRate(d) {
-  if (d <= 500)  return 0.22;
-  if (d <= 1500) return 0.15;
-  if (d <= 3000) return 0.10;
-  if (d <= 6000) return 0.065;
-  return 0.055;
+  return interpolateAnchors(d, BASE_RATE_ANCHORS);
 }
 
 function calcAirportPremium(cat1, cat2) {
@@ -41,8 +72,8 @@ function calcMarketPrices(distKm, depCat, arrCat) {
   const eco = Math.round(distKm * calcBaseRate(distKm) * calcAirportPremium(depCat, arrCat));
   return {
     eco,
-    biz:   Math.round(eco * (distKm < 1000 ? 2.5 : distKm < 3000 ? 3.0 : 4.0)),
-    first: Math.round(eco * (distKm < 1000 ? 5.0 : distKm < 3000 ? 7.0 : 10.0)),
+    biz:   Math.round(eco * interpolateAnchors(distKm, BUSINESS_MULT_ANCHORS)),
+    first: Math.round(eco * interpolateAnchors(distKm, FIRST_MULT_ANCHORS)),
   };
 }
 

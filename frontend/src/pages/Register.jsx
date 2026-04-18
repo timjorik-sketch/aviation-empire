@@ -57,9 +57,18 @@ function Register({ onRegister, onSwitchToLogin }) {
   };
 
   return (
-    <div className="auth-container">
-      <div className="auth-card">
-        <h2>Join Aviation Empire</h2>
+    <>
+      <div
+        className="page-hero"
+        style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.4),rgba(0,0,0,0.6)),url('/header-images/Headerimage_Home.png')" }}
+      >
+        <div className="page-hero-overlay">
+          <h1>Aviation Empire</h1>
+        </div>
+      </div>
+      <div className="auth-container">
+        <div className="auth-card">
+          <h2>Join Aviation Empire</h2>
         
         {error && <div className="error-message">{error}</div>}
         
@@ -120,14 +129,15 @@ function Register({ onRegister, onSwitchToLogin }) {
           </button>
         </form>
 
-        <p className="switch-auth">
-          Already have an account?{' '}
-          <button onClick={onSwitchToLogin} className="link-button">
-            Login here
-          </button>
-        </p>
+          <p className="switch-auth">
+            Already have an account?{' '}
+            <button onClick={onSwitchToLogin} className="link-button">
+              Login here
+            </button>
+          </p>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 

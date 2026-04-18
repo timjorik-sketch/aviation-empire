@@ -12,6 +12,7 @@ router.post('/register',
   body('email').isEmail().normalizeEmail(),
   body('username').isLength({ min: 3, max: 20 }).trim(),
   body('password').isLength({ min: 6 }),
+  body('invite_code').isString().trim().notEmpty().withMessage('Invite code required'),
   async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -19,7 +20,23 @@ router.post('/register',
         return res.status(400).json({ errors: errors.array() });
       }
 
-      const { email, username, password } = req.body;
+      const { email, username, password, invite_code } = req.body;
+
+      // Validate invite code
+      const codeResult = await pool.query(
+        'SELECT id, used_by, revoked FROM invite_codes WHERE code = $1',
+        [invite_code.toUpperCase()]
+      );
+      if (!codeResult.rows[0]) {
+        return res.status(400).json({ error: 'Invalid invite code' });
+      }
+      const inviteRow = codeResult.rows[0];
+      if (inviteRow.revoked) {
+        return res.status(400).json({ error: 'Invite code has been revoked' });
+      }
+      if (inviteRow.used_by) {
+        return res.status(400).json({ error: 'Invite code has already been used' });
+      }
 
       // Check if user exists
       const checkResult = await pool.query(
@@ -35,10 +52,17 @@ router.post('/register',
 
       // Insert user with RETURNING
       const insertResult = await pool.query(
-        'INSERT INTO users (email, username, password_hash) VALUES ($1, $2, $3) RETURNING id',
+        'INSERT INTO users (email, username, password_hash) VALUES ($1, $2, $3) RETURNING id, is_admin',
         [email, username, passwordHash]
       );
       const userId = insertResult.rows[0].id;
+      const isAdmin = insertResult.rows[0].is_admin || false;
+
+      // Mark invite code as used
+      await pool.query(
+        'UPDATE invite_codes SET used_by = $1, used_at = NOW() WHERE id = $2',
+        [userId, inviteRow.id]
+      );
 
       // Generate token
       const token = jwt.sign(
@@ -50,7 +74,7 @@ router.post('/register',
       res.status(201).json({
         message: 'User created successfully',
         token,
-        user: { id: userId, username, email }
+        user: { id: userId, username, email, is_admin: isAdmin }
       });
     } catch (error) {
       console.error('Register error:', error);
@@ -74,7 +98,7 @@ router.post('/login',
 
       // Find user
       const findResult = await pool.query(
-        'SELECT id, email, username, password_hash FROM users WHERE username = $1 OR email = $1',
+        'SELECT id, email, username, password_hash, is_admin FROM users WHERE username = $1 OR email = $1',
         [username]
       );
 
@@ -103,7 +127,7 @@ router.post('/login',
       res.json({
         message: 'Login successful',
         token,
-        user: { id: user.id, username: user.username, email: user.email }
+        user: { id: user.id, username: user.username, email: user.email, is_admin: user.is_admin || false }
       });
     } catch (error) {
       console.error('Login error:', error);
@@ -116,12 +140,12 @@ router.post('/login',
 router.get('/profile', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT id, username, email, created_at FROM users WHERE id = $1',
+      'SELECT id, username, email, created_at, is_admin FROM users WHERE id = $1',
       [req.userId]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'User not found' });
     const row = result.rows[0];
-    res.json({ user: { id: row.id, username: row.username, email: row.email, created_at: row.created_at } });
+    res.json({ user: { id: row.id, username: row.username, email: row.email, created_at: row.created_at, is_admin: row.is_admin || false } });
   } catch (error) {
     console.error('Profile error:', error);
     res.status(500).json({ error: 'Server error' });

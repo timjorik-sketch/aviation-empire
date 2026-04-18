@@ -39,6 +39,7 @@ import RouteMap from './pages/RouteMap';
 import AirportLink from './components/AirportLink.jsx';
 import RoutePreviewMap from './components/RoutePreviewMap.jsx';
 import Leaderboards from './pages/Leaderboards';
+import AdminPanel from './pages/AdminPanel';
 import SatisfactionRating, { getSatColor, scoreToRating } from './components/SatisfactionRating.jsx';
 import './App.css';
 
@@ -595,7 +596,7 @@ function App() {
       <div className="app">
         <div className="container">
           <div className="header">
-            <h1>Aviation Empire</h1>
+            <h1>Apron Empire</h1>
             <p className="subtitle">Loading...</p>
           </div>
         </div>
@@ -755,6 +756,9 @@ function App() {
   }
   if (currentPage === 'leaderboards') {
     return <Leaderboards airline={activeAirline} onBack={() => setCurrentPage('dashboard')} />;
+  }
+  if (currentPage === 'admin') {
+    return <AdminPanel airline={activeAirline} onBack={() => setCurrentPage('dashboard')} />;
   }
 
   const closeChangeModal = () => { setShowChangeModal(false); setShowCreateForm(false); };
@@ -927,7 +931,7 @@ function App() {
       {/* ── Hero banner ── */}
       <div className="page-hero">
         <div className="page-hero-overlay">
-          <h1>Aviation Empire</h1>
+          <h1>Apron Empire</h1>
         </div>
       </div>
 
@@ -959,6 +963,9 @@ function App() {
               {airlines.length === 0 ? '+ Create Airline' : 'Change Airline'}
             </button>
             <button className="hp-btn-logout-strip" onClick={() => setCurrentPage('edit-profile')}>Edit Profile</button>
+            {user?.is_admin && (
+              <button className="hp-btn-logout-strip" onClick={() => setCurrentPage('admin')}>Admin</button>
+            )}
             <button className="hp-btn-logout-strip" onClick={handleLogout}>Logout</button>
           </div>
         </div>
@@ -1370,7 +1377,7 @@ function App() {
             <h2>Get Started</h2>
             <p>
               {airlines.length === 0
-                ? 'Create your first airline to begin your aviation empire.'
+                ? 'Create your first airline to begin your Apron Empire.'
                 : 'Select an airline to get started.'}
             </p>
             <button className="btn-primary" style={{ padding: '12px 28px' }} onClick={() => setShowChangeModal(true)}>

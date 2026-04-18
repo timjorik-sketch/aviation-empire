@@ -21,6 +21,7 @@ import personnelRoutes, { startPayrollProcessor } from './routes/personnel.js';
 import expansionsRoutes from './routes/expansions.js';
 import marketAnalysesRouter, { startMarketAnalysesProcessor } from './routes/marketAnalyses.js';
 import leaderboardsRoutes from './routes/leaderboards.js';
+import adminRoutes from './routes/admin.js';
 
 dotenv.config();
 
@@ -48,6 +49,7 @@ app.use('/api/personnel', personnelRoutes);
 app.use('/api/expansions', expansionsRoutes);
 app.use('/api/market-analyses', marketAnalysesRouter);
 app.use('/api/leaderboards', leaderboardsRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Alias routes for convenience
 app.use('/api/fleet', aircraftRoutes);
@@ -56,14 +58,14 @@ app.use('/api/aircraft-market', aircraftRoutes);
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK', 
-    message: 'Aviation Empire Backend is running!',
+    message: 'Apron Empire Backend is running!',
     timestamp: new Date().toISOString() 
   });
 });
 
 app.get('/', (req, res) => {
   res.json({ 
-    message: '✈️ Welcome to Aviation Empire API!',
+    message: '✈️ Welcome to Apron Empire API!',
     version: '1.0.0'
   });
 });
@@ -81,7 +83,7 @@ app.use((err, req, res, next) => {
 
 // Bind to PORT immediately so Railway health checks pass
 app.listen(PORT, () => {
-  console.log(`🚀 Aviation Empire Backend running on port ${PORT}`);
+  console.log(`🚀 Apron Empire Backend running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV}`);
   console.log(`🔗 API: http://localhost:${PORT}`);
 

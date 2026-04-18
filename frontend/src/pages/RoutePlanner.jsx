@@ -415,7 +415,7 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
   if (loading) {
     return (
       <div className="app"><div className="container"><div className="header">
-        <h1>Aviation Empire</h1><p className="subtitle">Loading routes...</p>
+        <h1>Apron Empire</h1><p className="subtitle">Loading routes...</p>
       </div></div></div>
     );
   }

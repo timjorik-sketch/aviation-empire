@@ -276,6 +276,16 @@ async function initDatabase() {
       analyses_this_week INTEGER DEFAULT 0,
       FOREIGN KEY (airline_id) REFERENCES airlines(id)
     )`,
+    `CREATE TABLE IF NOT EXISTS invite_codes (
+      id SERIAL PRIMARY KEY,
+      code TEXT UNIQUE NOT NULL,
+      created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      used_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      used_at TIMESTAMPTZ,
+      revoked BOOLEAN DEFAULT FALSE,
+      note TEXT
+    )`,
   ];
   await runStatements(extraTables, 'extra tables');
 
@@ -301,6 +311,7 @@ async function initDatabase() {
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS logo_filename TEXT`,
     // users table
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS active_airline_id INTEGER REFERENCES airlines(id)`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE`,
     // flights table
     `ALTER TABLE flights ADD COLUMN IF NOT EXISTS service_profile_id INTEGER`,
     `ALTER TABLE flights ADD COLUMN IF NOT EXISTS booked_economy INTEGER DEFAULT 0`,
@@ -897,6 +908,18 @@ async function initDatabase() {
   await safeQuery(`DROP TABLE IF EXISTS mega_hubs`, null, 'drop mega_hubs');
   await safeQuery(`ALTER TABLE aircraft DROP COLUMN IF EXISTS cabin_profile_id`, null, 'drop cabin_profile_id');
   await safeQuery(`DROP TABLE IF EXISTS cabin_profiles`, null, 'drop cabin_profiles');
+
+  // ── BOOTSTRAP ADMINS ─────────────────────────────────────────────────────────
+  await safeQuery(
+    `UPDATE users SET is_admin = TRUE WHERE email = $1`,
+    ['timjorik@gmail.com'],
+    'bootstrap admin (email)'
+  );
+  await safeQuery(
+    `UPDATE users SET is_admin = TRUE WHERE LOWER(username) = LOWER($1)`,
+    ['Aclobe'],
+    'bootstrap admin (Aclobe)'
+  );
 
   // ── AUTO-SET active_airline_id for existing users ────────────────────────────
   await safeQuery(`

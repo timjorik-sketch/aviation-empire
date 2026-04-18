@@ -438,7 +438,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
       <div className="fleet-hero">
         <div className="fleet-hero-overlay">
           <h1>Fleet Management</h1>
-          <p>{airline.name} - Build Your Aviation Empire</p>
+          <p>{airline.name} - Build Your Apron Empire</p>
         </div>
       </div>
 

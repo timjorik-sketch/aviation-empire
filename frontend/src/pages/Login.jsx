@@ -48,12 +48,12 @@ function Login({ onLogin, onSwitchToRegister }) {
         style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.4),rgba(0,0,0,0.6)),url('/header-images/Headerimage_Home.png')" }}
       >
         <div className="page-hero-overlay">
-          <h1>Aviation Empire</h1>
+          <h1>Apron Empire</h1>
         </div>
       </div>
       <div className="auth-container">
         <div className="auth-card">
-          <h2>Login to Aviation Empire</h2>
+          <h2>Login to Apron Empire</h2>
         
         {error && <div className="error-message">{error}</div>}
         

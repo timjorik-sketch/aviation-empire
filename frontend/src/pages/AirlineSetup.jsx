@@ -72,14 +72,14 @@ function AirlineSetup({ onAirlineCreated }) {
     <div className="app">
       <div className="container">
         <div className="header">
-          <h1>Aviation Empire</h1>
+          <h1>Apron Empire</h1>
           <p className="subtitle">Create Your Airline</p>
         </div>
 
         <div className="auth-card">
           <h2>Airline Setup</h2>
           <p style={{ marginBottom: '1.5rem', color: '#666' }}>
-            Set up your airline to start your aviation empire!
+            Set up your airline to start your Apron Empire!
           </p>
 
           {error && <div className="error-message">{error}</div>}

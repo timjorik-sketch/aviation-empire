@@ -7,7 +7,8 @@ function Register({ onRegister, onSwitchToLogin }) {
     email: '',
     username: '',
     password: '',
-    confirmPassword: ''
+    confirmPassword: '',
+    inviteCode: ''
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -41,7 +42,8 @@ function Register({ onRegister, onSwitchToLogin }) {
         {
           email: formData.email,
           username: formData.username,
-          password: formData.password
+          password: formData.password,
+          invite_code: formData.inviteCode.trim().toUpperCase()
         }
       );
 
@@ -63,12 +65,12 @@ function Register({ onRegister, onSwitchToLogin }) {
         style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.4),rgba(0,0,0,0.6)),url('/header-images/Headerimage_Home.png')" }}
       >
         <div className="page-hero-overlay">
-          <h1>Aviation Empire</h1>
+          <h1>Apron Empire</h1>
         </div>
       </div>
       <div className="auth-container">
         <div className="auth-card">
-          <h2>Join Aviation Empire</h2>
+          <h2>Join Apron Empire</h2>
         
         {error && <div className="error-message">{error}</div>}
         
@@ -121,6 +123,21 @@ function Register({ onRegister, onSwitchToLogin }) {
               onChange={handleChange}
               required
               disabled={loading}
+            />
+          </div>
+
+          <div className="form-group">
+            <label>Invite Code</label>
+            <input
+              type="text"
+              name="inviteCode"
+              value={formData.inviteCode}
+              onChange={handleChange}
+              required
+              disabled={loading}
+              placeholder="e.g. A3F9K2XP"
+              autoCapitalize="characters"
+              style={{ letterSpacing: '0.05em', textTransform: 'uppercase' }}
             />
           </div>
 

@@ -1,4 +1,4 @@
-# Aviation Empire - Airline Simulation Game
+# Apron Empire - Airline Simulation Game
 
 Multiplayer Airline Simulator mit Echtzeit-Flugoperationen.
 
@@ -18,7 +18,7 @@ Server läuft auf: http://localhost:3001
 
 Öffne im Browser: http://localhost:3001
 
-Du solltest sehen: `{"message":"✈️ Welcome to Aviation Empire API!","version":"1.0.0"}`
+Du solltest sehen: `{"message":"✈️ Welcome to Apron Empire API!","version":"1.0.0"}`
 
 ## 📁 Projekt-Struktur
 

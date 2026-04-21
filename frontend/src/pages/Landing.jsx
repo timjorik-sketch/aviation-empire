@@ -166,8 +166,8 @@ function RegisterForm({ onRegister, onSwitchToLogin }) {
             Apron Empire is currently in closed beta and playable by invitation only.
           </p>
           <p>
-            Thanks for stopping by — we're rolling out invites in waves, so please
-            check back soon!
+            Thanks for stopping by — we're planning to open the game to the public
+            soon, so please check back!
           </p>
         </div>
 

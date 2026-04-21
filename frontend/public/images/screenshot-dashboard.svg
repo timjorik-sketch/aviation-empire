@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
-  <rect width="1600" height="900" fill="#F5F5F5"/>
-  <rect x="40" y="40" width="1520" height="820" fill="#ffffff" stroke="#E0E0E0" stroke-width="2" rx="12"/>
-  <text x="800" y="430" text-anchor="middle" font-family="Arial, sans-serif" font-size="48" font-weight="700" fill="#2C2C2C">Screenshot: Airline Dashboard</text>
-  <text x="800" y="490" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" fill="#666">Placeholder — replace with real screenshot</text>
-</svg>

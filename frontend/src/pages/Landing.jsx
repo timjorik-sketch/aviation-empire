@@ -3,6 +3,14 @@ import axios from 'axios';
 import './Auth.css';
 import './Landing.css';
 
+const GALLERY = [
+  { src: '/images/Apronempire_1.png', alt: 'Apron Empire — Live Flight Tracking Map', className: 'landing-gallery-big' },
+  { src: '/images/Apronempire_2.png', alt: 'Apron Empire — Fleet Management Overview' },
+  { src: '/images/Apronempire_3.png', alt: 'Apron Empire — Service Profile Configuration' },
+  { src: '/images/Apronempire_4.png', alt: 'Apron Empire — Route Planning Interface' },
+  { src: '/images/Apronempire_5.png', alt: 'Apron Empire — Airline Dashboard Statistics' },
+];
+
 const FEATURES = [
   {
     icon: '✈️',
@@ -94,8 +102,22 @@ export default function Landing({ onLogin, onSwitchToRegister, onForgotPassword 
           </p>
         </section>
 
+        <section className="landing-gallery" aria-label="Game screenshots">
+          {GALLERY.map(shot => (
+            <a
+              key={shot.src}
+              href={shot.src}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`landing-gallery-item ${shot.className || ''}`}
+            >
+              <img src={shot.src} alt={shot.alt} loading="lazy" />
+            </a>
+          ))}
+        </section>
+
         <section className="landing-features">
-          {FEATURES.slice(0, 2).map(f => (
+          {FEATURES.slice(0, 3).map(f => (
             <article key={f.title} className="landing-feature">
               <div className="landing-feature-icon" aria-hidden="true">{f.icon}</div>
               <h3>{f.title}</h3>
@@ -106,15 +128,14 @@ export default function Landing({ onLogin, onSwitchToRegister, onForgotPassword 
 
         <figure className="landing-screenshot">
           <img
-            src="/images/screenshot-fleet.svg"
-            alt="Screenshot: Fleet Overview"
+            src="/images/Apronempire_6.png"
+            alt="Apron Empire — Aircraft Purchase Marketplace"
             loading="lazy"
           />
         </figure>
-        <p className="landing-screenshot-caption">Fleet Overview — manage up to hundreds of aircraft</p>
 
         <section className="landing-features">
-          {FEATURES.slice(2, 4).map(f => (
+          {FEATURES.slice(3, 6).map(f => (
             <article key={f.title} className="landing-feature">
               <div className="landing-feature-icon" aria-hidden="true">{f.icon}</div>
               <h3>{f.title}</h3>
@@ -122,34 +143,6 @@ export default function Landing({ onLogin, onSwitchToRegister, onForgotPassword 
             </article>
           ))}
         </section>
-
-        <figure className="landing-screenshot">
-          <img
-            src="/images/screenshot-routes.svg"
-            alt="Screenshot: Route Map"
-            loading="lazy"
-          />
-        </figure>
-        <p className="landing-screenshot-caption">Route Map — plan your global network</p>
-
-        <section className="landing-features">
-          {FEATURES.slice(4, 6).map(f => (
-            <article key={f.title} className="landing-feature">
-              <div className="landing-feature-icon" aria-hidden="true">{f.icon}</div>
-              <h3>{f.title}</h3>
-              <p>{f.text}</p>
-            </article>
-          ))}
-        </section>
-
-        <figure className="landing-screenshot">
-          <img
-            src="/images/screenshot-dashboard.svg"
-            alt="Screenshot: Airline Dashboard"
-            loading="lazy"
-          />
-        </figure>
-        <p className="landing-screenshot-caption">Airline Dashboard — all key metrics at a glance</p>
 
         <section className="landing-cta">
           <h2>Ready for Takeoff?</h2>

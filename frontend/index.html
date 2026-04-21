@@ -3,11 +3,74 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Apron Empire</title>
+
+    <!-- Primary Meta Tags -->
+    <title>Apron Empire — Free Online Airline Management Game | Browser Simulation</title>
+    <meta name="title" content="Apron Empire — Free Online Airline Management Game | Browser Simulation" />
+    <meta name="description" content="Build and manage your own airline in this free browser-based simulation. Buy aircraft, plan routes to 2,200+ airports, hire crew, and compete globally. Play now — no download required." />
+    <meta name="keywords" content="airline game, aviation simulation, airline manager, browser game, flight simulation, airline tycoon, free airline game, multiplayer airline game, aircraft management, route planning game" />
+    <meta name="author" content="Apron Empire" />
+    <meta name="robots" content="index, follow" />
+    <meta name="language" content="English" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://aviation-empire.vercel.app/" />
+    <meta property="og:title" content="Apron Empire — Build Your Airline Empire" />
+    <meta property="og:description" content="The ultimate free browser-based airline management game. 60+ aircraft, 2,200+ airports, real-time economics. Play now!" />
+    <meta property="og:image" content="https://aviation-empire.vercel.app/images/og-image.svg" />
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:url" content="https://aviation-empire.vercel.app/" />
+    <meta property="twitter:title" content="Apron Empire — Build Your Airline Empire" />
+    <meta property="twitter:description" content="The ultimate free browser-based airline management game. 60+ aircraft, 2,200+ airports, real-time economics. Play now!" />
+    <meta property="twitter:image" content="https://aviation-empire.vercel.app/images/twitter-image.svg" />
+
+    <!-- Canonical URL -->
+    <link rel="canonical" href="https://aviation-empire.vercel.app/" />
+
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "VideoGame",
+      "name": "Apron Empire",
+      "description": "Free browser-based airline management simulation game. Build your fleet, plan routes, and compete globally.",
+      "genre": ["Simulation", "Strategy", "Management"],
+      "gamePlatform": ["Web Browser", "PC", "Mobile"],
+      "applicationCategory": "Game",
+      "operatingSystem": "Any",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      }
+    }
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- SEO fallback content (visible to crawlers before JS executes) -->
+      <noscript>
+        <h1>Apron Empire — Build Your Airline Empire</h1>
+        <p>Take control of your own airline. Buy aircraft, plan routes, manage crews, and compete with players worldwide in this realistic browser-based simulation.</p>
+        <h2>Build Your Fleet</h2>
+        <p>Start with a single aircraft and grow into a global carrier. Choose from 60+ real-world aircraft — from regional turboprops like the ATR 72 to wide-body giants like the Boeing 747-8 and Airbus A380.</p>
+        <h2>Plan Strategic Routes</h2>
+        <p>Connect 2,200+ real airports worldwide. Analyze market demand, set competitive prices, and discover the most profitable routes across short-haul, medium-haul, and intercontinental flights.</p>
+        <h2>Manage Your Operations</h2>
+        <p>Hire pilots and cabin crew. Configure cabin layouts. Design service profiles for Economy, Business, and First Class. Every decision impacts passenger satisfaction — and your bottom line.</p>
+        <h2>Real-Time Economics</h2>
+        <p>Dynamic market prices. Realistic fuel costs. Landing fees based on actual airport categories. Experience the challenges of running a profitable airline in a living, competitive world.</p>
+        <h2>Compete Globally</h2>
+        <p>Play against aviation enthusiasts from around the world. Climb the leaderboards. Form alliances. Dominate the skies.</p>
+        <h2>Play Anywhere, Anytime</h2>
+        <p>No download required. Apron Empire runs in your browser on desktop, tablet, and mobile. Your airline is always just a click away.</p>
+      </noscript>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

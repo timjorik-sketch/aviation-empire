@@ -286,6 +286,24 @@ async function initDatabase() {
       revoked BOOLEAN DEFAULT FALSE,
       note TEXT
     )`,
+    `CREATE TABLE IF NOT EXISTS password_resets (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT UNIQUE NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      used_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id)`,
+    `CREATE TABLE IF NOT EXISTS email_verifications (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT UNIQUE NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      used_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_email_verifications_user ON email_verifications(user_id)`,
   ];
   await runStatements(extraTables, 'extra tables');
 
@@ -312,6 +330,9 @@ async function initDatabase() {
     // users table
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS active_airline_id INTEGER REFERENCES airlines(id)`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_banned BOOLEAN DEFAULT FALSE`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ`,
     // flights table
     `ALTER TABLE flights ADD COLUMN IF NOT EXISTS service_profile_id INTEGER`,
     `ALTER TABLE flights ADD COLUMN IF NOT EXISTS booked_economy INTEGER DEFAULT 0`,

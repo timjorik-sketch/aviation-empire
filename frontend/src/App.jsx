@@ -20,7 +20,12 @@ class ErrorBoundary extends Component {
   }
 }
 import Login from './pages/Login';
+import Landing from './pages/Landing';
 import Register from './pages/Register';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
+import VerifyEmail from './pages/VerifyEmail';
+import VerifyEmailBanner from './components/VerifyEmailBanner.jsx';
 import FleetPage from './pages/FleetPage';
 import AircraftDetail from './pages/AircraftDetail';
 import AircraftMarketplace from './pages/AircraftMarketplace';
@@ -40,6 +45,7 @@ import AirportLink from './components/AirportLink.jsx';
 import RoutePreviewMap from './components/RoutePreviewMap.jsx';
 import Leaderboards from './pages/Leaderboards';
 import AdminPanel from './pages/AdminPanel';
+import AdminPlayers from './pages/AdminPlayers';
 import SatisfactionRating, { getSatColor, scoreToRating } from './components/SatisfactionRating.jsx';
 import './App.css';
 
@@ -435,6 +441,17 @@ function App() {
   const [airlines, setAirlines] = useState([]);
   const [activeAirline, setActiveAirline] = useState(null);
   const [showRegister, setShowRegister] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
+  const [resetToken, setResetToken] = useState(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('reset_token');
+  });
+  const [verifyToken, setVerifyToken] = useState(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('verify_token');
+  });
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showChangeModal, setShowChangeModal] = useState(false);
   const [currentPage, setCurrentPage] = useState('dashboard');
@@ -590,6 +607,28 @@ function App() {
     }).catch(() => {});
   }, [activeAirline?.id]);
 
+  // Email verification link — works whether the user is logged in or not.
+  if (verifyToken) {
+    return (
+      <VerifyEmail
+        token={verifyToken}
+        onDone={() => {
+          setVerifyToken(null);
+          if (typeof window !== 'undefined') {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('verify_token');
+            window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+          }
+          // If logged in, refresh cached user from storage so banner disappears
+          try {
+            const raw = localStorage.getItem('user');
+            if (raw) setUser(JSON.parse(raw));
+          } catch {}
+        }}
+      />
+    );
+  }
+
   // Loading state
   if (loading) {
     return (
@@ -606,10 +645,37 @@ function App() {
 
   // Auth screens
   if (!user) {
+    if (resetToken) {
+      return (
+        <ResetPassword
+          token={resetToken}
+          onDone={() => {
+            setResetToken(null);
+            // clear ?reset_token= from URL
+            if (typeof window !== 'undefined') {
+              const url = new URL(window.location.href);
+              url.searchParams.delete('reset_token');
+              window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+            }
+            setShowForgot(false);
+            setShowRegister(false);
+          }}
+        />
+      );
+    }
+    if (showForgot) {
+      return <ForgotPassword onBack={() => setShowForgot(false)} />;
+    }
     if (showRegister) {
       return <Register onRegister={handleRegister} onSwitchToLogin={() => setShowRegister(false)} />;
     }
-    return <Login onLogin={handleLogin} onSwitchToRegister={() => setShowRegister(true)} />;
+    return (
+      <Landing
+        onLogin={handleLogin}
+        onSwitchToRegister={() => setShowRegister(true)}
+        onForgotPassword={() => setShowForgot(true)}
+      />
+    );
   }
 
   const PAGE_LABELS = {
@@ -758,7 +824,10 @@ function App() {
     return <Leaderboards airline={activeAirline} onBack={() => setCurrentPage('dashboard')} />;
   }
   if (currentPage === 'admin') {
-    return <AdminPanel airline={activeAirline} onBack={() => setCurrentPage('dashboard')} />;
+    return <AdminPanel airline={activeAirline} onBack={() => setCurrentPage('dashboard')} onNavigate={setCurrentPage} />;
+  }
+  if (currentPage === 'admin-players') {
+    return <AdminPlayers airline={activeAirline} onBack={() => setCurrentPage('admin')} />;
   }
 
   const closeChangeModal = () => { setShowChangeModal(false); setShowCreateForm(false); };
@@ -969,6 +1038,8 @@ function App() {
             <button className="hp-btn-logout-strip" onClick={handleLogout}>Logout</button>
           </div>
         </div>
+
+        <VerifyEmailBanner user={user} />
 
         {/* ── Active airline content ── */}
         {activeAirline ? (

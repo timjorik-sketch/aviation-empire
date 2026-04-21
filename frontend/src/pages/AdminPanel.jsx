@@ -22,7 +22,7 @@ function statusBadge(row) {
   return { label: 'AVAILABLE', color: '#16a34a', bg: '#dcfce7' };
 }
 
-export default function AdminPanel({ airline, onBack }) {
+export default function AdminPanel({ airline, onBack, onNavigate }) {
   const [codes, setCodes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState('');
@@ -109,6 +109,19 @@ export default function AdminPanel({ airline, onBack }) {
 
       <div className="container" style={{ paddingTop: 24 }}>
         <TopBar onBack={onBack} balance={airline?.balance} />
+
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+          <button
+            onClick={() => onNavigate && onNavigate('admin-players')}
+            style={{
+              background: '#2C2C2C', color: '#fff', border: 'none',
+              padding: '10px 20px', borderRadius: 6, fontSize: 14,
+              fontWeight: 600, cursor: 'pointer'
+            }}
+          >
+            Player Management
+          </button>
+        </div>
 
         {error && (
           <div style={{ background: '#fee', color: '#c33', padding: '12px', borderRadius: 6, marginBottom: 16, border: '1px solid #fcc' }}>

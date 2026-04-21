@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1a2332"/>
+      <stop offset="1" stop-color="#2C2C2C"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="600" fill="url(#bg)"/>
+  <text x="600" y="285" text-anchor="middle" font-family="Arial, sans-serif" font-size="88" font-weight="800" fill="#ffffff">Apron Empire</text>
+  <text x="600" y="355" text-anchor="middle" font-family="Arial, sans-serif" font-size="32" fill="#c5d1e1">Build Your Airline Empire</text>
+  <text x="600" y="410" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" fill="#8aa0b8">Free browser-based airline management game</text>
+</svg>

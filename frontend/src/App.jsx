@@ -21,7 +21,6 @@ class ErrorBoundary extends Component {
 }
 import Login from './pages/Login';
 import Landing from './pages/Landing';
-import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import VerifyEmail from './pages/VerifyEmail';
@@ -440,7 +439,6 @@ function App() {
   const [user, setUser] = useState(null);
   const [airlines, setAirlines] = useState([]);
   const [activeAirline, setActiveAirline] = useState(null);
-  const [showRegister, setShowRegister] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
   const [resetToken, setResetToken] = useState(() => {
     if (typeof window === 'undefined') return null;
@@ -658,7 +656,6 @@ function App() {
               window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
             }
             setShowForgot(false);
-            setShowRegister(false);
           }}
         />
       );
@@ -666,13 +663,10 @@ function App() {
     if (showForgot) {
       return <ForgotPassword onBack={() => setShowForgot(false)} />;
     }
-    if (showRegister) {
-      return <Register onRegister={handleRegister} onSwitchToLogin={() => setShowRegister(false)} />;
-    }
     return (
       <Landing
         onLogin={handleLogin}
-        onSwitchToRegister={() => setShowRegister(true)}
+        onRegister={handleRegister}
         onForgotPassword={() => setShowForgot(true)}
       />
     );

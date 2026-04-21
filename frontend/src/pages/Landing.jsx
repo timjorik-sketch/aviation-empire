@@ -48,14 +48,12 @@ const FEATURES = [
   },
 ];
 
-export default function Landing({ onLogin, onSwitchToRegister, onForgotPassword }) {
+function LoginForm({ onLogin, onForgotPassword, onSwitchToRegister }) {
   const [formData, setFormData] = useState({ username: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  };
+  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -76,6 +74,158 @@ export default function Landing({ onLogin, onSwitchToRegister, onForgotPassword 
     }
   };
 
+  return (
+    <>
+      <h2 className="landing-auth-title">Welcome Back</h2>
+      <p className="landing-auth-subtitle">Log in to continue your airline</p>
+
+      {error && <div className="error-message">{error}</div>}
+
+      <form onSubmit={handleSubmit}>
+        <div className="form-group">
+          <label>Username or Email</label>
+          <input
+            type="text" name="username" value={formData.username}
+            onChange={handleChange} required disabled={loading}
+            autoComplete="username"
+          />
+        </div>
+
+        <div className="form-group">
+          <label>Password</label>
+          <input
+            type="password" name="password" value={formData.password}
+            onChange={handleChange} required disabled={loading}
+            autoComplete="current-password"
+          />
+        </div>
+
+        <button type="submit" className="btn-primary" disabled={loading}>
+          {loading ? 'Logging in…' : 'Log In'}
+        </button>
+      </form>
+
+      <button type="button" onClick={onForgotPassword} className="landing-forgot">
+        Forgot password?
+      </button>
+
+      <p className="switch-auth">
+        Don't have an account?{' '}
+        <button onClick={onSwitchToRegister} className="link-button">Create one</button>
+      </p>
+    </>
+  );
+}
+
+function RegisterForm({ onRegister, onSwitchToLogin }) {
+  const [formData, setFormData] = useState({
+    email: '', username: '', password: '', confirmPassword: '', inviteCode: ''
+  });
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (formData.password !== formData.confirmPassword) {
+      setError('Passwords do not match'); return;
+    }
+    if (formData.password.length < 6) {
+      setError('Password must be at least 6 characters'); return;
+    }
+    setLoading(true);
+    try {
+      const response = await axios.post(
+        `${import.meta.env.VITE_API_URL || ''}/api/auth/register`,
+        {
+          email: formData.email,
+          username: formData.username,
+          password: formData.password,
+          invite_code: formData.inviteCode.trim().toUpperCase(),
+        }
+      );
+      localStorage.setItem('token', response.data.token);
+      localStorage.setItem('user', JSON.stringify(response.data.user));
+      onRegister(response.data.user);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Registration failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <h2 className="landing-auth-title">Create Account</h2>
+      <p className="landing-auth-subtitle">Start building your airline empire</p>
+
+      {error && <div className="error-message">{error}</div>}
+
+      <form onSubmit={handleSubmit}>
+        <div className="form-group">
+          <label>Email</label>
+          <input
+            type="email" name="email" value={formData.email}
+            onChange={handleChange} required disabled={loading}
+            autoComplete="email"
+          />
+        </div>
+
+        <div className="form-group">
+          <label>Username (3–20 characters)</label>
+          <input
+            type="text" name="username" value={formData.username}
+            onChange={handleChange} minLength={3} maxLength={20}
+            required disabled={loading} autoComplete="username"
+          />
+        </div>
+
+        <div className="form-group">
+          <label>Password (min 6 characters)</label>
+          <input
+            type="password" name="password" value={formData.password}
+            onChange={handleChange} minLength={6} required disabled={loading}
+            autoComplete="new-password"
+          />
+        </div>
+
+        <div className="form-group">
+          <label>Confirm Password</label>
+          <input
+            type="password" name="confirmPassword" value={formData.confirmPassword}
+            onChange={handleChange} required disabled={loading}
+            autoComplete="new-password"
+          />
+        </div>
+
+        <div className="form-group">
+          <label>Invite Code</label>
+          <input
+            type="text" name="inviteCode" value={formData.inviteCode}
+            onChange={handleChange} required disabled={loading}
+            placeholder="e.g. A3F9K2XP"
+            autoCapitalize="characters"
+            style={{ letterSpacing: '0.05em', textTransform: 'uppercase' }}
+          />
+        </div>
+
+        <button type="submit" className="btn-primary" disabled={loading}>
+          {loading ? 'Creating account…' : 'Register'}
+        </button>
+      </form>
+
+      <p className="switch-auth">
+        Already have an account?{' '}
+        <button onClick={onSwitchToLogin} className="link-button">Log in</button>
+      </p>
+    </>
+  );
+}
+
+export default function Landing({ onLogin, onRegister, onForgotPassword }) {
+  const [mode, setMode] = useState('login');
 
   return (
     <div className="landing-root">
@@ -111,7 +261,14 @@ export default function Landing({ onLogin, onSwitchToRegister, onForgotPassword 
             Join thousands of players building their aviation empires.
             Create your free account and start flying today.
           </p>
-          <button className="landing-cta-btn" onClick={onSwitchToRegister}>
+          <button
+            className="landing-cta-btn"
+            onClick={() => {
+              setMode('register');
+              const el = document.querySelector('.landing-auth');
+              if (el) el.scrollIntoView({ behavior: 'smooth' });
+            }}
+          >
             Create Free Account
           </button>
         </section>
@@ -119,61 +276,22 @@ export default function Landing({ onLogin, onSwitchToRegister, onForgotPassword 
         <p className="landing-footer">© Apron Empire — Free to play, no download required.</p>
       </main>
 
-      {/* ── RIGHT: Login ─────────────────────────────────────────────────── */}
+      {/* ── RIGHT: Auth (login / register toggle) ────────────────────────── */}
       <aside className="landing-auth">
         <div className="landing-auth-card">
           <div className="landing-auth-logo">Apron Empire</div>
-          <h2 className="landing-auth-title">Welcome Back</h2>
-          <p className="landing-auth-subtitle">Log in to continue your airline</p>
-
-          {error && <div className="error-message">{error}</div>}
-
-          <form onSubmit={handleSubmit}>
-            <div className="form-group">
-              <label>Username or Email</label>
-              <input
-                type="text"
-                name="username"
-                value={formData.username}
-                onChange={handleChange}
-                required
-                disabled={loading}
-                autoComplete="username"
-              />
-            </div>
-
-            <div className="form-group">
-              <label>Password</label>
-              <input
-                type="password"
-                name="password"
-                value={formData.password}
-                onChange={handleChange}
-                required
-                disabled={loading}
-                autoComplete="current-password"
-              />
-            </div>
-
-            <button type="submit" className="btn-primary" disabled={loading}>
-              {loading ? 'Logging in…' : 'Log In'}
-            </button>
-          </form>
-
-          <button
-            type="button"
-            onClick={onForgotPassword}
-            className="landing-forgot"
-          >
-            Forgot password?
-          </button>
-
-          <p className="switch-auth">
-            Don't have an account?{' '}
-            <button onClick={onSwitchToRegister} className="link-button">
-              Create one
-            </button>
-          </p>
+          {mode === 'login' ? (
+            <LoginForm
+              onLogin={onLogin}
+              onForgotPassword={onForgotPassword}
+              onSwitchToRegister={() => setMode('register')}
+            />
+          ) : (
+            <RegisterForm
+              onRegister={onRegister}
+              onSwitchToLogin={() => setMode('login')}
+            />
+          )}
         </div>
       </aside>
     </div>

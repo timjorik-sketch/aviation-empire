@@ -3,45 +3,48 @@ import axios from 'axios';
 import './Auth.css';
 import './Landing.css';
 
-const GALLERY = [
-  { src: '/images/Apronempire_1.png', alt: 'Apron Empire — Live Flight Tracking Map' },
-  { src: '/images/Apronempire_2.png', alt: 'Apron Empire — Fleet Management Overview' },
-  { src: '/images/Apronempire_3.png', alt: 'Apron Empire — Service Profile Configuration' },
-  { src: '/images/Apronempire_4.png', alt: 'Apron Empire — Route Planning Interface' },
-  { src: '/images/Apronempire_5.png', alt: 'Apron Empire — Airline Dashboard Statistics' },
-  { src: '/images/Apronempire_6.png', alt: 'Apron Empire — Aircraft Purchase Marketplace' },
-];
-
 const FEATURES = [
   {
     icon: '✈️',
     title: 'Build Your Fleet',
     text: 'Start with a single aircraft and grow into a global carrier. Choose from 60+ real-world aircraft — from regional turboprops like the ATR 72 to wide-body giants like the Boeing 747-8 and Airbus A380.',
-  },
-  {
-    icon: '🗺️',
-    title: 'Plan Strategic Routes',
-    text: 'Connect 2,200+ real airports worldwide. Analyze market demand, set competitive prices, and discover the most profitable routes across short-haul, medium-haul, and intercontinental flights.',
+    image: '/images/Apronempire_4.png',
+    alt: 'Apron Empire — Fleet overview',
   },
   {
     icon: '👨‍✈️',
     title: 'Manage Your Operations',
     text: 'Hire pilots and cabin crew. Configure cabin layouts. Design service profiles for Economy, Business, and First Class. Every decision impacts passenger satisfaction — and your bottom line.',
+    image: '/images/Apronempire_2.png',
+    alt: 'Apron Empire — Operations and crew management',
+  },
+  {
+    icon: '🗺️',
+    title: 'Plan Strategic Routes',
+    text: 'Connect 2,200+ real airports worldwide. Analyze market demand, set competitive prices, and discover the most profitable routes across short-haul, medium-haul, and intercontinental flights.',
+    image: '/images/Apronempire_3.png',
+    alt: 'Apron Empire — Route planning',
   },
   {
     icon: '📊',
     title: 'Real-Time Economics',
     text: 'Dynamic market prices. Realistic fuel costs. Landing fees based on actual airport categories. Experience the challenges of running a profitable airline in a living, competitive world.',
+    image: '/images/Apronempire_1.png',
+    alt: 'Apron Empire — Live flight tracking map',
   },
   {
     icon: '🌍',
     title: 'Compete Globally',
     text: 'Play against aviation enthusiasts from around the world. Climb the leaderboards. Form alliances. Dominate the skies.',
+    image: '/images/Apronempire_5.png',
+    alt: 'Apron Empire — Airline dashboard statistics',
   },
   {
     icon: '🎮',
     title: 'Play Anywhere, Anytime',
     text: 'No download required. Apron Empire runs in your browser on desktop, tablet, and mobile. Your airline is always just a click away.',
+    image: '/images/Apronempire_6.png',
+    alt: 'Apron Empire — Aircraft marketplace',
   },
 ];
 
@@ -91,36 +94,17 @@ export default function Landing({ onLogin, onSwitchToRegister, onForgotPassword 
           </p>
         </section>
 
-        <section className="landing-gallery" aria-label="Game screenshots">
-          {GALLERY.map(shot => (
-            <a
-              key={shot.src}
-              href={shot.src}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="landing-gallery-item"
-            >
-              <img src={shot.src} alt={shot.alt} loading="lazy" />
-            </a>
-          ))}
-        </section>
-
-        <section className="landing-features">
-          {FEATURES.slice(0, 3).map(f => (
-            <article key={f.title} className="landing-feature">
-              <div className="landing-feature-icon" aria-hidden="true">{f.icon}</div>
-              <h3>{f.title}</h3>
-              <p>{f.text}</p>
-            </article>
-          ))}
-        </section>
-
-        <section className="landing-features">
-          {FEATURES.slice(3, 6).map(f => (
-            <article key={f.title} className="landing-feature">
-              <div className="landing-feature-icon" aria-hidden="true">{f.icon}</div>
-              <h3>{f.title}</h3>
-              <p>{f.text}</p>
+        <section className="landing-featrows" aria-label="Features">
+          {FEATURES.map(f => (
+            <article key={f.title} className="landing-featrow">
+              <div className="landing-featrow-text">
+                <div className="landing-featrow-icon" aria-hidden="true">{f.icon}</div>
+                <h3>{f.title}</h3>
+                <p>{f.text}</p>
+              </div>
+              <div className="landing-featrow-media">
+                <img src={f.image} alt={f.alt} loading="lazy" />
+              </div>
             </article>
           ))}
         </section>

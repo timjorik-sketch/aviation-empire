@@ -1,22 +1,25 @@
 /* ── LANDING PAGE ──────────────────────────────────────────────────────────── */
 
-.landing-root {
+.landing-page {
   min-height: 100vh;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
   background: #F5F5F5;
 }
 
-/* Left (marketing) column ── scrollable */
+.landing-root {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: #F5F5F5;
+  align-items: start;
+}
+
+/* Left (marketing) column — scrolls with the page */
 .landing-marketing {
   background: linear-gradient(180deg, #F5F5F5 0%, #e9ecf1 100%);
-  padding: 64px 56px;
-  overflow-y: auto;
-  max-height: 100vh;
+  padding: 56px 56px 80px;
   color: #2C2C2C;
 }
 
-/* Right (login) column ── fixed, centered */
+/* Right (login) column — sticks below the header while you scroll */
 .landing-auth {
   background: #1a2332;
   display: flex;
@@ -25,7 +28,8 @@
   padding: 40px;
   position: sticky;
   top: 0;
-  height: 100vh;
+  min-height: 100vh;
+  align-self: start;
 }
 
 .landing-auth-card {
@@ -235,6 +239,7 @@
   .landing-auth {
     position: static;
     height: auto;
+    min-height: 0;
     padding: 32px 20px;
     order: -1;
   }
@@ -245,8 +250,6 @@
 
   .landing-marketing {
     padding: 48px 24px;
-    max-height: none;
-    overflow-y: visible;
   }
 
   .landing-h1 {

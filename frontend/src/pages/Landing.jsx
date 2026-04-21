@@ -70,12 +70,24 @@ export default function Landing({ onLogin, onSwitchToRegister, onForgotPassword 
   };
 
   return (
-    <div className="landing-root">
+    <div className="landing-page">
+      {/* ── Header image ─────────────────────────────────────────────────── */}
+      <div
+        className="page-hero"
+        style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.4),rgba(0,0,0,0.6)),url('/header-images/Headerimage_Home.png')" }}
+      >
+        <div className="page-hero-overlay">
+          <h1>Apron Empire</h1>
+          <p>Build Your Airline Empire</p>
+        </div>
+      </div>
+
+      {/* ── Two-column layout below ──────────────────────────────────────── */}
+      <div className="landing-root">
       {/* ── LEFT: Marketing ──────────────────────────────────────────────── */}
       <main className="landing-marketing">
         <section className="landing-hero">
           <span className="landing-eyebrow">Airline Management Simulation</span>
-          <h1 className="landing-h1">Build Your Airline Empire</h1>
           <p className="landing-sub">
             Take control of your own airline. Buy aircraft, plan routes, manage crews,
             and compete with players worldwide in this realistic browser-based simulation.
@@ -210,6 +222,7 @@ export default function Landing({ onLogin, onSwitchToRegister, onForgotPassword 
           </p>
         </div>
       </aside>
+      </div>
     </div>
   );
 }

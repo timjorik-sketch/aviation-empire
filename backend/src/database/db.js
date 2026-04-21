@@ -304,6 +304,13 @@ async function initDatabase() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
     `CREATE INDEX IF NOT EXISTS idx_email_verifications_user ON email_verifications(user_id)`,
+    `CREATE TABLE IF NOT EXISTS interest_clicks (
+      id SERIAL PRIMARY KEY,
+      ip_hash TEXT,
+      user_agent TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_interest_clicks_ip_time ON interest_clicks(ip_hash, created_at)`,
   ];
   await runStatements(extraTables, 'extra tables');
 

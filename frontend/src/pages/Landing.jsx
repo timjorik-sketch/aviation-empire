@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import axios from 'axios';
 import './Auth.css';
 import './Landing.css';
+
+const INTEREST_KEY = 'apronInterestShown';
 
 const FEATURES = [
   {
@@ -261,6 +263,37 @@ function RegisterForm({ onRegister, onSwitchToLogin }) {
 
 export default function Landing({ onLogin, onRegister, onForgotPassword }) {
   const [mode, setMode] = useState('login');
+  const [interestCount, setInterestCount] = useState(null);
+  const [interestClicked, setInterestClicked] = useState(() => {
+    if (typeof localStorage === 'undefined') return false;
+    return localStorage.getItem(INTEREST_KEY) === '1';
+  });
+  const [interestLoading, setInterestLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    axios.get(`${import.meta.env.VITE_API_URL || ''}/api/interest/count`)
+      .then(r => { if (!cancelled) setInterestCount(r.data?.total ?? 0); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleShowInterest = async () => {
+    if (interestClicked || interestLoading) return;
+    setInterestLoading(true);
+    try {
+      const res = await axios.post(`${import.meta.env.VITE_API_URL || ''}/api/interest`);
+      setInterestCount(res.data?.total ?? (interestCount ?? 0) + 1);
+      setInterestClicked(true);
+      try { localStorage.setItem(INTEREST_KEY, '1'); } catch {}
+    } catch {
+      // Still mark as clicked locally so they don't hammer it; count just stays
+      setInterestClicked(true);
+      try { localStorage.setItem(INTEREST_KEY, '1'); } catch {}
+    } finally {
+      setInterestLoading(false);
+    }
+  };
 
   return (
     <div className="landing-root">
@@ -293,19 +326,38 @@ export default function Landing({ onLogin, onRegister, onForgotPassword }) {
         <section className="landing-cta">
           <h2>Ready for Takeoff?</h2>
           <p>
-            Join thousands of players building their aviation empires.
-            Create your free account and start flying today.
+            We're still in closed beta, but the more players who show interest,
+            the faster we can open the gates. Give us a single click and help
+            push Apron Empire to public launch!
           </p>
-          <button
-            className="landing-cta-btn"
-            onClick={() => {
-              setMode('register');
-              const el = document.querySelector('.landing-auth');
-              if (el) el.scrollIntoView({ behavior: 'smooth' });
-            }}
-          >
-            Create Free Account
-          </button>
+
+          <div className="landing-cta-actions">
+            <button
+              className={`landing-interest-btn${interestClicked ? ' landing-interest-btn--done' : ''}`}
+              onClick={handleShowInterest}
+              disabled={interestClicked || interestLoading}
+            >
+              {interestClicked ? '✓ Thanks for your interest!' :
+               interestLoading ? 'Sending…' : '⭐ Show Your Interest'}
+            </button>
+
+            <button
+              className="landing-cta-btn"
+              onClick={() => {
+                setMode('register');
+                const el = document.querySelector('.landing-auth');
+                if (el) el.scrollIntoView({ behavior: 'smooth' });
+              }}
+            >
+              Create Account
+            </button>
+          </div>
+
+          {interestCount !== null && interestCount > 0 && (
+            <p className="landing-interest-count">
+              <strong>{interestCount.toLocaleString('en-US')}</strong> {interestCount === 1 ? 'person has' : 'people have'} already shown interest.
+            </p>
+          )}
         </section>
 
         <p className="landing-footer">© Apron Empire — Free to play, no download required.</p>

@@ -231,6 +231,57 @@
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
 }
 
+.landing-cta-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.landing-interest-btn {
+  background: #f59e0b;
+  color: #1a2332;
+  border: none;
+  padding: 14px 24px;
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s, background 0.2s;
+}
+
+.landing-interest-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(245, 158, 11, 0.35);
+  background: #fbbf24;
+}
+
+.landing-interest-btn:disabled {
+  cursor: default;
+}
+
+.landing-interest-btn--done {
+  background: #16a34a;
+  color: #ffffff;
+}
+
+.landing-interest-btn--done:hover {
+  background: #16a34a;
+  transform: none;
+  box-shadow: none;
+}
+
+.landing-interest-count {
+  margin-top: 16px;
+  font-size: 14px;
+  color: #c5d1e1;
+}
+
+.landing-interest-count strong {
+  color: #ffffff;
+}
+
 .landing-footer {
   font-size: 12px;
   color: #888;

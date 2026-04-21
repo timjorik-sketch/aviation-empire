@@ -29,6 +29,7 @@ export default function AdminPanel({ airline, onBack, onNavigate }) {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
   const [copiedId, setCopiedId] = useState(null);
+  const [interestStats, setInterestStats] = useState(null);
 
   const fetchCodes = useCallback(async () => {
     const token = localStorage.getItem('token');
@@ -48,6 +49,16 @@ export default function AdminPanel({ airline, onBack, onNavigate }) {
   }, []);
 
   useEffect(() => { fetchCodes(); }, [fetchCodes]);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    fetch(`${API_URL}/api/admin/interest-stats`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(r => r.json())
+      .then(d => setInterestStats(d))
+      .catch(() => {});
+  }, []);
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -122,6 +133,33 @@ export default function AdminPanel({ airline, onBack, onNavigate }) {
             Player Management
           </button>
         </div>
+
+        {interestStats && (
+          <div style={{
+            background: '#fff', borderRadius: 8, padding: 20, marginBottom: 16,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+            display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 16,
+          }}>
+            <div>
+              <div style={{ fontSize: 12, color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Interest (total)</div>
+              <div style={{ fontSize: 32, fontWeight: 800, color: '#2C2C2C', marginTop: 4 }}>
+                {interestStats.total?.toLocaleString('en-US') ?? 0}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Last 7 days</div>
+              <div style={{ fontSize: 32, fontWeight: 800, color: '#2C2C2C', marginTop: 4 }}>
+                {interestStats.last_7d?.toLocaleString('en-US') ?? 0}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: '#666', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Last 24 hours</div>
+              <div style={{ fontSize: 32, fontWeight: 800, color: '#2C2C2C', marginTop: 4 }}>
+                {interestStats.last_24h?.toLocaleString('en-US') ?? 0}
+              </div>
+            </div>
+          </div>
+        )}
 
         {error && (
           <div style={{ background: '#fee', color: '#c33', padding: '12px', borderRadius: 6, marginBottom: 16, border: '1px solid #fcc' }}>

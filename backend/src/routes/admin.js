@@ -64,6 +64,23 @@ router.post('/invite-codes', async (req, res) => {
   }
 });
 
+// ── INTEREST COUNTER ────────────────────────────────────────────────────────
+router.get('/interest-stats', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days')::int AS last_7d,
+        COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours')::int AS last_24h
+      FROM interest_clicks
+    `);
+    res.json(result.rows[0]);
+  } catch (e) {
+    console.error('Interest stats error:', e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // ── PLAYER MANAGEMENT ───────────────────────────────────────────────────────
 
 // List / search players (paginated, 15 per page)

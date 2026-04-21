@@ -22,6 +22,7 @@ import expansionsRoutes from './routes/expansions.js';
 import marketAnalysesRouter, { startMarketAnalysesProcessor } from './routes/marketAnalyses.js';
 import leaderboardsRoutes from './routes/leaderboards.js';
 import adminRoutes from './routes/admin.js';
+import interestRoutes from './routes/interest.js';
 
 dotenv.config();
 
@@ -50,6 +51,7 @@ app.use('/api/expansions', expansionsRoutes);
 app.use('/api/market-analyses', marketAnalysesRouter);
 app.use('/api/leaderboards', leaderboardsRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/interest', interestRoutes);
 
 // Alias routes for convenience
 app.use('/api/fleet', aircraftRoutes);

@@ -63,6 +63,25 @@
   font-size: 14px;
 }
 
+.landing-beta-notice {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #7c2d12;
+  border-radius: 8px;
+  padding: 16px 18px;
+  margin-bottom: 20px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.landing-beta-notice p {
+  margin: 0;
+}
+
+.landing-beta-notice p + p {
+  margin-top: 10px;
+}
+
 .landing-forgot {
   display: block;
   text-align: right;

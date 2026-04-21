@@ -118,6 +118,7 @@ function LoginForm({ onLogin, onForgotPassword, onSwitchToRegister }) {
 }
 
 function RegisterForm({ onRegister, onSwitchToLogin }) {
+  const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
     email: '', username: '', password: '', confirmPassword: '', inviteCode: ''
   });
@@ -155,6 +156,36 @@ function RegisterForm({ onRegister, onSwitchToLogin }) {
       setLoading(false);
     }
   };
+
+  if (!showForm) {
+    return (
+      <>
+        <h2 className="landing-auth-title">Closed Beta</h2>
+        <div className="landing-beta-notice">
+          <p>
+            Apron Empire is currently in closed beta and playable by invitation only.
+          </p>
+          <p>
+            Thanks for stopping by — we're rolling out invites in waves, so please
+            check back soon!
+          </p>
+        </div>
+
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={() => setShowForm(true)}
+        >
+          I have an invite code
+        </button>
+
+        <p className="switch-auth">
+          Already have an account?{' '}
+          <button onClick={onSwitchToLogin} className="link-button">Log in</button>
+        </p>
+      </>
+    );
+  }
 
   return (
     <>
@@ -217,6 +248,10 @@ function RegisterForm({ onRegister, onSwitchToLogin }) {
       </form>
 
       <p className="switch-auth">
+        <button onClick={() => setShowForm(false)} className="link-button">
+          ← Back
+        </button>
+        {' · '}
         Already have an account?{' '}
         <button onClick={onSwitchToLogin} className="link-button">Log in</button>
       </p>

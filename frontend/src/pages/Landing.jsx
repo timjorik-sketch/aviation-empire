@@ -76,10 +76,6 @@ export default function Landing({ onLogin, onSwitchToRegister, onForgotPassword 
     }
   };
 
-  const scrollToTop = () => {
-    const el = document.querySelector('.landing-auth');
-    if (el) el.scrollIntoView({ behavior: 'smooth' });
-  };
 
   return (
     <div className="landing-root">
@@ -115,7 +111,7 @@ export default function Landing({ onLogin, onSwitchToRegister, onForgotPassword 
             Join thousands of players building their aviation empires.
             Create your free account and start flying today.
           </p>
-          <button className="landing-cta-btn" onClick={scrollToTop}>
+          <button className="landing-cta-btn" onClick={onSwitchToRegister}>
             Create Free Account
           </button>
         </section>

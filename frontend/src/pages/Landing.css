@@ -160,24 +160,16 @@
 }
 
 .landing-featrow-media {
-  background: #F5F5F5;
   border-radius: 8px;
   overflow: hidden;
-  aspect-ratio: 16 / 10;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8px;
+  background: #F5F5F5;
+  line-height: 0;
 }
 
 .landing-featrow-media img {
-  max-width: 100%;
-  max-height: 100%;
-  width: auto;
+  width: 100%;
   height: auto;
-  object-fit: contain;
   display: block;
-  border-radius: 4px;
 }
 
 /* CTA */
@@ -260,10 +252,6 @@
 
   .landing-featrow {
     grid-template-columns: 1fr;
-  }
-
-  .landing-featrow-media {
-    aspect-ratio: 16 / 9;
   }
 
   .landing-cta {

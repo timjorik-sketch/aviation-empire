@@ -78,9 +78,6 @@ function LoginForm({ onLogin, onForgotPassword, onSwitchToRegister }) {
 
   return (
     <>
-      <h2 className="landing-auth-title">Welcome Back</h2>
-      <p className="landing-auth-subtitle">Log in to continue your airline</p>
-
       {error && <div className="error-message">{error}</div>}
 
       <form onSubmit={handleSubmit}>

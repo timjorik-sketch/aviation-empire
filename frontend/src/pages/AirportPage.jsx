@@ -376,118 +376,88 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
             </div>
           </div>
 
-          {/* ── Map + Airport Information row ── */}
-          <div className="ap-map-row">
+          {/* ── Two-column layout: 40% sidebar / 60% boards ── */}
+          <div className="ap-layout-grid">
 
-            {/* Map */}
-            {airport.latitude != null && airport.longitude != null && (
-              <div className="ap-map-col">
-                <AirportMap
-                  lat={airport.latitude}
-                  lng={airport.longitude}
-                  airportName={airport.name}
-                  iataCode={airport.iata_code}
-                />
-              </div>
-            )}
+            {/* Left column 40%: map + info + airlines + your airline */}
+            <div className="ap-left-col">
 
-            {/* Airport Information card */}
-            <div className="ap-sidebar-card ap-info-col">
-              <div className="ap-sidebar-title">Airport Information</div>
-              <table className="ap-info-table">
-                <tbody>
-                  <tr>
-                    <td className="ap-it-label">Category</td>
-                    <td className="ap-it-val">
-                      {airport.category
-                        ? <span className="ap-cat-badge">Cat {airport.category} – {CATEGORY_LABELS[airport.category]}</span>
-                        : '—'}
-                    </td>
-                  </tr>
-                  <tr>
-                    <td className="ap-it-label">Continent</td>
-                    <td className="ap-it-val">{airport.continent || '—'}</td>
-                  </tr>
-                  <tr>
-                    <td className="ap-it-label">Country</td>
-                    <td className="ap-it-val">{airport.country || '—'}</td>
-                  </tr>
-                  <tr>
-                    <td className="ap-it-label">Runway</td>
-                    <td className="ap-it-val ap-it-runway">
-                      <span>{formatRunway(airport.runway_length_m)}</span>
-                      <button className="ap-capable-link" onClick={openCapableModal}>
-                        Compatible Aircraft ↗
-                      </button>
-                    </td>
-                  </tr>
-                  <tr className="ap-it-section-row">
-                    <td colSpan={3} className="ap-it-section-label">Personnel</td>
-                  </tr>
-                  <tr>
-                    <td className="ap-it-label">Ground Staff</td>
-                    <td className="ap-it-val">
-                      {airport.category
-                        ? <>{GROUND_STAFF_BY_CAT[airport.category] ?? '—'} <span style={{ color: '#999', fontSize: '0.78rem' }}>employees</span></>
-                        : '—'}
-                    </td>
-                  </tr>
-                  <tr className="ap-it-section-row">
-                    <td className="ap-it-section-label">Fees</td>
-                    <td className="ap-it-section-col-hd">Landing</td>
-                    <td className="ap-it-section-col-hd">Ground</td>
-                  </tr>
-                  <tr>
-                    <td className="ap-it-label">Light</td>
-                    <td className="ap-it-fee">{formatFee(airport.landing_fee_light)}</td>
-                    <td className="ap-it-fee">{formatFee(airport.ground_handling_fee_light ?? airport.ground_handling_fee)}</td>
-                  </tr>
-                  <tr>
-                    <td className="ap-it-label">Medium</td>
-                    <td className="ap-it-fee">{formatFee(airport.landing_fee_medium)}</td>
-                    <td className="ap-it-fee">{formatFee(airport.ground_handling_fee_medium ?? airport.ground_handling_fee)}</td>
-                  </tr>
-                  <tr className="ap-it-last">
-                    <td className="ap-it-label">Heavy</td>
-                    <td className="ap-it-fee">{formatFee(airport.landing_fee_heavy)}</td>
-                    <td className="ap-it-fee">{formatFee(airport.ground_handling_fee_heavy ?? airport.ground_handling_fee)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-          </div>
-
-          {/* ── Main content: boards (left) + airlines sidebar (right) ── */}
-          <div className="ap-main">
-
-            {/* Boards column */}
-            <div className="ap-boards-col">
-
-              {/* Departures */}
-              <div className="ap-board-wrap">
-                <div className="ap-board-titlebar dep">
-                  <img src="/icon/icon_departures.png" alt="" style={{ width: 18, height: 18, objectFit: 'contain', flexShrink: 0 }} />
-                  <span className="ap-board-title">DEPARTURES</span>
-                  <span className="ap-board-ct">{departures.length} shown</span>
+              {/* Satellite map */}
+              {airport.latitude != null && airport.longitude != null && (
+                <div className="ap-map-col">
+                  <AirportMap
+                    lat={airport.latitude}
+                    lng={airport.longitude}
+                    airportName={airport.name}
+                    iataCode={airport.iata_code}
+                  />
                 </div>
-                <BoardTable type="departures" flights={departures} now={now} onNavigateToAirport={onNavigateToAirport} onAirlineClick={setProfilePopupCode} />
+              )}
+
+              {/* Airport Information card */}
+              <div className="ap-sidebar-card">
+                <div className="ap-sidebar-title">Airport Information</div>
+                <table className="ap-info-table">
+                  <tbody>
+                    <tr>
+                      <td className="ap-it-label">Category</td>
+                      <td className="ap-it-val">
+                        {airport.category
+                          ? <span className="ap-cat-badge">Cat {airport.category} – {CATEGORY_LABELS[airport.category]}</span>
+                          : '—'}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="ap-it-label">Continent</td>
+                      <td className="ap-it-val">{airport.continent || '—'}</td>
+                    </tr>
+                    <tr>
+                      <td className="ap-it-label">Country</td>
+                      <td className="ap-it-val">{airport.country || '—'}</td>
+                    </tr>
+                    <tr>
+                      <td className="ap-it-label">Runway</td>
+                      <td className="ap-it-val ap-it-runway">
+                        <span>{formatRunway(airport.runway_length_m)}</span>
+                        <button className="ap-capable-link" onClick={openCapableModal}>
+                          Compatible Aircraft ↗
+                        </button>
+                      </td>
+                    </tr>
+                    <tr className="ap-it-section-row">
+                      <td colSpan={3} className="ap-it-section-label">Personnel</td>
+                    </tr>
+                    <tr>
+                      <td className="ap-it-label">Ground Staff</td>
+                      <td className="ap-it-val">
+                        {airport.category
+                          ? <>{GROUND_STAFF_BY_CAT[airport.category] ?? '—'} <span style={{ color: '#999', fontSize: '0.78rem' }}>employees</span></>
+                          : '—'}
+                      </td>
+                    </tr>
+                    <tr className="ap-it-section-row">
+                      <td className="ap-it-section-label">Fees</td>
+                      <td className="ap-it-section-col-hd">Landing</td>
+                      <td className="ap-it-section-col-hd">Ground</td>
+                    </tr>
+                    <tr>
+                      <td className="ap-it-label">Light</td>
+                      <td className="ap-it-fee">{formatFee(airport.landing_fee_light)}</td>
+                      <td className="ap-it-fee">{formatFee(airport.ground_handling_fee_light ?? airport.ground_handling_fee)}</td>
+                    </tr>
+                    <tr>
+                      <td className="ap-it-label">Medium</td>
+                      <td className="ap-it-fee">{formatFee(airport.landing_fee_medium)}</td>
+                      <td className="ap-it-fee">{formatFee(airport.ground_handling_fee_medium ?? airport.ground_handling_fee)}</td>
+                    </tr>
+                    <tr className="ap-it-last">
+                      <td className="ap-it-label">Heavy</td>
+                      <td className="ap-it-fee">{formatFee(airport.landing_fee_heavy)}</td>
+                      <td className="ap-it-fee">{formatFee(airport.ground_handling_fee_heavy ?? airport.ground_handling_fee)}</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
-
-              {/* Arrivals */}
-              <div className="ap-board-wrap" style={{ marginTop: '1.25rem' }}>
-                <div className="ap-board-titlebar arr">
-                  <img src="/icon/icon_landing.png" alt="" style={{ width: 18, height: 18, objectFit: 'contain', flexShrink: 0 }} />
-                  <span className="ap-board-title">ARRIVALS</span>
-                  <span className="ap-board-ct">{arrivals.length} shown</span>
-                </div>
-                <BoardTable type="arrivals" flights={arrivals} now={now} onNavigateToAirport={onNavigateToAirport} onAirlineClick={setProfilePopupCode} />
-              </div>
-
-            </div>
-
-            {/* Sidebar */}
-            <div className="ap-sidebar-col">
 
               {/* Airlines Operating card */}
               <div className="ap-sidebar-card">
@@ -512,7 +482,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
 
               {/* Your Airline */}
               {airline && destStatus && destStatus.is_opened && (
-                <div className="ap-sidebar-card" style={{ marginTop: '1rem' }}>
+                <div className="ap-sidebar-card">
                   <div className="ap-sidebar-title">Your Airline</div>
                   <DestinationStatusCard
                     destStatus={destStatus}
@@ -520,6 +490,32 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
                   />
                 </div>
               )}
+
+            </div>
+
+            {/* Right column 60%: Departures + Arrivals */}
+            <div className="ap-right-col">
+
+              {/* Departures */}
+              <div className="ap-board-wrap">
+                <div className="ap-board-titlebar dep">
+                  <img src="/icon/icon_departures.png" alt="" style={{ width: 18, height: 18, objectFit: 'contain', flexShrink: 0 }} />
+                  <span className="ap-board-title">DEPARTURES</span>
+                  <span className="ap-board-ct">{departures.length} shown</span>
+                </div>
+                <BoardTable type="departures" flights={departures} now={now} onNavigateToAirport={onNavigateToAirport} onAirlineClick={setProfilePopupCode} />
+              </div>
+
+              {/* Arrivals */}
+              <div className="ap-board-wrap">
+                <div className="ap-board-titlebar arr">
+                  <img src="/icon/icon_landing.png" alt="" style={{ width: 18, height: 18, objectFit: 'contain', flexShrink: 0 }} />
+                  <span className="ap-board-title">ARRIVALS</span>
+                  <span className="ap-board-ct">{arrivals.length} shown</span>
+                </div>
+                <BoardTable type="arrivals" flights={arrivals} now={now} onNavigateToAirport={onNavigateToAirport} onAirlineClick={setProfilePopupCode} />
+              </div>
+
             </div>
 
           </div>
@@ -848,39 +844,29 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
         }
         .ap-btn-close:hover { background: #F5F5F5; border-color: #AAAAAA; }
 
-        /* ── Map + Info row ── */
-        .ap-map-row {
+        /* ── Two-column layout: 40% / 60% ── */
+        .ap-layout-grid {
           margin-top: 1.5rem;
           display: grid;
-          grid-template-columns: 1fr 395px;
-          gap: 1.5rem;
-          align-items: stretch;
-        }
-        @media (max-width: 900px) {
-          .ap-map-row { grid-template-columns: 1fr; }
-        }
-        .ap-map-col {
-          border-radius: 8px;
-          overflow: hidden;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-          height: 400px;
-        }
-        .ap-info-col {
-          /* stretches to match map height */
-          align-self: stretch;
-        }
-
-        /* ── Main content grid ── */
-        .ap-main {
-          margin-top: 1.5rem;
-          display: grid;
-          grid-template-columns: 7fr 3fr;
+          grid-template-columns: 2fr 3fr;
           gap: 1.5rem;
           align-items: start;
         }
         @media (max-width: 900px) {
-          .ap-main { grid-template-columns: 1fr; }
-          .ap-sidebar-col { order: -1; }
+          .ap-layout-grid { grid-template-columns: 1fr; }
+        }
+        .ap-left-col,
+        .ap-right-col {
+          display: flex;
+          flex-direction: column;
+          gap: 1.25rem;
+          min-width: 0;
+        }
+        .ap-map-col {
+          border-radius: 8px;
+          overflow: hidden;
+          box-shadow: var(--shadow-2);
+          height: 280px;
         }
 
         /* ── Flight boards (FIDS style) ── */
@@ -1021,10 +1007,10 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
           .ap-iata { font-size: 2.4rem; }
           .ap-airport-name { font-size: 1rem; }
           .ap-strip-right { width: 100%; }
-          .ap-map-row { grid-template-columns: 1fr; gap: 1rem; margin-top: 1rem; }
-          .ap-map-col { height: 250px; }
+          .ap-layout-grid { grid-template-columns: 1fr; gap: 1rem; margin-top: 1rem; }
+          .ap-left-col, .ap-right-col { gap: 1rem; }
+          .ap-map-col { height: 220px; }
           .ap-info-table td { padding: 0.4rem 0.6rem; font-size: 0.8rem; }
-          .ap-main { grid-template-columns: 1fr; gap: 1rem; margin-top: 1rem; }
           .ap-board-table th { padding: 0.35rem 0.5rem; font-size: 0.58rem; }
           .ap-board-table td { padding: 2px 0.5rem; font-size: 0.7rem; }
           .ap-fn { font-size: 0.78rem; }

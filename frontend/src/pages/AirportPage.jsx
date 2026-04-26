@@ -18,7 +18,7 @@ const GROUND_STAFF_BY_CAT = { 1: 2, 2: 4, 3: 7, 4: 10, 5: 14, 6: 18, 7: 22, 8: 2
 // Required min widths (enforced by the locked column layout):
 //   full      airline 124 + time 64 + flight 78 + status 110 + dest ~150 = 526px
 //   compact   airline 124 + time 64 + flight 78 + status 110 + dest  ~80 = 456px
-//   code-only airline  52 + time 56 + flight 78 + status 100 + dest  ~40 = 326px
+//   code-only airline  86 + time 56 + flight 78 + status 100 + dest  ~40 = 360px
 //
 // Switch points add ~30px headroom so we never sit right on the edge.
 function classifyBoardWidth(w) {
@@ -162,15 +162,18 @@ function DestinationLabel({ code, name, onNavigate, mode }) {
   return <AirportLink code={code} onNavigate={onNavigate} />;
 }
 
-function AirlineChip({ code, logoFilename, dark = true, onClick, compact = false }) {
+function AirlineChip({ code, logoFilename, dark = true, onClick, size = 'normal' }) {
   const style = onClick ? { cursor: 'pointer' } : {};
-  if (logoFilename && !compact) {
+  if (logoFilename) {
+    const dims = size === 'small'
+      ? { width: 78, height: 22 }
+      : { width: 110, height: 30 };
     return (
       <img
         src={logoFilename.startsWith('http') ? logoFilename : `${API_URL}/airline-logos/${logoFilename}`}
         alt={code}
         title={code}
-        style={{ width: 110, height: 30, objectFit: 'contain', display: 'block', ...style }}
+        style={{ ...dims, objectFit: 'contain', display: 'block', ...style }}
         onClick={onClick}
       />
     );
@@ -233,7 +236,7 @@ function BoardTable({ type, flights, now, onNavigateToAirport, onAirlineClick })
           const airportName = isArr ? f.origin_name : f.destination_name;
           return (
             <tr key={f.id}>
-              <td><AirlineChip code={f.airline_code} logoFilename={f.logo_filename} dark={false} compact={mode === 'code-only'} onClick={onAirlineClick ? () => onAirlineClick(f.airline_code) : undefined} /></td>
+              <td><AirlineChip code={f.airline_code} logoFilename={f.logo_filename} dark={false} size={mode === 'code-only' ? 'small' : 'normal'} onClick={onAirlineClick ? () => onAirlineClick(f.airline_code) : undefined} /></td>
               <td className="ap-time">{formatBoardTime(time)}</td>
               <td className="ap-apt-col" title={airportName || airportCode}>
                 <DestinationLabel
@@ -1013,10 +1016,11 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
         .ap-board-table th:nth-child(4),
         .ap-board-table td:nth-child(4) { width: 78px; text-align: right; padding-right: 0.45rem !important; }
 
-        /* Narrow boards (smartphones): collapse the airline column to a tiny
-           code chip so destination + status still fit on the row. */
+        /* Narrow boards (smartphones): airline column shrinks just enough to
+           hold a 78×22 logo, time/flight stay readable, destination falls back
+           to the IATA code. */
         .ap-board-table[data-mode="code-only"] th:nth-child(1),
-        .ap-board-table[data-mode="code-only"] td:nth-child(1) { width: 52px; }
+        .ap-board-table[data-mode="code-only"] td:nth-child(1) { width: 86px; }
         .ap-board-table[data-mode="code-only"] th:nth-child(2),
         .ap-board-table[data-mode="code-only"] td:nth-child(2) { width: 56px; }
         .ap-board-table[data-mode="code-only"] td,
@@ -1026,7 +1030,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
            or fails — guarantees the same layout below 600px viewport. */
         @media (max-width: 600px) {
           .ap-board-table th:nth-child(1),
-          .ap-board-table td:nth-child(1) { width: 52px; }
+          .ap-board-table td:nth-child(1) { width: 86px; }
           .ap-board-table th:nth-child(2),
           .ap-board-table td:nth-child(2) { width: 56px; }
           .ap-board-table td,

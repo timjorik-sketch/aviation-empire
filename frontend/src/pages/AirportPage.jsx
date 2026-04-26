@@ -100,7 +100,7 @@ function AirlineChip({ code, logoFilename, dark = true, onClick }) {
         src={logoFilename.startsWith('http') ? logoFilename : `${API_URL}/airline-logos/${logoFilename}`}
         alt={code}
         title={code}
-        style={{ width: 120, height: 30, objectFit: 'contain', display: 'block', ...style }}
+        style={{ width: 84, height: 22, objectFit: 'contain', display: 'block', ...style }}
         onClick={onClick}
       />
     );
@@ -379,20 +379,8 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
           {/* ── Two-column layout: 40% sidebar / 60% boards ── */}
           <div className="ap-layout-grid">
 
-            {/* Left column 40%: map + info + airlines + your airline */}
+            {/* Left column 35%: info + airlines + your airline */}
             <div className="ap-left-col">
-
-              {/* Satellite map */}
-              {airport.latitude != null && airport.longitude != null && (
-                <div className="ap-map-col">
-                  <AirportMap
-                    lat={airport.latitude}
-                    lng={airport.longitude}
-                    airportName={airport.name}
-                    iataCode={airport.iata_code}
-                  />
-                </div>
-              )}
 
               {/* Airport Information card */}
               <div className="ap-sidebar-card">
@@ -493,8 +481,20 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
 
             </div>
 
-            {/* Right column 60%: Departures + Arrivals */}
+            {/* Right column 65%: satellite map + Departures + Arrivals */}
             <div className="ap-right-col">
+
+              {/* Satellite map */}
+              {airport.latitude != null && airport.longitude != null && (
+                <div className="ap-map-col">
+                  <AirportMap
+                    lat={airport.latitude}
+                    lng={airport.longitude}
+                    airportName={airport.name}
+                    iataCode={airport.iata_code}
+                  />
+                </div>
+              )}
 
               {/* Departures */}
               <div className="ap-board-wrap">
@@ -844,11 +844,11 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
         }
         .ap-btn-close:hover { background: #F5F5F5; border-color: #AAAAAA; }
 
-        /* ── Two-column layout: 40% / 60% ── */
+        /* ── Two-column layout: 35% / 65% ── */
         .ap-layout-grid {
           margin-top: 1.5rem;
           display: grid;
-          grid-template-columns: 2fr 3fr;
+          grid-template-columns: 35fr 65fr;
           gap: 1.5rem;
           align-items: start;
         }
@@ -866,7 +866,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
           border-radius: 8px;
           overflow: hidden;
           box-shadow: var(--shadow-2);
-          height: 280px;
+          height: 320px;
         }
 
         /* ── Flight boards (FIDS style) ── */
@@ -921,8 +921,8 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
         .ap-apt-col { font-size: 0.78rem; font-weight: 500; color: rgba(255,255,255,0.65) !important; }
         .ap-apt-col button { font-size: 0.78rem; color: rgba(255,255,255,0.65) !important; text-decoration-color: rgba(255,255,255,0.25) !important; }
         .ap-time    { font-size: 0.78rem !important; font-weight: 500; color: rgba(255,255,255,0.65) !important; font-variant-numeric: tabular-nums; }
-        .ap-th-status { text-align: right !important; }
-        .ap-td-status { text-align: right; }
+        .ap-th-status { text-align: right !important; white-space: nowrap; padding-right: 0.85rem !important; }
+        .ap-td-status { text-align: right; white-space: nowrap; padding-right: 0.85rem !important; width: 1%; }
         .ap-day-sep-row td { padding: 0; }
         .ap-day-sep-cell {
           padding: 0.35rem 0.75rem !important;

@@ -622,7 +622,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
         <section className="overview-section">
           <div className="fleet-section-bar">
             <span className="fleet-section-bar-title">Airplane List</span>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <div className="ov-bar-controls">
               <button
                 className="ov-btn-toggle-all"
                 onClick={toggleAllBases}
@@ -1733,6 +1733,14 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
         }
         .ov-btn-toggle-all:hover { background: rgba(255,255,255,0.15); border-color: white; }
 
+        .ov-bar-controls {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+        }
+
         .ov-inline-select {
           padding: 0.25rem 0.4rem;
           border: 1px solid #E0E0E0;
@@ -1872,6 +1880,22 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
              reduced mobile padding. */
           .overview-section .fleet-section-bar {
             margin: -1.25rem -1.25rem 1rem;
+            flex-wrap: wrap;
+            row-gap: 10px;
+          }
+          /* On phones, push the controls onto their own row under the title and
+             let them wrap further if labels still don't fit. */
+          .overview-section .ov-bar-controls {
+            width: 100%;
+            justify-content: flex-start;
+          }
+          .overview-section .view-mode-pill-btn {
+            padding: 0.28rem 0.6rem;
+            font-size: 0.68rem;
+          }
+          .overview-section .ov-btn-toggle-all {
+            padding: 0.28rem 0.55rem;
+            font-size: 0.68rem;
           }
           .overview-table th,
           .overview-table td {

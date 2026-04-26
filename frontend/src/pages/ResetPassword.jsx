@@ -38,7 +38,7 @@ export default function ResetPassword({ token, onDone }) {
     <>
       <div
         className="page-hero"
-        style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.4),rgba(0,0,0,0.6)),url('/header-images/Headerimage_Home.png')" }}
+        style={{ backgroundImage: "url('/header-images/Headerimage_Home.png')" }}
       >
         <div className="page-hero-overlay">
           <h1>Choose a New Password</h1>

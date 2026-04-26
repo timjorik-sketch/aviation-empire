@@ -491,7 +491,7 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
         }
       `}</style>
 
-      <div className="page-hero" style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.4), rgba(0,0,0,0.6)), url('/header-images/Headerimage_Routes.png')" }}>
+      <div className="page-hero" style={{ backgroundImage: "url('/header-images/Headerimage_Routes.png')" }}>
         <div className="page-hero-overlay">
           <h1>Route Planning</h1>
           <p>{airline.name}</p>

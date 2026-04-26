@@ -50,7 +50,7 @@ export default function Personnel({ airline, onBack }) {
 
   return (
     <div className="app">
-      <div className="page-hero" style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.4), rgba(0,0,0,0.6)), url('/header-images/Headerimage_crew.png')" }}>
+      <div className="page-hero" style={{ backgroundImage: "url('/header-images/Headerimage_crew.png')" }}>
         <div className="page-hero-overlay">
           <h1>Staff & Crew</h1>
           <p>{airline?.name}</p>

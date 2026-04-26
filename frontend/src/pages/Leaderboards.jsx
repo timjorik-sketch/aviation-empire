@@ -124,7 +124,7 @@ export default function Leaderboards({ airline, onBack }) {
 
   if (loading) return (
     <div className="app">
-      <div className="page-hero" style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.45),rgba(0,0,0,0.65)),url('/header-images/Headerimage_Leaderboards.png')" }}>
+      <div className="page-hero" style={{ backgroundImage: "url('/header-images/Headerimage_Leaderboards.png')" }}>
         <div className="page-hero-overlay"><h1>Leaderboards</h1></div>
       </div>
       <div className="container" style={{ paddingTop: 24 }}>
@@ -136,7 +136,7 @@ export default function Leaderboards({ airline, onBack }) {
 
   return (
     <div className="app">
-      <div className="page-hero" style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.45),rgba(0,0,0,0.65)),url('/header-images/Headerimage_Leaderboards.png')" }}>
+      <div className="page-hero" style={{ backgroundImage: "url('/header-images/Headerimage_Leaderboards.png')" }}>
         <div className="page-hero-overlay">
           <h1>Leaderboards</h1>
           <p>Airline Rankings</p>

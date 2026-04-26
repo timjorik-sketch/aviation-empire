@@ -318,12 +318,9 @@ export default function EditProfile({ user, onBack, onLogout, onAirlinesChanged 
 
         /* ── Hero ── */
         .ep-hero {
-          width: 100%; height: 260px;
-          background: linear-gradient(rgba(0,0,0,0.45), rgba(0,0,0,0.65)),
-                      url('/header-images/Headerimage_Home.png') center/cover;
-          display: flex; align-items: center; justify-content: center;
+          width: 100%; height: 240px;
+          background: url('/header-images/Headerimage_Home.png') center 30% / cover no-repeat;
         }
-        .ep-hero h1 { color: #fff; font-size: 2.4rem; margin: 0; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); }
 
         /* ── Top bar ── */
         .ep-topbar {
@@ -502,7 +499,9 @@ export default function EditProfile({ user, onBack, onLogout, onAirlinesChanged 
 
       {/* Hero */}
       <div className="ep-hero">
-        <h1>Edit Profile</h1>
+        <div className="ep-hero-overlay">
+          <h1>Edit Profile</h1>
+        </div>
       </div>
 
       {/* Top bar */}

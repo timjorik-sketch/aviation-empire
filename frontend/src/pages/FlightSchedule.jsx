@@ -201,7 +201,7 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
         }
       `}</style>
 
-      <div className="page-hero" style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.4), rgba(0,0,0,0.6)), url('/header-images/Headerimage_opertaions.png')" }}>
+      <div className="page-hero" style={{ backgroundImage: "url('/header-images/Headerimage_opertaions.png')" }}>
         <div className="page-hero-overlay">
           <h1>Flightplan</h1>
           <p>{airline.name}</p>

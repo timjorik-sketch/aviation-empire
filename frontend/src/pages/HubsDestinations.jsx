@@ -497,7 +497,7 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
         }
         .ap-hover-hero {
           height: 80px;
-          background: linear-gradient(rgba(0,0,0,0.35), rgba(0,0,0,0.6)),
+          background: 
             url('/header-images/Headerimage_Airports.png') center / cover;
           border-radius: 8px 8px 0 0;
           display: flex; align-items: flex-end; padding: 8px 12px;
@@ -637,7 +637,7 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
 
       <div
         className="page-hero"
-        style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.4), rgba(0,0,0,0.6)), url('/header-images/Headerimage_Flightplan.png')" }}
+        style={{ backgroundImage: "url('/header-images/Headerimage_Flightplan.png')" }}
       >
         <div className="page-hero-overlay">
           <h1>Network</h1>

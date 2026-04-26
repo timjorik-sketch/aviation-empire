@@ -612,17 +612,10 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
         /* ── Hero image ── */
         .ap-hero {
           width: 100%;
-          height: 300px;
-          background:
-            linear-gradient(rgba(0,0,0,0.35), rgba(0,0,0,0.55)),
-            url('/header-images/Headerimage_Airports.png')
-            center / cover;
-          position: relative;
-          display: flex;
-          align-items: flex-start;
-          padding: 1rem 1.5rem;
+          height: 240px;
+          background: url('/header-images/Headerimage_Airports.png') center 30% / cover no-repeat;
         }
-        @media (max-width: 768px) { .ap-hero { height: 220px; } }
+        @media (max-width: 768px) { .ap-hero { height: 180px; } }
 
         /* Back button overlaid on hero */
         .ap-btn-back {
@@ -1022,7 +1015,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
         .ap-al-name-link:hover { text-decoration-color: #2C2C2C; }
 
         @media (max-width: 480px) {
-          .ap-hero { height: 160px; padding: 0.75rem 1rem; }
+          .ap-hero { height: 140px; }
           .ap-container { padding: 16px 10px 32px; }
           .ap-info-strip { padding: 16px; flex-direction: column; align-items: flex-start; gap: 1rem; }
           .ap-iata { font-size: 2.4rem; }

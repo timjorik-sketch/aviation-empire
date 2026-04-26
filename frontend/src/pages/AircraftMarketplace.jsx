@@ -615,14 +615,9 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
 
         /* Hero */
         .am-hero {
-          width: 100%; height: 280px;
-          background: linear-gradient(rgba(0,0,0,0.4), rgba(0,0,0,0.6)),
-            url('/header-images/Headerimage_market.png') center/cover;
-          display: flex; align-items: center; justify-content: center;
+          width: 100%; height: 240px;
+          background: url('/header-images/Headerimage_market.png') center 30% / cover no-repeat;
         }
-        .am-hero-overlay { text-align: center; color: white; }
-        .am-hero-overlay h1 { font-size: 2.8rem; margin: 0; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); }
-        .am-hero-overlay p { font-size: 1.1rem; margin-top: 0.5rem; opacity: 0.9; }
 
         .am-container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
 
@@ -711,9 +706,7 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
         @media (max-width: 1300px) { .am-grid { grid-template-columns: repeat(2, 1fr); } }
         @media (max-width: 900px)  { .am-grid { grid-template-columns: 1fr; } }
         @media (max-width: 480px) {
-          .am-hero { height: 180px; }
-          .am-hero-overlay h1 { font-size: 1.6rem; }
-          .am-hero-overlay p { font-size: 0.85rem; }
+          .am-hero { height: 160px; }
           .am-container { padding: 1rem 0.75rem; }
           .am-layout { grid-template-columns: 1fr; }
           .am-sidebar { position: static; }

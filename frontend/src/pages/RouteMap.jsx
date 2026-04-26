@@ -84,12 +84,11 @@ export default function RouteMap({ airline, onBack }) {
       `}</style>
 
       <div className="page-hero" style={{
-        backgroundImage: 'linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.7)), url("/header-images/Headerimage_Routes.png")',
-        height: '180px',
+        backgroundImage: 'url("/header-images/Headerimage_Routes.png")',
       }}>
         <div className="page-hero-overlay">
-          <h1 style={{ fontSize: '2rem' }}>Route Map</h1>
-          <p style={{ fontSize: '1rem', opacity: 0.8 }}>Great circle routes between airports</p>
+          <h1>Route Map</h1>
+          <p>Great circle routes between airports</p>
         </div>
       </div>
 

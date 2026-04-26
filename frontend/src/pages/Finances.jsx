@@ -234,7 +234,7 @@ export default function Finances({ airline, onBack, onNavigateToAirport, onNavig
   };
 
   if (loading) return (
-    <div className="app"><div className="page-hero" style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.4),rgba(0,0,0,0.6)),url('/header-images/Headerimage_Finance.png')" }}><div className="page-hero-overlay"><h1>Finances</h1></div></div><div className="container" style={{ paddingTop: 24 }}><TopBar onBack={onBack} balance={airline.balance} airline={airline} /><p style={{ color: '#666', marginTop: '2rem' }}>Loading…</p></div></div>
+    <div className="app"><div className="page-hero" style={{ backgroundImage: "url('/header-images/Headerimage_Finance.png')" }}><div className="page-hero-overlay"><h1>Finances</h1></div></div><div className="container" style={{ paddingTop: 24 }}><TopBar onBack={onBack} balance={airline.balance} airline={airline} /><p style={{ color: '#666', marginTop: '2rem' }}>Loading…</p></div></div>
   );
 
   const w = data?.weekly || {};
@@ -276,7 +276,7 @@ export default function Finances({ airline, onBack, onNavigateToAirport, onNavig
   return (
     <div className="app">
       {/* Hero */}
-      <div className="page-hero" style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.4),rgba(0,0,0,0.6)),url('/header-images/Headerimage_Finance.png')" }}>
+      <div className="page-hero" style={{ backgroundImage: "url('/header-images/Headerimage_Finance.png')" }}>
         <div className="page-hero-overlay">
           <h1>Finances</h1>
           <p>{airline.name}</p>

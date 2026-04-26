@@ -2734,12 +2734,10 @@ const styles = `
 
   /* ── Hero ── */
   .ad-hero {
-    width: 100%; height: 300px;
-    background:
-      linear-gradient(rgba(0,0,0,0.35), rgba(0,0,0,0.55)),
-      url('/header-images/Headerimage_Airplane.png') center / cover;
+    width: 100%; height: 240px;
+    background: url('/header-images/Headerimage_Airplane.png') center 30% / cover no-repeat;
   }
-  @media (max-width: 768px) { .ad-hero { height: 220px; } }
+  @media (max-width: 768px) { .ad-hero { height: 180px; } }
 
   /* ── Container ── */
   .ad-container {

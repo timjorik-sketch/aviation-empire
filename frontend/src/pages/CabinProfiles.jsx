@@ -413,13 +413,8 @@ function CabinProfiles({ airline, onBack, backLabel = 'Dashboard' }) {
 
         .cp-hero {
           width: 100%; height: 240px;
-          background: linear-gradient(rgba(0,0,0,0.4), rgba(0,0,0,0.6)),
-                      url('/header-images/Headerimage_cabin.png') center/cover;
-          display: flex; align-items: center; justify-content: center;
+          background: url('/header-images/Headerimage_cabin.png') center 30% / cover no-repeat;
         }
-        .cp-hero-overlay { text-align: center; color: white; }
-        .cp-hero-overlay h1 { font-size: 2.5rem; margin: 0; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); }
-        .cp-hero-overlay p { margin: 8px 0 0; font-size: 1rem; opacity: 0.85; }
 
         .cp-container { max-width: 1100px; margin: 0 auto; padding: 24px 20px 60px; }
 
@@ -622,8 +617,7 @@ function CabinProfiles({ airline, onBack, backLabel = 'Dashboard' }) {
         .cp-btn-save:hover { background: #444; }
 
         @media (max-width: 640px) {
-          .cp-hero { height: 180px; }
-          .cp-hero-overlay h1 { font-size: 1.8rem; }
+          .cp-hero { height: 160px; }
           .cp-form-card { padding: 20px; }
           .cp-seat-btn { min-width: 64px; }
         }

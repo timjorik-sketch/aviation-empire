@@ -468,29 +468,8 @@ function ServiceProfiles({ airline, onBack, backLabel = 'Dashboard' }) {
         /* Hero */
         .sp-hero {
           width: 100%;
-          height: 280px;
-          background: linear-gradient(rgba(0,0,0,0.45), rgba(0,0,0,0.65)),
-                      url('/header-images/Headerimage_Services.png') center/cover;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .sp-hero-overlay {
-          text-align: center;
-          color: white;
-        }
-
-        .sp-hero-overlay h1 {
-          font-size: 2.75rem;
-          margin: 0;
-          text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
-        }
-
-        .sp-hero-overlay p {
-          font-size: 1.1rem;
-          margin-top: 0.5rem;
-          opacity: 0.9;
+          height: 240px;
+          background: url('/header-images/Headerimage_Services.png') center 30% / cover no-repeat;
         }
 
         /* Container */
@@ -1039,8 +1018,7 @@ function ServiceProfiles({ airline, onBack, backLabel = 'Dashboard' }) {
         }
 
         @media (max-width: 768px) {
-          .sp-hero { height: 200px; }
-          .sp-hero-overlay h1 { font-size: 1.75rem; }
+          .sp-hero { height: 160px; }
           .sp-section { padding: 1.25rem; }
           .sp-top-bar { flex-direction: column; align-items: stretch; }
           .sp-items-grid { grid-template-columns: repeat(2, 1fr); }

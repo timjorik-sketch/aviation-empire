@@ -236,7 +236,7 @@ function FlightOperations({ airline, onBalanceUpdate, onBack, onNavigateToAirpor
 
   return (
     <div className="app">
-      <div className="page-hero" style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.4), rgba(0,0,0,0.6)), url('/header-images/Headerimage_opertaions.png')" }}>
+      <div className="page-hero" style={{ backgroundImage: "url('/header-images/Headerimage_opertaions.png')" }}>
         <div className="page-hero-overlay">
           <h1>Flight Operations</h1>
           <p>{airline.name}</p>

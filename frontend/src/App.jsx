@@ -722,8 +722,11 @@ function App() {
       })()}
 
       {/* ── Hero banner ── */}
-      <div className="page-hero">
-        <div className="page-hero-overlay">
+      <div
+        className="page-hero"
+        style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.35),rgba(0,0,0,0.55)),url('/header-images/Headerimage_Home.png')" }}
+      >
+        <div className="page-hero-overlay page-hero-overlay--centered">
           <img src="/logo/logo_white.png" alt="Apron Empire" className="page-hero-logo page-hero-logo--large" />
         </div>
       </div>

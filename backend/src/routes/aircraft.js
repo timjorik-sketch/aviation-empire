@@ -81,7 +81,7 @@ function calcUsedValue(newPrice, kAge, kFh, ageYears, totalFh) {
   const val = newPrice * Math.exp(-(kAge || 0.035) * ageYears) * Math.exp(-(kFh || 0.000006) * totalFh);
   return Math.max(val, newPrice * 0.30);
 }
-const MARKET_TARGET_PER_TYPE = 8;
+const MARKET_TARGET_PER_TYPE = 15;
 
 export async function fillUsedMarket() {
   try {

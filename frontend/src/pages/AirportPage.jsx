@@ -8,22 +8,44 @@ const API_URL = import.meta.env.VITE_API_URL || '';
 
 const GROUND_STAFF_BY_CAT = { 1: 2, 2: 4, 3: 7, 4: 10, 5: 14, 6: 18, 7: 22, 8: 25 };
 
-// Watch a target element's width via ResizeObserver and classify into a
-// destination-rendering mode. Driven by the *board* width, not the viewport,
-// so a tablet in portrait (where the board takes full screen width) can still
-// show names while a tiny embedded board would fall back to code-only.
+// Pick a destination-rendering mode based on how wide the board container
+// actually is.
+//
+// Required min widths (enforced by the locked column layout):
+//   full      airline 124 + time 64 + dest 80 + flight 70 + status 110 = 448px
+//   compact   airline 124 + time 64 + dest 60 + flight 70 + status 110 = 428px
+//   code-only airline  52 + time 56 + dest 40 + flight 60 + status 100 = 308px
+//
+// Switch points add ~50px headroom so we never sit right on the threshold.
+function classifyBoardWidth(w) {
+  if (w < 540) return 'code-only';
+  if (w < 800) return 'compact';
+  return 'full';
+}
+
 function useBoardMode(ref) {
-  const [mode, setMode] = useState('full');
+  const [mode, setMode] = useState(() => {
+    if (typeof window === 'undefined') return 'full';
+    return classifyBoardWidth(window.innerWidth);
+  });
   useEffect(() => {
-    if (!ref.current || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(([entry]) => {
-      const w = entry.contentRect.width;
-      if (w < 480) setMode('code-only');
-      else if (w < 760) setMode('compact');
-      else setMode('full');
-    });
-    ro.observe(ref.current);
-    return () => ro.disconnect();
+    const update = () => {
+      const w = ref.current
+        ? ref.current.getBoundingClientRect().width
+        : window.innerWidth;
+      setMode(classifyBoardWidth(w));
+    };
+    update();
+    let ro;
+    if (ref.current && typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(update);
+      ro.observe(ref.current);
+    }
+    window.addEventListener('resize', update);
+    return () => {
+      if (ro) ro.disconnect();
+      window.removeEventListener('resize', update);
+    };
   }, [ref]);
   return mode;
 }
@@ -990,6 +1012,17 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
         .ap-board-table[data-mode="code-only"] td:nth-child(2) { width: 56px; }
         .ap-board-table[data-mode="code-only"] td,
         .ap-board-table[data-mode="code-only"] th { padding-left: 0.4rem !important; padding-right: 0.4rem !important; }
+
+        /* CSS fallback for column widths in case the JS measurement is late
+           or fails — guarantees the same layout below 600px viewport. */
+        @media (max-width: 600px) {
+          .ap-board-table th:nth-child(1),
+          .ap-board-table td:nth-child(1) { width: 52px; }
+          .ap-board-table th:nth-child(2),
+          .ap-board-table td:nth-child(2) { width: 56px; }
+          .ap-board-table td,
+          .ap-board-table th { padding-left: 0.4rem !important; padding-right: 0.4rem !important; }
+        }
         .ap-board-table tbody tr:last-child td { border-bottom: none; }
         .ap-board-table tbody tr:hover td { background: rgba(255,255,255,0.03); }
         .ap-board-table tbody tr.ap-row-done td { opacity: 0.45; }

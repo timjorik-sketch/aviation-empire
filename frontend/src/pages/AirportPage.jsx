@@ -848,11 +848,11 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
         }
         .ap-btn-close:hover { background: #F5F5F5; border-color: #AAAAAA; }
 
-        /* ── Two-column layout: 40% / 60% ── */
+        /* ── Two-column layout: 35% / 65% ── */
         .ap-layout-grid {
           margin-top: 1.5rem;
           display: grid;
-          grid-template-columns: 2fr 3fr;
+          grid-template-columns: 35fr 65fr;
           gap: 1.5rem;
           align-items: start;
         }

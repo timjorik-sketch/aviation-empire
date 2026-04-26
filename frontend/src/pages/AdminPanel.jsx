@@ -3,6 +3,26 @@ import TopBar from '../components/TopBar.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
+const ADMIN_CARD = {
+  borderRadius: 8,
+  overflow: 'hidden',
+  boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+  marginBottom: 16,
+  background: '#fff',
+};
+const ADMIN_CARD_HEADER = {
+  background: '#2C2C2C',
+  color: '#fff',
+  padding: '12px 20px',
+  fontSize: 13,
+  fontWeight: 700,
+  letterSpacing: '0.08em',
+  textTransform: 'uppercase',
+};
+const ADMIN_CARD_BODY = {
+  padding: 24,
+};
+
 function formatDateTime(dt) {
   if (!dt) return '—';
   const d = new Date(dt);
@@ -44,46 +64,48 @@ function MarketSection() {
   };
 
   return (
-    <div style={{ background: 'white', borderRadius: 8, padding: 24, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', marginBottom: 16 }}>
-      <h3 style={{ margin: '0 0 16px', color: '#2C2C2C' }}>Market</h3>
-      <p style={{ margin: '0 0 16px', color: '#666', fontSize: 14 }}>
-        Manage the aircraft marketplace inventory.
-      </p>
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        <button
-          onClick={() => run('/api/aircraft/dev/fill-market', 'fill')}
-          disabled={!!busy}
-          style={{
-            background: '#b45309', color: '#fff', border: 'none', borderRadius: 6,
-            padding: '10px 20px', fontWeight: 600, fontSize: 14, cursor: busy ? 'wait' : 'pointer',
-            opacity: busy ? 0.7 : 1,
-          }}
-        >
-          {busy === 'fill' ? 'Filling…' : 'Fill Market'}
-        </button>
-        <button
-          onClick={() => run('/api/aircraft/dev/clear-market', 'clear')}
-          disabled={!!busy}
-          style={{
-            background: '#6b7280', color: '#fff', border: 'none', borderRadius: 6,
-            padding: '10px 20px', fontWeight: 600, fontSize: 14, cursor: busy ? 'wait' : 'pointer',
-            opacity: busy ? 0.7 : 1,
-          }}
-        >
-          {busy === 'clear' ? 'Clearing…' : 'Clear Market'}
-        </button>
-      </div>
-      {msg && (
-        <div style={{
-          marginTop: 12,
-          background: msg.ok ? '#dcfce7' : '#fee',
-          color: msg.ok ? '#166534' : '#c33',
-          border: `1px solid ${msg.ok ? '#bbf7d0' : '#fcc'}`,
-          borderRadius: 6, padding: '8px 12px', fontSize: 13,
-        }}>
-          {msg.text}
+    <div style={ADMIN_CARD}>
+      <div style={ADMIN_CARD_HEADER}>Market</div>
+      <div style={ADMIN_CARD_BODY}>
+        <p style={{ margin: '0 0 16px', color: '#666', fontSize: 14 }}>
+          Manage the aircraft marketplace inventory.
+        </p>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <button
+            onClick={() => run('/api/aircraft/dev/fill-market', 'fill')}
+            disabled={!!busy}
+            style={{
+              background: '#b45309', color: '#fff', border: 'none', borderRadius: 6,
+              padding: '10px 20px', fontWeight: 600, fontSize: 14, cursor: busy ? 'wait' : 'pointer',
+              opacity: busy ? 0.7 : 1,
+            }}
+          >
+            {busy === 'fill' ? 'Filling…' : 'Fill Market'}
+          </button>
+          <button
+            onClick={() => run('/api/aircraft/dev/clear-market', 'clear')}
+            disabled={!!busy}
+            style={{
+              background: '#6b7280', color: '#fff', border: 'none', borderRadius: 6,
+              padding: '10px 20px', fontWeight: 600, fontSize: 14, cursor: busy ? 'wait' : 'pointer',
+              opacity: busy ? 0.7 : 1,
+            }}
+          >
+            {busy === 'clear' ? 'Clearing…' : 'Clear Market'}
+          </button>
         </div>
-      )}
+        {msg && (
+          <div style={{
+            marginTop: 12,
+            background: msg.ok ? '#dcfce7' : '#fee',
+            color: msg.ok ? '#166534' : '#c33',
+            border: `1px solid ${msg.ok ? '#bbf7d0' : '#fcc'}`,
+            borderRadius: 6, padding: '8px 12px', fontSize: 13,
+          }}>
+            {msg.text}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -487,41 +509,45 @@ export default function AdminPanel({ airline, onBack, onNavigate }) {
 
         <MarketSection />
 
-        <div style={{ background: 'white', borderRadius: 8, padding: 24, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', marginBottom: 16 }}>
-          <h3 style={{ margin: '0 0 16px', color: '#2C2C2C' }}>Prices</h3>
-          <p style={{ margin: '0 0 16px', color: '#666', fontSize: 14 }}>
-            Route Price Calculator — preview demand, attractiveness and 72h booking forecast for any route.
-          </p>
-          <RoutePriceCalculator />
+        <div style={ADMIN_CARD}>
+          <div style={ADMIN_CARD_HEADER}>Prices</div>
+          <div style={ADMIN_CARD_BODY}>
+            <p style={{ margin: '0 0 16px', color: '#666', fontSize: 14 }}>
+              Route Price Calculator — preview demand, attractiveness and 72h booking forecast for any route.
+            </p>
+            <RoutePriceCalculator />
+          </div>
         </div>
 
-        {/* Invite codes management */}
-        <div style={{ background: 'white', borderRadius: 8, padding: 24, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-          <h3 style={{ margin: '0 0 16px', color: '#2C2C2C' }}>Generate New Invite Code</h3>
-          <form onSubmit={handleCreate} style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <div style={{ flex: '1 1 240px' }}>
-              <label style={{ display: 'block', marginBottom: 6, color: '#666', fontSize: 14, fontWeight: 500 }}>
-                Note (optional — e.g. recipient name)
-              </label>
-              <input
-                type="text"
-                value={note}
-                onChange={e => setNote(e.target.value)}
-                placeholder="e.g. For Marco"
-                disabled={creating}
-                style={{ width: '100%', padding: 10, border: '1px solid #E0E0E0', borderRadius: 6, fontSize: 14 }}
-              />
-            </div>
-            <button type="submit" disabled={creating} className="btn-primary" style={{ width: 'auto', padding: '12px 24px', margin: 0 }}>
-              {creating ? 'Generating…' : 'Generate Code'}
-            </button>
-          </form>
+        {/* Invite code generation */}
+        <div style={ADMIN_CARD}>
+          <div style={ADMIN_CARD_HEADER}>Generate New Invite Code</div>
+          <div style={ADMIN_CARD_BODY}>
+            <form onSubmit={handleCreate} style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <div style={{ flex: '1 1 240px' }}>
+                <label style={{ display: 'block', marginBottom: 6, color: '#666', fontSize: 14, fontWeight: 500 }}>
+                  Note (optional — e.g. recipient name)
+                </label>
+                <input
+                  type="text"
+                  value={note}
+                  onChange={e => setNote(e.target.value)}
+                  placeholder="e.g. For Marco"
+                  disabled={creating}
+                  style={{ width: '100%', padding: 10, border: '1px solid #E0E0E0', borderRadius: 6, fontSize: 14 }}
+                />
+              </div>
+              <button type="submit" disabled={creating} className="btn-primary" style={{ width: 'auto', padding: '12px 24px', margin: 0 }}>
+                {creating ? 'Generating…' : 'Generate Code'}
+              </button>
+            </form>
+          </div>
+        </div>
 
-          <hr style={{ border: 'none', borderTop: '1px solid #E0E0E0', margin: '24px 0' }} />
-
-          <h3 style={{ margin: '0 0 16px', color: '#2C2C2C' }}>
-            Invite Codes ({codes.length})
-          </h3>
+        {/* Invite codes list */}
+        <div style={ADMIN_CARD}>
+          <div style={ADMIN_CARD_HEADER}>Invite Codes ({codes.length})</div>
+          <div style={ADMIN_CARD_BODY}>
           {loading ? (
             <p style={{ color: '#666' }}>Loading…</p>
           ) : codes.length === 0 ? (
@@ -593,6 +619,7 @@ export default function AdminPanel({ airline, onBack, onNavigate }) {
               </table>
             </div>
           )}
+          </div>
         </div>
       </div>
     </div>

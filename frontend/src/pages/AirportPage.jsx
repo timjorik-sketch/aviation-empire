@@ -135,9 +135,9 @@ function DestinationLabel({ code, name, onNavigate, mode }) {
   return <AirportLink code={code} onNavigate={onNavigate} />;
 }
 
-function AirlineChip({ code, logoFilename, dark = true, onClick }) {
+function AirlineChip({ code, logoFilename, dark = true, onClick, compact = false }) {
   const style = onClick ? { cursor: 'pointer' } : {};
-  if (logoFilename) {
+  if (logoFilename && !compact) {
     return (
       <img
         src={logoFilename.startsWith('http') ? logoFilename : `${API_URL}/airline-logos/${logoFilename}`}
@@ -180,7 +180,7 @@ function BoardTable({ type, flights, now, onNavigateToAirport, onAirlineClick })
   }
 
   return (
-    <table className="ap-board-table" ref={tableRef}>
+    <table className="ap-board-table" ref={tableRef} data-mode={mode}>
       <thead>
         <tr>
           <th>Airline</th>
@@ -205,7 +205,7 @@ function BoardTable({ type, flights, now, onNavigateToAirport, onAirlineClick })
           const airportName = isArr ? f.origin_name : f.destination_name;
           return (
             <tr key={f.id}>
-              <td><AirlineChip code={f.airline_code} logoFilename={f.logo_filename} dark={false} onClick={onAirlineClick ? () => onAirlineClick(f.airline_code) : undefined} /></td>
+              <td><AirlineChip code={f.airline_code} logoFilename={f.logo_filename} dark={false} compact={mode === 'code-only'} onClick={onAirlineClick ? () => onAirlineClick(f.airline_code) : undefined} /></td>
               <td className="ap-time">{formatBoardTime(time)}</td>
               <td className="ap-apt-col" title={airportName || airportCode}>
                 <DestinationLabel
@@ -975,6 +975,15 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
         .ap-board-table td:nth-child(1) { width: 124px; }
         .ap-board-table th:nth-child(2),
         .ap-board-table td:nth-child(2) { width: 64px; }
+
+        /* Narrow boards (smartphones): collapse the airline column to a tiny
+           code chip so destination + status still fit on the row. */
+        .ap-board-table[data-mode="code-only"] th:nth-child(1),
+        .ap-board-table[data-mode="code-only"] td:nth-child(1) { width: 52px; }
+        .ap-board-table[data-mode="code-only"] th:nth-child(2),
+        .ap-board-table[data-mode="code-only"] td:nth-child(2) { width: 56px; }
+        .ap-board-table[data-mode="code-only"] td,
+        .ap-board-table[data-mode="code-only"] th { padding-left: 0.4rem !important; padding-right: 0.4rem !important; }
         .ap-board-table tbody tr:last-child td { border-bottom: none; }
         .ap-board-table tbody tr:hover td { background: rgba(255,255,255,0.03); }
         .ap-board-table tbody tr.ap-row-done td { opacity: 0.45; }

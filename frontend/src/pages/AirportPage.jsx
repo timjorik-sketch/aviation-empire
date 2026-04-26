@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import AirportMap from '../components/AirportMap.jsx';
 import AirportLink from '../components/AirportLink.jsx';
 import AirlineProfilePopup from '../components/AirlineProfilePopup.jsx';
@@ -8,17 +8,24 @@ const API_URL = import.meta.env.VITE_API_URL || '';
 
 const GROUND_STAFF_BY_CAT = { 1: 2, 2: 4, 3: 7, 4: 10, 5: 14, 6: 18, 7: 22, 8: 25 };
 
-// Track viewport width to choose how much destination text fits in board cells.
-function useViewportMode() {
-  const [width, setWidth] = useState(() => typeof window === 'undefined' ? 1400 : window.innerWidth);
+// Watch a target element's width via ResizeObserver and classify into a
+// destination-rendering mode. Driven by the *board* width, not the viewport,
+// so a tablet in portrait (where the board takes full screen width) can still
+// show names while a tiny embedded board would fall back to code-only.
+function useBoardMode(ref) {
+  const [mode, setMode] = useState('full');
   useEffect(() => {
-    const onResize = () => setWidth(window.innerWidth);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-  if (width < 900) return 'code-only';
-  if (width < 1300) return 'compact';
-  return 'full';
+    if (!ref.current || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(([entry]) => {
+      const w = entry.contentRect.width;
+      if (w < 480) setMode('code-only');
+      else if (w < 760) setMode('compact');
+      else setMode('full');
+    });
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, [ref]);
+  return mode;
 }
 
 const CATEGORY_LABELS = {
@@ -144,8 +151,10 @@ function AirlineChip({ code, logoFilename, dark = true, onClick }) {
   return <span className={`ap-chip ${dark ? 'ap-chip-dark' : 'ap-chip-board'}`} style={style} onClick={onClick}>{code}</span>;
 }
 
-function BoardTable({ type, flights, now, onNavigateToAirport, onAirlineClick, mode }) {
+function BoardTable({ type, flights, now, onNavigateToAirport, onAirlineClick }) {
   const isArr = type === 'arrivals';
+  const tableRef = useRef(null);
+  const mode = useBoardMode(tableRef);
 
   // Filter and compute statuses
   const rows = flights.map(f => {
@@ -171,7 +180,7 @@ function BoardTable({ type, flights, now, onNavigateToAirport, onAirlineClick, m
   }
 
   return (
-    <table className="ap-board-table">
+    <table className="ap-board-table" ref={tableRef}>
       <thead>
         <tr>
           <th>Airline</th>
@@ -284,7 +293,6 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
 
   const [destStatus, setDestStatus] = useState(null); // { is_opened, destination_type, effective_type, weekly_flights }
   const [addingDest, setAddingDest] = useState(false);
-  const viewportMode = useViewportMode();
 
   const fetchBoards = useCallback(() => {
     Promise.all([
@@ -547,7 +555,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
                   <span className="ap-board-title">DEPARTURES</span>
                   <span className="ap-board-ct">{departures.length} shown</span>
                 </div>
-                <BoardTable type="departures" flights={departures} now={now} onNavigateToAirport={onNavigateToAirport} onAirlineClick={setProfilePopupCode} mode={viewportMode} />
+                <BoardTable type="departures" flights={departures} now={now} onNavigateToAirport={onNavigateToAirport} onAirlineClick={setProfilePopupCode} />
               </div>
 
               {/* Arrivals */}
@@ -557,7 +565,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
                   <span className="ap-board-title">ARRIVALS</span>
                   <span className="ap-board-ct">{arrivals.length} shown</span>
                 </div>
-                <BoardTable type="arrivals" flights={arrivals} now={now} onNavigateToAirport={onNavigateToAirport} onAirlineClick={setProfilePopupCode} mode={viewportMode} />
+                <BoardTable type="arrivals" flights={arrivals} now={now} onNavigateToAirport={onNavigateToAirport} onAirlineClick={setProfilePopupCode} />
               </div>
 
             </div>

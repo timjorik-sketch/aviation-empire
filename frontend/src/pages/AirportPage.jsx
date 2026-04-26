@@ -431,11 +431,13 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
                     </tr>
                     <tr>
                       <td className="ap-it-label">Runway</td>
-                      <td colSpan={2} className="ap-it-val ap-it-runway">
-                        <span>{formatRunway(airport.runway_length_m)}</span>
-                        <button className="ap-capable-link" onClick={openCapableModal}>
-                          Compatible Aircraft ↗
-                        </button>
+                      <td colSpan={2} className="ap-it-val">
+                        <span className="ap-it-runway">
+                          <span>{formatRunway(airport.runway_length_m)}</span>
+                          <button className="ap-capable-link" onClick={openCapableModal}>
+                            Compatible Aircraft ↗
+                          </button>
+                        </span>
                       </td>
                     </tr>
                     <tr className="ap-it-section-row">
@@ -722,7 +724,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
           font-size: 0.66rem; font-weight: 600; color: #AAAAAA; text-transform: uppercase;
           letter-spacing: 0.08em; text-align: right; padding-right: 1rem;
         }
-        .ap-it-runway { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; justify-content: flex-end; }
+        .ap-it-runway { display: inline-flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; justify-content: flex-end; }
         .ap-it-section-row td {
           background: #F9F9F9; border-bottom: 1px solid #E8E8E8;
           padding: 0.3rem 1rem;

@@ -16,7 +16,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
   const [fleetOverview, setFleetOverview] = useState([]);
   const [sortCol, setSortCol] = useState('registration');
   const [sortDir, setSortDir] = useState('asc');
-  const [editMode, setEditMode] = useState(false);
+  const [viewMode, setViewMode] = useState('operations'); // 'operations' | 'configuration' | 'financials'
   const [profilesByType, setProfilesByType] = useState({}); // typeId → profiles[]
   const [profilesLoading, setProfilesLoading] = useState(false);
   const [openedAirports, setOpenedAirports] = useState([]);
@@ -158,6 +158,10 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
           is_listed_for_sale: ac.is_listed_for_sale ?? 0,
           listed_price: ac.listed_price ?? null,
           delivery_at: ac.delivery_at ?? null,
+          completed_flights: ac.completed_flights ?? 0,
+          total_profit: ac.total_profit ?? 0,
+          avg_profit: ac.avg_profit ?? 0,
+          avg_load_factor: ac.avg_load_factor ?? 0,
         };
       });
 
@@ -169,9 +173,17 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
 
   // ── Fleet Overview helpers ──────────────────────────────────────────────────
 
-  const handleToggleEdit = async () => {
-    if (editMode) { setEditMode(false); return; }
-    // Load cabin profiles per unique type + opened airports when entering edit mode
+  const handleViewModeChange = async (mode) => {
+    if (mode === viewMode) return;
+    if (mode !== 'configuration') {
+      setViewMode(mode);
+      return;
+    }
+    // Configuration mode: lazy-load cabin profiles per unique type + opened airports on first switch
+    if (Object.keys(profilesByType).length > 0 && openedAirports.length > 0) {
+      setViewMode('configuration');
+      return;
+    }
     const typeIds = [...new Set(fleetOverview.map(ac => ac.type_id).filter(Boolean))];
     const token = localStorage.getItem('token');
     setProfilesLoading(true);
@@ -193,11 +205,11 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
       setProfilesByType(map);
       setOpenedAirports(openedRes.airports || []);
     } catch (e) {
-      console.error('Load edit-mode data error:', e);
+      console.error('Load configuration-mode data error:', e);
     } finally {
       setProfilesLoading(false);
     }
-    setEditMode(true);
+    setViewMode('configuration');
   };
 
   const handleCabinProfileInlineChange = async (ac, profileId) => {
@@ -333,6 +345,10 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
       else if (sortCol === 'aircraft_type') { aVal = a.aircraft_type; bVal = b.aircraft_type; }
       else if (sortCol === 'location') { aVal = getLocationText(a); bVal = getLocationText(b); }
       else if (sortCol === 'condition') { return sortDir === 'asc' ? (a.condition ?? 100) - (b.condition ?? 100) : (b.condition ?? 100) - (a.condition ?? 100); }
+      else if (sortCol === 'load_factor') { return sortDir === 'asc' ? (a.avg_load_factor ?? 0) - (b.avg_load_factor ?? 0) : (b.avg_load_factor ?? 0) - (a.avg_load_factor ?? 0); }
+      else if (sortCol === 'avg_profit') { return sortDir === 'asc' ? (a.avg_profit ?? 0) - (b.avg_profit ?? 0) : (b.avg_profit ?? 0) - (a.avg_profit ?? 0); }
+      else if (sortCol === 'total_profit') { return sortDir === 'asc' ? (a.total_profit ?? 0) - (b.total_profit ?? 0) : (b.total_profit ?? 0) - (a.total_profit ?? 0); }
+      else if (sortCol === 'completed_flights') { return sortDir === 'asc' ? (a.completed_flights ?? 0) - (b.completed_flights ?? 0) : (b.completed_flights ?? 0) - (a.completed_flights ?? 0); }
       else { aVal = a.registration; bVal = b.registration; }
       const cmp = String(aVal).localeCompare(String(bVal));
       return sortDir === 'asc' ? cmp : -cmp;
@@ -614,13 +630,38 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
               >
                 {groupedOverview.length > 0 && groupedOverview.every(g => collapsedBases.has(g.code ?? '__none__')) ? '▶ All' : '▼ All'}
               </button>
-              <button
-                className={`ov-btn-edit-mode${editMode ? ' ov-btn-edit-mode--active' : ''}`}
-                onClick={handleToggleEdit}
-                disabled={profilesLoading}
-              >
-                {profilesLoading ? 'Loading…' : editMode ? 'Done Editing' : 'Edit Airplanes'}
-              </button>
+              <div className="view-mode-pill" role="tablist" aria-label="Airplane list view mode">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === 'operations'}
+                  className={`view-mode-pill-btn${viewMode === 'operations' ? ' view-mode-pill-btn--active' : ''}`}
+                  onClick={() => handleViewModeChange('operations')}
+                  disabled={profilesLoading}
+                >
+                  Operations
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === 'configuration'}
+                  className={`view-mode-pill-btn${viewMode === 'configuration' ? ' view-mode-pill-btn--active' : ''}`}
+                  onClick={() => handleViewModeChange('configuration')}
+                  disabled={profilesLoading}
+                >
+                  {profilesLoading && viewMode !== 'configuration' ? 'Loading…' : 'Configuration'}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={viewMode === 'financials'}
+                  className={`view-mode-pill-btn${viewMode === 'financials' ? ' view-mode-pill-btn--active' : ''}`}
+                  onClick={() => handleViewModeChange('financials')}
+                  disabled={profilesLoading}
+                >
+                  Financials
+                </button>
+              </div>
             </div>
           </div>
 
@@ -674,21 +715,43 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                               <th className="sortable-th" onClick={() => handleSort('aircraft_type')}>
                                 Type <SortIcon col="aircraft_type" />
                               </th>
-                              {editMode && (
+                              {viewMode === 'configuration' && !group.forSale && !group.inProduction && (
                                 <th className="sortable-th" onClick={() => handleSort('condition')}>
                                   Condition <SortIcon col="condition" />
                                 </th>
                               )}
-                              {editMode && !group.forSale && !group.inProduction ? (
+                              {group.forSale ? (
+                                <>
+                                  <th>Verkaufspreis</th>
+                                  <th>Aktion</th>
+                                </>
+                              ) : group.inProduction ? (
+                                <>
+                                  <th className="sortable-th" onClick={() => handleSort('location')}>
+                                    Current Location <SortIcon col="location" />
+                                  </th>
+                                  <th>Actions</th>
+                                </>
+                              ) : viewMode === 'configuration' ? (
                                 <>
                                   <th>Cabin Profile</th>
                                   <th>Home Base</th>
                                   <th>Decommission</th>
                                 </>
-                              ) : group.forSale ? (
+                              ) : viewMode === 'financials' ? (
                                 <>
-                                  <th>Verkaufspreis</th>
-                                  <th>Aktion</th>
+                                  <th className="sortable-th" onClick={() => handleSort('completed_flights')} style={{ textAlign: 'right' }}>
+                                    Flights <SortIcon col="completed_flights" />
+                                  </th>
+                                  <th className="sortable-th" onClick={() => handleSort('load_factor')} style={{ textAlign: 'right' }}>
+                                    Ø Load Factor <SortIcon col="load_factor" />
+                                  </th>
+                                  <th className="sortable-th" onClick={() => handleSort('avg_profit')} style={{ textAlign: 'right' }}>
+                                    Ø Profit / Flight <SortIcon col="avg_profit" />
+                                  </th>
+                                  <th className="sortable-th" onClick={() => handleSort('total_profit')} style={{ textAlign: 'right' }}>
+                                    Total Profit <SortIcon col="total_profit" />
+                                  </th>
                                 </>
                               ) : (
                                 <>
@@ -723,7 +786,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                                   </td>
                                   <td className="ov-name">{ac.name || <span className="ov-empty">—</span>}</td>
                                   <td className="ov-type">{ac.aircraft_type}</td>
-                                  {editMode && (
+                                  {viewMode === 'configuration' && !group.forSale && !group.inProduction && (
                                     <td className="ov-condition">
                                       {(() => {
                                         const c = ac.condition ?? 100;
@@ -738,7 +801,37 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                                       })()}
                                     </td>
                                   )}
-                                  {editMode && !group.forSale && !group.inProduction ? (
+                                  {group.forSale ? (
+                                    <>
+                                      <td className="ov-listed-price">
+                                        {ac.listed_price ? `$${Math.round(ac.listed_price).toLocaleString()}` : '—'}
+                                      </td>
+                                      <td>
+                                        <button
+                                          className="ov-btn-schedule"
+                                          onClick={() => handleCancelListing(ac)}
+                                        >
+                                          Verkauf beenden
+                                        </button>
+                                      </td>
+                                    </>
+                                  ) : inProduction ? (
+                                    <>
+                                      <td className="ov-location">
+                                        <span style={{ display: 'inline-block', padding: '2px 7px', borderRadius: 10, background: '#E5E7EB', color: '#6B7280', fontSize: '0.7rem', fontWeight: 700 }}>
+                                          In Production
+                                        </span>
+                                      </td>
+                                      <td>
+                                        <button
+                                          className="ov-btn-schedule"
+                                          onClick={() => setDeliveryModal(ac)}
+                                        >
+                                          View Details
+                                        </button>
+                                      </td>
+                                    </>
+                                  ) : viewMode === 'configuration' ? (
                                     <>
                                       <td>
                                         <select
@@ -775,34 +868,25 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                                         </button>
                                       </td>
                                     </>
-                                  ) : group.forSale ? (
+                                  ) : viewMode === 'financials' ? (
                                     <>
-                                      <td className="ov-listed-price">
-                                        {ac.listed_price ? `$${Math.round(ac.listed_price).toLocaleString()}` : '—'}
+                                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                                        {ac.completed_flights || 0}
                                       </td>
-                                      <td>
-                                        <button
-                                          className="ov-btn-schedule"
-                                          onClick={() => handleCancelListing(ac)}
-                                        >
-                                          Verkauf beenden
-                                        </button>
+                                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                                        {ac.completed_flights > 0
+                                          ? `${(ac.avg_load_factor * 100).toFixed(1)}%`
+                                          : <span className="ov-empty">—</span>}
                                       </td>
-                                    </>
-                                  ) : inProduction ? (
-                                    <>
-                                      <td className="ov-location">
-                                        <span style={{ display: 'inline-block', padding: '2px 7px', borderRadius: 10, background: '#E5E7EB', color: '#6B7280', fontSize: '0.7rem', fontWeight: 700 }}>
-                                          In Production
-                                        </span>
+                                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: ac.avg_profit < 0 ? '#dc2626' : '#16a34a', fontWeight: 600 }}>
+                                        {ac.completed_flights > 0
+                                          ? `${ac.avg_profit < 0 ? '-' : ''}$${Math.abs(Math.round(ac.avg_profit)).toLocaleString()}`
+                                          : <span className="ov-empty" style={{ color: '#999', fontWeight: 400 }}>—</span>}
                                       </td>
-                                      <td>
-                                        <button
-                                          className="ov-btn-schedule"
-                                          onClick={() => setDeliveryModal(ac)}
-                                        >
-                                          View Details
-                                        </button>
+                                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: ac.total_profit < 0 ? '#dc2626' : '#16a34a', fontWeight: 700 }}>
+                                        {ac.completed_flights > 0
+                                          ? `${ac.total_profit < 0 ? '-' : ''}$${Math.abs(Math.round(ac.total_profit)).toLocaleString()}`
+                                          : <span className="ov-empty" style={{ color: '#999', fontWeight: 400 }}>—</span>}
                                       </td>
                                     </>
                                   ) : (
@@ -1540,22 +1624,36 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
 
         .ov-listed-price { font-size: 0.85rem; color: #2C2C2C; font-weight: 600; }
 
-        .ov-btn-edit-mode {
+        .view-mode-pill {
+          display: inline-flex;
+          background: rgba(0,0,0,0.18);
+          border: 1px solid rgba(255,255,255,0.25);
+          border-radius: 6px;
+          padding: 2px;
+          gap: 2px;
+        }
+        .view-mode-pill-btn {
           padding: 0.3rem 0.9rem;
           background: transparent;
-          border: 1px solid rgba(255,255,255,0.5);
-          color: white;
-          border-radius: 6px;
-          font-size: 0.78rem;
+          border: none;
+          color: rgba(255,255,255,0.75);
+          border-radius: 4px;
+          font-size: 0.75rem;
           font-weight: 600;
           cursor: pointer;
           text-transform: uppercase;
-          letter-spacing: 0.05em;
-          transition: background 0.15s, border-color 0.15s;
+          letter-spacing: 0.04em;
+          transition: background 0.15s, color 0.15s;
         }
-        .ov-btn-edit-mode:hover { background: rgba(255,255,255,0.15); border-color: white; }
-        .ov-btn-edit-mode--active { background: white; color: #2C2C2C; border-color: white; }
-        .ov-btn-edit-mode--active:hover { background: #E0E0E0; }
+        .view-mode-pill-btn:hover:not(:disabled):not(.view-mode-pill-btn--active) {
+          background: rgba(255,255,255,0.1);
+          color: white;
+        }
+        .view-mode-pill-btn--active {
+          background: white;
+          color: #2C2C2C;
+        }
+        .view-mode-pill-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
         .ov-btn-toggle-all {
           padding: 0.3rem 0.7rem;

@@ -358,10 +358,22 @@ router.get('/fleet', authMiddleware, async (req, res) => {
              t.new_price_usd, t.depreciation_age, t.depreciation_fh, a.total_flight_hours,
              a.is_listed_for_sale, t.min_runway_takeoff_m, t.min_runway_landing_m,
              a.delivery_at,
-             (SELECT current_value FROM used_aircraft_market WHERE seller_aircraft_id = a.id LIMIT 1) as listed_price
+             (SELECT current_value FROM used_aircraft_market WHERE seller_aircraft_id = a.id LIMIT 1) as listed_price,
+             fin.completed_flights, fin.total_profit, fin.avg_profit, fin.avg_load_factor
       FROM aircraft a
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
       LEFT JOIN airline_cabin_profiles acp ON a.airline_cabin_profile_id = acp.id
+      LEFT JOIN (
+        SELECT
+          aircraft_id,
+          COUNT(*)::int AS completed_flights,
+          SUM(COALESCE(booking_revenue_collected,0) - COALESCE(fuel_cost,0) - COALESCE(landing_fee,0) - COALESCE(atc_fee,0)) AS total_profit,
+          AVG(COALESCE(booking_revenue_collected,0) - COALESCE(fuel_cost,0) - COALESCE(landing_fee,0) - COALESCE(atc_fee,0)) AS avg_profit,
+          AVG(CASE WHEN total_seats > 0 THEN seats_sold::float / total_seats ELSE NULL END) AS avg_load_factor
+        FROM flights
+        WHERE airline_id = $1 AND status = 'completed'
+        GROUP BY aircraft_id
+      ) fin ON fin.aircraft_id = a.id
       WHERE a.airline_id = $1
       ORDER BY a.purchased_at DESC
     `, [airlineId]);
@@ -393,6 +405,10 @@ router.get('/fleet', authMiddleware, async (req, res) => {
       min_runway_takeoff_m: row.min_runway_takeoff_m ?? 0,
       min_runway_landing_m: row.min_runway_landing_m ?? 0,
       delivery_at: row.delivery_at ?? null,
+      completed_flights: row.completed_flights ?? 0,
+      total_profit: row.total_profit != null ? Number(row.total_profit) : 0,
+      avg_profit: row.avg_profit != null ? Number(row.avg_profit) : 0,
+      avg_load_factor: row.avg_load_factor != null ? Number(row.avg_load_factor) : 0,
     }));
 
     res.json({ fleet });

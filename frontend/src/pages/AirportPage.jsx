@@ -902,44 +902,44 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
         .ap-board-ct { font-size: 0.65rem; color: rgba(255,255,255,0.3); font-weight: 400; letter-spacing: 0; }
 
         .ap-board-empty {
-          padding: 3rem 1.5rem; text-align: center;
+          padding: 2.5rem 1.5rem; text-align: center;
           color: rgba(255,255,255,0.2); font-size: 0.83rem; font-style: italic;
         }
 
-        /* Board table */
+        /* Board table — typography aligned with dashboard (.hp-board-table) */
         .ap-board-table {
           width: 100%; border-collapse: collapse;
-          font-family: 'Courier New', Courier, monospace;
+          font-family: var(--font-mono);
         }
         .ap-board-table thead tr {
           background: rgba(255,255,255,0.04);
           border-bottom: 1px solid rgba(255,255,255,0.07);
         }
         .ap-board-table th {
-          padding: 0.5rem 0.85rem; text-align: left;
+          padding: 0.5rem 0.75rem; text-align: left;
           font-size: 0.65rem; font-weight: 700;
           letter-spacing: 0.1em; text-transform: uppercase;
           color: rgba(255,255,255,0.35); white-space: nowrap;
           font-family: system-ui, sans-serif;
         }
         .ap-board-table td {
-          padding: 2px 0.85rem; color: #EDE8D0; height: 30px;
-          font-size: 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.04);
+          padding: 0.48rem 0.75rem; color: #EDE8D0;
+          font-size: 0.85rem; border-bottom: 1px solid rgba(255,255,255,0.04);
           white-space: nowrap; vertical-align: middle;
         }
         .ap-board-table tbody tr:last-child td { border-bottom: none; }
         .ap-board-table tbody tr:hover td { background: rgba(255,255,255,0.03); }
         .ap-board-table tbody tr.ap-row-done td { opacity: 0.45; }
 
-        .ap-fn { font-size: 0.88rem; font-weight: 500; color: #facc15 !important; letter-spacing: 0.04em; }
+        .ap-fn      { font-size: 0.88rem; font-weight: 500; color: #facc15 !important; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
         .ap-apt-col { font-size: 0.88rem; font-weight: 500; color: rgba(255,255,255,0.65) !important; }
         .ap-apt-col button { font-size: 0.88rem; color: rgba(255,255,255,0.65) !important; text-decoration-color: rgba(255,255,255,0.25) !important; }
-        .ap-time { font-size: 0.88rem !important; font-weight: 500; color: rgba(255,255,255,0.65) !important; }
+        .ap-time    { font-size: 0.88rem !important; font-weight: 500; color: rgba(255,255,255,0.65) !important; font-variant-numeric: tabular-nums; }
         .ap-th-status { text-align: right !important; }
         .ap-td-status { text-align: right; }
         .ap-day-sep-row td { padding: 0; }
         .ap-day-sep-cell {
-          padding: 0.35rem 0.85rem !important;
+          padding: 0.35rem 0.75rem !important;
           font-size: 0.65rem !important; font-weight: 700 !important;
           letter-spacing: 0.1em; text-transform: uppercase;
           color: rgba(255,255,255,0.35) !important;
@@ -954,7 +954,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
           display: inline-block; background: rgba(255,255,255,0.1);
           border: 1px solid rgba(255,255,255,0.15); color: rgba(255,255,255,0.85);
           font-size: 0.7rem; font-weight: 700; padding: 0.13rem 0.42rem;
-          border-radius: 3px; letter-spacing: 0.05em; font-family: monospace;
+          border-radius: 3px; letter-spacing: 0.05em; font-family: var(--font-mono);
         }
 
         /* Status dots */

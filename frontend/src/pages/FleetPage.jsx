@@ -1097,32 +1097,42 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
           to { transform: rotate(360deg); }
         }
 
-        /* Hero Section */
+        /* Hero Section — Variante A (compact banner) */
         .fleet-hero {
           width: 100%;
-          height: 350px;
-          background: linear-gradient(rgba(0,0,0,0.4), rgba(0,0,0,0.6)),
-                      url('/header-images/Headerimage_Fleet.png') center/cover;
+          height: 200px;
+          background: linear-gradient(rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.65) 100%),
+                      url('/header-images/Headerimage_Fleet.png');
+          background-size: cover;
+          background-position: center 30%;
           display: flex;
-          align-items: center;
-          justify-content: center;
+          align-items: flex-end;
+          justify-content: flex-start;
+          padding: 0 0 24px 32px;
         }
 
         .fleet-hero-overlay {
-          text-align: center;
+          text-align: left;
           color: white;
         }
 
         .fleet-hero h1 {
-          font-size: 3rem;
-          margin: 0;
-          text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+          font-size: 1.75rem !important;
+          margin: 0 !important;
+          text-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
+          font-weight: 700 !important;
+          text-transform: uppercase !important;
+          letter-spacing: 0.08em !important;
+          color: #fff !important;
         }
 
         .fleet-hero p {
-          font-size: 1.25rem;
-          margin-top: 0.5rem;
-          opacity: 0.9;
+          font-size: 0.85rem !important;
+          margin-top: 0.4rem !important;
+          opacity: 0.85 !important;
+          font-weight: 500 !important;
+          text-transform: uppercase !important;
+          letter-spacing: 0.08em !important;
         }
 
         /* Container */
@@ -1352,11 +1362,16 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
 
         @media (max-width: 768px) {
           .fleet-hero {
-            height: 220px;
+            height: 140px;
+            padding: 0 0 18px 20px;
           }
 
           .fleet-hero h1 {
-            font-size: 2rem;
+            font-size: 1.25rem !important;
+          }
+
+          .fleet-hero p {
+            font-size: 0.7rem !important;
           }
 
           .fleet-section {

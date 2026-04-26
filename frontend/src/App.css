@@ -969,7 +969,8 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
   font-family: system-ui, sans-serif;
 }
 .hp-board-table td {
-  padding: 0.4rem 0.75rem;
+  padding: 0 0.75rem;
+  height: 34px;
   color: #EDE8D0;
   font-size: 0.75rem;
   border-bottom: 1px solid rgba(255,255,255,0.04);

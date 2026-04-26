@@ -923,7 +923,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
           font-family: system-ui, sans-serif;
         }
         .ap-board-table td {
-          padding: 0.4rem 0.75rem; color: #EDE8D0;
+          padding: 0 0.75rem; height: 34px; color: #EDE8D0;
           font-size: 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.04);
           white-space: nowrap; vertical-align: middle;
         }

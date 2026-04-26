@@ -939,6 +939,8 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
           font-size: 0.7rem; border-bottom: 1px solid rgba(255,255,255,0.04);
           white-space: nowrap; vertical-align: middle;
         }
+        .ap-board-table td:first-child,
+        .ap-board-table th:first-child { padding-left: 0.45rem; padding-right: 0.45rem; }
         .ap-board-table tbody tr:last-child td { border-bottom: none; }
         .ap-board-table tbody tr:hover td { background: rgba(255,255,255,0.03); }
         .ap-board-table tbody tr.ap-row-done td { opacity: 0.45; }

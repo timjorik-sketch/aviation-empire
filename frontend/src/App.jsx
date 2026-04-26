@@ -633,7 +633,7 @@ function App() {
       <div className="app">
         <div className="container">
           <div className="header">
-            <h1>Apron Empire</h1>
+            <img src="/logo/logo_black.png" alt="Apron Empire" className="brand-logo" />
             <p className="subtitle">Loading...</p>
           </div>
         </div>
@@ -994,7 +994,7 @@ function App() {
       {/* ── Hero banner ── */}
       <div className="page-hero">
         <div className="page-hero-overlay">
-          <h1>Apron Empire</h1>
+          <img src="/logo/logo_white.png" alt="Apron Empire" className="page-hero-logo page-hero-logo--large" />
         </div>
       </div>
 

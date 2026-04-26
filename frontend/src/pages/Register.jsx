@@ -65,7 +65,7 @@ function Register({ onRegister, onSwitchToLogin }) {
         style={{ backgroundImage: "linear-gradient(rgba(0,0,0,0.4),rgba(0,0,0,0.6)),url('/header-images/Headerimage_Home.png')" }}
       >
         <div className="page-hero-overlay">
-          <h1>Apron Empire</h1>
+          <img src="/logo/logo_white.png" alt="Apron Empire" className="page-hero-logo" />
         </div>
       </div>
       <div className="auth-container">

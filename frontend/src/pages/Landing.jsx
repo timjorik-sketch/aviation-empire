@@ -366,7 +366,7 @@ export default function Landing({ onLogin, onRegister, onForgotPassword }) {
       {/* ── RIGHT: Auth (login / register toggle) ────────────────────────── */}
       <aside className="landing-auth">
         <div className="landing-auth-card">
-          <div className="landing-auth-logo">Apron Empire</div>
+          <img src="/logo/logo_black.png" alt="Apron Empire" className="landing-auth-logo" />
           {mode === 'login' ? (
             <LoginForm
               onLogin={onLogin}

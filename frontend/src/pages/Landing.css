@@ -38,13 +38,10 @@
 }
 
 .landing-auth-logo {
-  text-align: center;
-  margin-bottom: 8px;
-  font-size: 14px;
-  letter-spacing: 0.2em;
-  color: #666;
-  text-transform: uppercase;
-  font-weight: 600;
+  display: block;
+  height: 44px;
+  width: auto;
+  margin: 0 auto 12px;
 }
 
 .landing-auth-title {

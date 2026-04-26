@@ -24,16 +24,18 @@ async function issueVerificationEmail(user) {
     [user.id, tokenHash]
   );
   const verifyUrl = `${frontendBase()}/?verify_token=${rawToken}`;
-  try {
-    const result = await sendVerificationEmail({
-      to: user.email, username: user.username, verifyUrl,
+  // Fire-and-forget: don't block the HTTP response on SMTP latency
+  sendVerificationEmail({ to: user.email, username: user.username, verifyUrl })
+    .then(result => {
+      if (result?.skipped) {
+        console.log(`[verify-email] SMTP off — link for ${user.email}: ${verifyUrl}`);
+      } else {
+        console.log(`[verify-email] sent to ${user.email} (id: ${result?.messageId})`);
+      }
+    })
+    .catch(mailErr => {
+      console.error('[verify-email] email send failed:', mailErr);
     });
-    if (result?.skipped) {
-      console.log(`[verify-email] SMTP off — link for ${user.email}: ${verifyUrl}`);
-    }
-  } catch (mailErr) {
-    console.error('[verify-email] email send failed:', mailErr);
-  }
 }
 
 const router = express.Router();
@@ -233,19 +235,18 @@ router.post('/forgot-password',
       const base = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
       const resetUrl = `${base}/?reset_token=${rawToken}`;
 
-      try {
-        const result = await sendPasswordResetEmail({
-          to: user.email,
-          username: user.username,
-          resetUrl,
+      // Fire-and-forget: don't block the HTTP response on SMTP latency
+      sendPasswordResetEmail({ to: user.email, username: user.username, resetUrl })
+        .then(result => {
+          if (result?.skipped) {
+            console.log(`[forgot-password] SMTP off — link for ${user.email}: ${resetUrl}`);
+          } else {
+            console.log(`[forgot-password] sent to ${user.email} (id: ${result?.messageId})`);
+          }
+        })
+        .catch(mailErr => {
+          console.error('[forgot-password] email send failed:', mailErr);
         });
-        if (result?.skipped) {
-          console.log(`[forgot-password] SMTP off — link for ${user.email}: ${resetUrl}`);
-        }
-      } catch (mailErr) {
-        // Log but still respond generically — user shouldn't see mailer errors
-        console.error('[forgot-password] email send failed:', mailErr);
-      }
 
       return genericOk();
     } catch (error) {

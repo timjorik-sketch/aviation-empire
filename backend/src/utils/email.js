@@ -1,41 +1,31 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
-let cachedTransporter = null;
+let cachedClient = null;
 
-function getTransporter() {
-  if (cachedTransporter !== null) return cachedTransporter;
-
-  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
-  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
-    cachedTransporter = false;
+function getClient() {
+  if (cachedClient !== null) return cachedClient;
+  const apiKey = process.env.RESEND_API_KEY || process.env.SMTP_PASS;
+  if (!apiKey) {
+    cachedClient = false;
     return false;
   }
-
-  const port = parseInt(SMTP_PORT || '587', 10);
-  cachedTransporter = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port,
-    secure: port === 465,
-    auth: { user: SMTP_USER, pass: SMTP_PASS },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
-  });
-  return cachedTransporter;
+  cachedClient = new Resend(apiKey);
+  return cachedClient;
 }
 
 export async function sendEmail({ to, subject, html, text }) {
-  const transporter = getTransporter();
-  const from = process.env.SMTP_FROM || process.env.SMTP_USER;
+  const client = getClient();
+  const from = process.env.EMAIL_FROM || process.env.SMTP_FROM || 'Apron Empire <noreply@apronempire.com>';
 
-  if (!transporter) {
-    console.warn('[email] SMTP not configured — skipping send. Payload:');
+  if (!client) {
+    console.warn('[email] RESEND_API_KEY not configured — skipping send. Payload:');
     console.warn(`  to: ${to}\n  subject: ${subject}\n  text: ${text}`);
     return { skipped: true };
   }
 
-  const info = await transporter.sendMail({ from, to, subject, html, text });
-  return { messageId: info.messageId };
+  const { data, error } = await client.emails.send({ from, to, subject, html, text });
+  if (error) throw new Error(`Resend API error: ${error.message || JSON.stringify(error)}`);
+  return { messageId: data?.id };
 }
 
 export async function sendVerificationEmail({ to, username, verifyUrl }) {

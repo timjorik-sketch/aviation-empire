@@ -1112,12 +1112,12 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
           bottom: 28px;
           left: 32px;
           max-width: calc(100% - 64px);
-          background: rgba(255, 255, 255, 0.72);
+          background: rgba(255, 255, 255, 0.55);
           backdrop-filter: blur(24px) saturate(180%);
           -webkit-backdrop-filter: blur(24px) saturate(180%);
           padding: 18px 28px;
-          border-radius: 12px;
-          border: 1px solid rgba(255, 255, 255, 0.5);
+          border-radius: var(--radius-lg);
+          border: 1px solid rgba(255, 255, 255, 0.45);
           box-shadow:
             0 1px 0 rgba(255, 255, 255, 0.6) inset,
             0 12px 32px rgba(0, 0, 0, 0.18),
@@ -1382,7 +1382,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
             left: 16px;
             max-width: calc(100% - 32px);
             padding: 13px 18px;
-            border-radius: 10px;
+            border-radius: var(--radius-lg);
           }
 
           .fleet-hero h1 {

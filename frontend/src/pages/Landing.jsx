@@ -300,6 +300,7 @@ export default function Landing({ onLogin, onRegister, onForgotPassword }) {
       {/* ── LEFT: Marketing ──────────────────────────────────────────────── */}
       <main className="landing-marketing">
         <section className="landing-hero">
+          <img src="/logo/logo_black.png" alt="Apron Empire" className="landing-marketing-logo" />
           <span className="landing-eyebrow">Airline Management Simulation</span>
           <h1 className="landing-h1">Build Your Airline Empire</h1>
           <p className="landing-sub">

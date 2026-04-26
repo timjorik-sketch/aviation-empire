@@ -102,6 +102,17 @@
   margin-bottom: 56px;
 }
 
+.landing-marketing-logo {
+  display: block;
+  height: 56px;
+  width: auto;
+  margin-bottom: 24px;
+}
+
+@media (max-width: 768px) {
+  .landing-marketing-logo { height: 44px; margin-bottom: 16px; }
+}
+
 .landing-eyebrow {
   display: inline-block;
   padding: 4px 12px;

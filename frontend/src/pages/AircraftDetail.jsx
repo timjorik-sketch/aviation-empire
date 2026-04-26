@@ -371,6 +371,14 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     fetchAllAirports();
   }, [fetchDetail, fetchAirports, fetchAllAirports]);
 
+  // Keep current_flight + current_location fresh while the page is open so
+  // location and status reflect ongoing flight processing — including for
+  // grounded aircraft that still have in-progress scheduled flights.
+  useEffect(() => {
+    const iv = setInterval(fetchDetail, 30000);
+    return () => clearInterval(iv);
+  }, [fetchDetail]);
+
   useEffect(() => {
     if (aircraft?.type_id) fetchCabinProfiles(aircraft.type_id);
   }, [aircraft?.type_id, fetchCabinProfiles]);
@@ -1315,9 +1323,15 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                 const gst = (depSt && depSt.cls !== 'scheduled')
                   ? depSt
                   : { label: 'On Ground', cls: 'ontime', color: '#22c55e' };
-                const dotCls = !isActive ? 'maintenance' : gst.cls;
-                const displayLabel = !isActive ? 'Inactive' : gst.label;
-                const displayColor = !isActive ? '#9ca3af' : gst.color;
+                // When grounded but a flight is still actively progressing
+                // (boarding/taxiing), surface the real status instead of forcing
+                // "Inactive" — the badge in the title bar already conveys the
+                // grounded state, and location should keep tracking flights.
+                const isImminent = depSt && depSt.cls !== 'scheduled';
+                const showInactive = !isActive && !isImminent;
+                const dotCls = showInactive ? 'maintenance' : gst.cls;
+                const displayLabel = showInactive ? 'Inactive' : gst.label;
+                const displayColor = showInactive ? '#9ca3af' : gst.color;
                 return (
                   <div className="ad-on-ground">
                     <StatusDot cls={dotCls} pulse={false} />

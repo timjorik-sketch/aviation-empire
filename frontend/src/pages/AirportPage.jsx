@@ -92,6 +92,28 @@ function StatusDots({ cls, label }) {
   );
 }
 
+// Pick the most readable destination representation that still fits.
+//  Tier 1 (≤ 22 chars):  "Berlin Heathrow (LHR)"   — full name + code
+//  Tier 2 (first word ≤ 14 chars): "Berlin BER" — city + code, no parens
+//  Tier 3 (else): "BER" — code only
+function DestinationLabel({ code, name, onNavigate }) {
+  if (!name) {
+    return <AirportLink code={code} onNavigate={onNavigate} />;
+  }
+  if (name.length <= 22) {
+    return <AirportLink code={code} name={name} onNavigate={onNavigate} />;
+  }
+  const firstWord = name.split(/\s+/)[0] || '';
+  if (firstWord && firstWord.length <= 14) {
+    return (
+      <span>
+        {firstWord} <AirportLink code={code} onNavigate={onNavigate} />
+      </span>
+    );
+  }
+  return <AirportLink code={code} onNavigate={onNavigate} />;
+}
+
 function AirlineChip({ code, logoFilename, dark = true, onClick }) {
   const style = onClick ? { cursor: 'pointer' } : {};
   if (logoFilename) {
@@ -163,9 +185,9 @@ function BoardTable({ type, flights, now, onNavigateToAirport, onAirlineClick })
               <td><AirlineChip code={f.airline_code} logoFilename={f.logo_filename} dark={false} onClick={onAirlineClick ? () => onAirlineClick(f.airline_code) : undefined} /></td>
               <td className="ap-time">{formatBoardTime(time)}</td>
               <td className="ap-apt-col" title={airportName || airportCode}>
-                <AirportLink
+                <DestinationLabel
                   code={airportCode}
-                  name={airportName && airportName.length <= 14 ? airportName : undefined}
+                  name={airportName}
                   onNavigate={onNavigateToAirport}
                 />
               </td>

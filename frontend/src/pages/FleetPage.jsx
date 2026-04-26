@@ -474,10 +474,10 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
         {/* Messages handled by Toast above */}
 
         {/* Fleet + Manage Fleet sidebar */}
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start', marginBottom: '2rem' }}>
+        <div className="fleet-row" style={{ marginBottom: '2rem' }}>
 
         {/* Fleet Section */}
-        <section className="fleet-section" style={{ flex: 7, minWidth: 0, marginBottom: 0 }}>
+        <section className="fleet-section fleet-row-main" style={{ marginBottom: 0 }}>
           <div className="fleet-section-bar">
             <span className="fleet-section-bar-title">Fleet ({totalAircraft})</span>
           </div>
@@ -525,7 +525,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
         </section>
 
         {/* Right column: Manage Fleet + Aircraft on Order */}
-        <div style={{ flex: 3, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div className="fleet-row-side">
 
           {/* Manage Fleet */}
           <div style={{ background: 'white', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', overflow: 'hidden' }}>
@@ -1219,6 +1219,20 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
           border: 1px solid #fca5a5;
         }
 
+        /* Fleet + sidebar row */
+        .fleet-row {
+          display: flex;
+          gap: 1rem;
+          align-items: flex-start;
+        }
+        .fleet-row-main { flex: 7; min-width: 0; }
+        .fleet-row-side {
+          flex: 3;
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+        }
+
         /* Section Styling */
         .fleet-section {
           background: white;
@@ -1395,6 +1409,22 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
 
           .fleet-section {
             padding: 1.5rem;
+          }
+
+          /* Match the section bar's negative margin to the smaller mobile padding
+             so the dark header still butts cleanly against the card edges. */
+          .fleet-section .fleet-section-bar {
+            margin: -1.5rem -1.5rem 1rem;
+          }
+
+          /* Stack Fleet + Manage Fleet vertically on phones. */
+          .fleet-row {
+            flex-direction: column;
+          }
+          .fleet-row-main,
+          .fleet-row-side {
+            flex: 1 1 auto;
+            width: 100%;
           }
 
           .fleet-top-bar {
@@ -1837,6 +1867,11 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
         @media (max-width: 768px) {
           .overview-section {
             padding: 1.25rem;
+          }
+          /* Same fix as .fleet-section: keep the section bar flush with the
+             reduced mobile padding. */
+          .overview-section .fleet-section-bar {
+            margin: -1.25rem -1.25rem 1rem;
           }
           .overview-table th,
           .overview-table td {

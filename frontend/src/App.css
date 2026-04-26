@@ -43,7 +43,7 @@
   filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.5));
 }
 .page-hero-logo--large {
-  height: 160px;
+  height: 128px;
 }
 .brand-logo {
   display: block;
@@ -70,7 +70,7 @@
     font-size: 2rem;
   }
   .page-hero-logo { height: 44px; }
-  .page-hero-logo--large { height: 100px; }
+  .page-hero-logo--large { height: 80px; }
   .brand-logo { height: 44px; }
 }
 

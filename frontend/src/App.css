@@ -26,13 +26,28 @@
   color: white;
 }
 
-.page-hero-overlay h1 {
-  font-size: 3rem;
-  margin: 0;
-  text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+/* Unified hero title styling — applied to every page hero across the app.
+   Uses !important to win over the per-page <style> blocks that some pages
+   ship with (FleetPage, CabinProfiles, AircraftMarketplace, etc.). */
+.page-hero-overlay h1,
+.fleet-hero h1,
+.fleet-hero-overlay h1,
+.cp-hero-overlay h1,
+.sp-hero-overlay h1,
+.am-hero-overlay h1,
+.ad-hero h1,
+.ad-hero-overlay h1,
+.ap-hero h1,
+.ap-hero-overlay h1,
+.ep-hero h1,
+.ep-hero-overlay h1 {
+  font-size: 2.25rem !important;
+  margin: 0 !important;
+  text-shadow: 2px 2px 4px rgba(0,0,0,0.5) !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.08em !important;
+  color: #fff !important;
 }
 
 .page-hero-logo {
@@ -52,13 +67,24 @@
   margin: 0 auto;
 }
 
-.page-hero-overlay p {
-  font-size: 1.25rem;
-  margin-top: 0.5rem;
-  opacity: 0.9;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+.page-hero-overlay p,
+.fleet-hero p,
+.fleet-hero-overlay p,
+.cp-hero-overlay p,
+.sp-hero-overlay p,
+.am-hero-overlay p,
+.ad-hero p,
+.ad-hero-overlay p,
+.ap-hero p,
+.ap-hero-overlay p,
+.ep-hero p,
+.ep-hero-overlay p {
+  font-size: 1.05rem !important;
+  margin-top: 0.5rem !important;
+  opacity: 0.9 !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.08em !important;
 }
 
 @media (max-width: 768px) {
@@ -66,8 +92,33 @@
     height: 220px;
   }
 
-  .page-hero-overlay h1 {
-    font-size: 2rem;
+  .page-hero-overlay h1,
+  .fleet-hero h1,
+  .fleet-hero-overlay h1,
+  .cp-hero-overlay h1,
+  .sp-hero-overlay h1,
+  .am-hero-overlay h1,
+  .ad-hero h1,
+  .ad-hero-overlay h1,
+  .ap-hero h1,
+  .ap-hero-overlay h1,
+  .ep-hero h1,
+  .ep-hero-overlay h1 {
+    font-size: 1.5rem !important;
+  }
+  .page-hero-overlay p,
+  .fleet-hero p,
+  .fleet-hero-overlay p,
+  .cp-hero-overlay p,
+  .sp-hero-overlay p,
+  .am-hero-overlay p,
+  .ad-hero p,
+  .ad-hero-overlay p,
+  .ap-hero p,
+  .ap-hero-overlay p,
+  .ep-hero p,
+  .ep-hero-overlay p {
+    font-size: 0.85rem !important;
   }
   .page-hero-logo { height: 44px; }
   .page-hero-logo--large { height: 56px; }

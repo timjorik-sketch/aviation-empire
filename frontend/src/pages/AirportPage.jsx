@@ -415,7 +415,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
                   <tbody>
                     <tr>
                       <td className="ap-it-label">Category</td>
-                      <td className="ap-it-val">
+                      <td colSpan={2} className="ap-it-val">
                         {airport.category
                           ? <span className="ap-cat-badge">Cat {airport.category} – {CATEGORY_LABELS[airport.category]}</span>
                           : '—'}
@@ -423,15 +423,15 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
                     </tr>
                     <tr>
                       <td className="ap-it-label">Continent</td>
-                      <td className="ap-it-val">{airport.continent || '—'}</td>
+                      <td colSpan={2} className="ap-it-val">{airport.continent || '—'}</td>
                     </tr>
                     <tr>
                       <td className="ap-it-label">Country</td>
-                      <td className="ap-it-val">{airport.country || '—'}</td>
+                      <td colSpan={2} className="ap-it-val">{airport.country || '—'}</td>
                     </tr>
                     <tr>
                       <td className="ap-it-label">Runway</td>
-                      <td className="ap-it-val ap-it-runway">
+                      <td colSpan={2} className="ap-it-val ap-it-runway">
                         <span>{formatRunway(airport.runway_length_m)}</span>
                         <button className="ap-capable-link" onClick={openCapableModal}>
                           Compatible Aircraft ↗
@@ -443,7 +443,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
                     </tr>
                     <tr>
                       <td className="ap-it-label">Ground Staff</td>
-                      <td className="ap-it-val">
+                      <td colSpan={2} className="ap-it-val">
                         {airport.category
                           ? <>{GROUND_STAFF_BY_CAT[airport.category] ?? '—'} <span style={{ color: '#999', fontSize: '0.78rem' }}>employees</span></>
                           : '—'}

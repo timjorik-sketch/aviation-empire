@@ -740,17 +740,17 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                                 </>
                               ) : viewMode === 'financials' ? (
                                 <>
-                                  <th className="sortable-th" onClick={() => handleSort('completed_flights')} style={{ textAlign: 'right' }}>
-                                    Flights <SortIcon col="completed_flights" />
+                                  <th className="sortable-th" onClick={() => handleSort('completed_flights')} style={{ textAlign: 'right' }} title="Completed flights in the last 7 days">
+                                    Flights (7d) <SortIcon col="completed_flights" />
                                   </th>
-                                  <th className="sortable-th" onClick={() => handleSort('load_factor')} style={{ textAlign: 'right' }}>
-                                    Ø Load Factor <SortIcon col="load_factor" />
+                                  <th className="sortable-th" onClick={() => handleSort('load_factor')} style={{ textAlign: 'right' }} title="Average load factor over the last 7 days">
+                                    Ø Load Factor (7d) <SortIcon col="load_factor" />
                                   </th>
-                                  <th className="sortable-th" onClick={() => handleSort('avg_profit')} style={{ textAlign: 'right' }}>
-                                    Ø Profit / Flight <SortIcon col="avg_profit" />
+                                  <th className="sortable-th" onClick={() => handleSort('avg_profit')} style={{ textAlign: 'right' }} title="Average profit per flight over the last 7 days">
+                                    Ø Profit / Flight (7d) <SortIcon col="avg_profit" />
                                   </th>
-                                  <th className="sortable-th" onClick={() => handleSort('total_profit')} style={{ textAlign: 'right' }}>
-                                    Total Profit <SortIcon col="total_profit" />
+                                  <th className="sortable-th" onClick={() => handleSort('total_profit')} style={{ textAlign: 'right' }} title="Total profit over the last 7 days">
+                                    Total Profit (7d) <SortIcon col="total_profit" />
                                   </th>
                                 </>
                               ) : (

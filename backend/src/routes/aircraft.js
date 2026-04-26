@@ -371,7 +371,10 @@ router.get('/fleet', authMiddleware, async (req, res) => {
           AVG(COALESCE(revenue,0) - COALESCE(fuel_cost,0) - COALESCE(landing_fee,0) - COALESCE(atc_fee,0)) AS avg_profit,
           AVG(CASE WHEN total_seats > 0 THEN seats_sold::float / total_seats ELSE NULL END) AS avg_load_factor
         FROM flights
-        WHERE airline_id = $1 AND status = 'completed' AND booking_revenue_collected = 1
+        WHERE airline_id = $1
+          AND status = 'completed'
+          AND booking_revenue_collected = 1
+          AND arrival_time >= NOW() - INTERVAL '7 days'
         GROUP BY aircraft_id
       ) fin ON fin.aircraft_id = a.id
       WHERE a.airline_id = $1

@@ -153,8 +153,8 @@ function AirlineChip({ code, logoFilename, dark = true, onClick, compact = false
 
 function BoardTable({ type, flights, now, onNavigateToAirport, onAirlineClick }) {
   const isArr = type === 'arrivals';
-  const tableRef = useRef(null);
-  const mode = useBoardMode(tableRef);
+  const containerRef = useRef(null);
+  const mode = useBoardMode(containerRef);
 
   // Filter and compute statuses
   const rows = flights.map(f => {
@@ -180,7 +180,8 @@ function BoardTable({ type, flights, now, onNavigateToAirport, onAirlineClick })
   }
 
   return (
-    <table className="ap-board-table" ref={tableRef} data-mode={mode}>
+    <div ref={containerRef} className="ap-board-scroll">
+    <table className="ap-board-table" data-mode={mode}>
       <thead>
         <tr>
           <th>Airline</th>
@@ -222,6 +223,7 @@ function BoardTable({ type, flights, now, onNavigateToAirport, onAirlineClick })
         })}
       </tbody>
     </table>
+    </div>
   );
 }
 
@@ -943,6 +945,10 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
           padding: 2.5rem 1.5rem; text-align: center;
           color: rgba(255,255,255,0.2); font-size: 0.83rem; font-style: italic;
         }
+
+        /* Block container around the table so we can measure its width
+           independently of the table's own (potentially overflowing) layout. */
+        .ap-board-scroll { width: 100%; overflow: hidden; }
 
         /* Board table — typography aligned with dashboard (.hp-board-table) */
         .ap-board-table {

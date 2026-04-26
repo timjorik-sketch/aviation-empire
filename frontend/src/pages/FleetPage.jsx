@@ -1097,11 +1097,11 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
           to { transform: rotate(360deg); }
         }
 
-        /* Hero Section — Variante C (glass caption) */
+        /* Hero Section — Variante C (floating glass card) */
         .fleet-hero {
           position: relative;
           width: 100%;
-          height: 200px;
+          height: 240px;
           background: url('/header-images/Headerimage_Fleet.png');
           background-size: cover;
           background-position: center 30%;
@@ -1109,16 +1109,19 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
 
         .fleet-hero-overlay {
           position: absolute;
-          bottom: 0;
+          bottom: 28px;
           left: 32px;
           max-width: calc(100% - 64px);
-          background: rgba(255, 255, 255, 0.92);
-          backdrop-filter: blur(10px);
-          -webkit-backdrop-filter: blur(10px);
-          padding: 14px 22px;
-          border-radius: 8px 8px 0 0;
-          border-left: 4px solid #2563eb;
-          box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.06);
+          background: rgba(255, 255, 255, 0.72);
+          backdrop-filter: blur(24px) saturate(180%);
+          -webkit-backdrop-filter: blur(24px) saturate(180%);
+          padding: 18px 28px;
+          border-radius: 12px;
+          border: 1px solid rgba(255, 255, 255, 0.5);
+          box-shadow:
+            0 1px 0 rgba(255, 255, 255, 0.6) inset,
+            0 12px 32px rgba(0, 0, 0, 0.18),
+            0 2px 6px rgba(0, 0, 0, 0.08);
           text-align: left;
         }
 
@@ -1130,11 +1133,12 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
           text-transform: uppercase !important;
           letter-spacing: 0.08em !important;
           color: var(--color-text-primary) !important;
+          line-height: 1.15 !important;
         }
 
         .fleet-hero p {
           font-size: 0.78rem !important;
-          margin-top: 0.3rem !important;
+          margin-top: 0.4rem !important;
           opacity: 1 !important;
           font-weight: 500 !important;
           text-transform: uppercase !important;
@@ -1370,17 +1374,19 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
 
         @media (max-width: 768px) {
           .fleet-hero {
-            height: 140px;
+            height: 180px;
           }
 
           .fleet-hero-overlay {
+            bottom: 18px;
             left: 16px;
             max-width: calc(100% - 32px);
-            padding: 11px 16px;
+            padding: 13px 18px;
+            border-radius: 10px;
           }
 
           .fleet-hero h1 {
-            font-size: 1.05rem !important;
+            font-size: 1.1rem !important;
           }
 
           .fleet-hero p {

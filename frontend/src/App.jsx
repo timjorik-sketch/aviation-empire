@@ -593,7 +593,7 @@ function App() {
     const textColor  = isYellow ? '#facc15' : isBlinking ? '#facc15' : 'rgba(255,255,255,0.45)';
     return (
       <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
-        {label && <span style={{ fontSize: '0.78rem', color: textColor, fontWeight: 500, whiteSpace: 'nowrap' }}>{label}</span>}
+        {label && <span style={{ fontSize: '0.72rem', color: textColor, fontWeight: 500, whiteSpace: 'nowrap' }}>{label}</span>}
         <span className={isBlinking ? 'hp-dot-blink-a' : undefined}
           style={{ width: 7, height: 7, borderRadius: '50%', display: 'inline-block', flexShrink: 0, background: dotColor }} />
         <span className={isBlinking ? 'hp-dot-blink-b' : undefined}

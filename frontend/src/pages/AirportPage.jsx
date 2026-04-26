@@ -78,7 +78,7 @@ function StatusDots({ cls, label }) {
   return (
     <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
       {label && (
-        <span style={{ fontSize: '0.78rem', color: textColor, fontWeight: 500, whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: '0.72rem', color: textColor, fontWeight: 500, whiteSpace: 'nowrap' }}>
           {label}
         </span>
       )}

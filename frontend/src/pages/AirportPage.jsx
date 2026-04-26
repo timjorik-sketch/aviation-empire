@@ -8,6 +8,19 @@ const API_URL = import.meta.env.VITE_API_URL || '';
 
 const GROUND_STAFF_BY_CAT = { 1: 2, 2: 4, 3: 7, 4: 10, 5: 14, 6: 18, 7: 22, 8: 25 };
 
+// Track viewport width to choose how much destination text fits in board cells.
+function useViewportMode() {
+  const [width, setWidth] = useState(() => typeof window === 'undefined' ? 1400 : window.innerWidth);
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  if (width < 900) return 'code-only';
+  if (width < 1300) return 'compact';
+  return 'full';
+}
+
 const CATEGORY_LABELS = {
   1: 'Airstrip',
   2: 'Local',
@@ -92,24 +105,25 @@ function StatusDots({ cls, label }) {
   );
 }
 
-// Pick the most readable destination representation that still fits.
-//  Tier 1 (≤ 22 chars):  "Berlin Heathrow (LHR)"   — full name + code
-//  Tier 2 (first word ≤ 14 chars): "Berlin BER" — city + code, no parens
-//  Tier 3 (else): "BER" — code only
-function DestinationLabel({ code, name, onNavigate }) {
-  if (!name) {
+// Pick the most readable destination representation that still fits the
+// available column width.
+//  - Mobile (< 900px):  always code-only ("LHR"), no parens
+//  - Tablet/Desktop:    "Full Name (LHR)" if it fits, else "City (LHR)",
+//                       else "LHR" (no parens when code-only)
+function DestinationLabel({ code, name, onNavigate, mode }) {
+  if (!name || mode === 'code-only') {
     return <AirportLink code={code} onNavigate={onNavigate} />;
   }
-  if (name.length <= 22) {
+  // Width-dependent thresholds
+  const fullMax = mode === 'compact' ? 12 : 22;
+  const cityMax = mode === 'compact' ? 10 : 14;
+
+  if (name.length <= fullMax) {
     return <AirportLink code={code} name={name} onNavigate={onNavigate} />;
   }
   const firstWord = name.split(/\s+/)[0] || '';
-  if (firstWord && firstWord.length <= 14) {
-    return (
-      <span>
-        {firstWord} <AirportLink code={code} onNavigate={onNavigate} />
-      </span>
-    );
+  if (firstWord && firstWord.length <= cityMax) {
+    return <AirportLink code={code} name={firstWord} onNavigate={onNavigate} />;
   }
   return <AirportLink code={code} onNavigate={onNavigate} />;
 }
@@ -130,7 +144,7 @@ function AirlineChip({ code, logoFilename, dark = true, onClick }) {
   return <span className={`ap-chip ${dark ? 'ap-chip-dark' : 'ap-chip-board'}`} style={style} onClick={onClick}>{code}</span>;
 }
 
-function BoardTable({ type, flights, now, onNavigateToAirport, onAirlineClick }) {
+function BoardTable({ type, flights, now, onNavigateToAirport, onAirlineClick, mode }) {
   const isArr = type === 'arrivals';
 
   // Filter and compute statuses
@@ -189,6 +203,7 @@ function BoardTable({ type, flights, now, onNavigateToAirport, onAirlineClick })
                   code={airportCode}
                   name={airportName}
                   onNavigate={onNavigateToAirport}
+                  mode={mode}
                 />
               </td>
               <td className="ap-fn">{f.flight_number}</td>
@@ -269,6 +284,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
 
   const [destStatus, setDestStatus] = useState(null); // { is_opened, destination_type, effective_type, weekly_flights }
   const [addingDest, setAddingDest] = useState(false);
+  const viewportMode = useViewportMode();
 
   const fetchBoards = useCallback(() => {
     Promise.all([
@@ -531,7 +547,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
                   <span className="ap-board-title">DEPARTURES</span>
                   <span className="ap-board-ct">{departures.length} shown</span>
                 </div>
-                <BoardTable type="departures" flights={departures} now={now} onNavigateToAirport={onNavigateToAirport} onAirlineClick={setProfilePopupCode} />
+                <BoardTable type="departures" flights={departures} now={now} onNavigateToAirport={onNavigateToAirport} onAirlineClick={setProfilePopupCode} mode={viewportMode} />
               </div>
 
               {/* Arrivals */}
@@ -541,7 +557,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
                   <span className="ap-board-title">ARRIVALS</span>
                   <span className="ap-board-ct">{arrivals.length} shown</span>
                 </div>
-                <BoardTable type="arrivals" flights={arrivals} now={now} onNavigateToAirport={onNavigateToAirport} onAirlineClick={setProfilePopupCode} />
+                <BoardTable type="arrivals" flights={arrivals} now={now} onNavigateToAirport={onNavigateToAirport} onAirlineClick={setProfilePopupCode} mode={viewportMode} />
               </div>
 
             </div>

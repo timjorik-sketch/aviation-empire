@@ -39,6 +39,9 @@
   font-size: 1.25rem;
   margin-top: 0.5rem;
   opacity: 0.9;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 @media (max-width: 768px) {

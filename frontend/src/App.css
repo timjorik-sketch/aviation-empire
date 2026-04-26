@@ -636,11 +636,11 @@
 }
 .hp-btn-logout-strip:hover { background: var(--color-surface-page); border-color: #AAAAAA; }
 
-/* Two-column dashboard layout: 30% / 70% */
+/* Two-column dashboard layout: 40% / 60% */
 .hp-layout-grid {
   margin-top: 1.5rem;
   display: grid;
-  grid-template-columns: 3fr 7fr;
+  grid-template-columns: 2fr 3fr;
   gap: 1.5rem;
   align-items: start;
 }

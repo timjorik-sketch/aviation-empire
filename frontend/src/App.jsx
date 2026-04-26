@@ -771,11 +771,11 @@ function App() {
         {/* ── Active airline content ── */}
         {activeAirline ? (
           <>
-            {/* Logo + Info row */}
-            <div className="hp-content-row">
+            {/* ── Two-column layout: 30% sidebar / 70% main ── */}
+            <div className="hp-layout-grid">
 
-              {/* Left: map + boards */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Left column 30%: Airline Information + Fleet + Manage */}
+              <div className="hp-left-col">
 
                 {/* Airline Information */}
                 <div className="hp-sidebar-card">
@@ -788,192 +788,167 @@ function App() {
                       Flightplan
                     </button>
                   </div>
-                  {/* Two columns */}
-                  <div className="hp-info-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1px', background: '#F0F0F0', alignItems: 'stretch' }}>
 
-                    {/* Left column: Logo → Passengers + Progression → Finances → Network */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                  {/* Identity: Code + Name + full-width Logo */}
+                  <div style={{ background: '#fff', borderBottom: '1px solid #F0F0F0' }}>
+                    <div className="hp-it-section-label">Airline</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.5rem 1.1rem' }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '1.5rem', fontWeight: 700, color: '#2C2C2C', letterSpacing: '0.05em', flexShrink: 0 }}>{activeAirline.airline_code}</span>
+                      <span style={{ fontSize: '1rem', fontWeight: 600, color: '#2C2C2C', lineHeight: 1.2 }}>{activeAirline.name}</span>
+                    </div>
+                    <label
+                      style={{ display: 'block', position: 'relative', cursor: 'pointer', borderTop: '1px solid #F0F0F0' }}
+                      title="Upload logo (480 × 120 px)"
+                    >
+                      {activeAirline.logo_filename
+                        ? <img src={activeAirline.logo_filename.startsWith('http') ? activeAirline.logo_filename : `${API_URL}/airline-logos/${activeAirline.logo_filename}`} alt="logo" style={{ display: 'block', width: '100%', height: 'auto', aspectRatio: '4/1', objectFit: 'contain' }} />
+                        : <div style={{ aspectRatio: '4/1', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#CCC', fontSize: '0.8rem' }}>Logo hochladen (480 × 120 px)</div>
+                      }
+                      <div className="ait-logo-hover-overlay">↑ Upload</div>
+                      <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" style={{ display: 'none' }}
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const url = URL.createObjectURL(file);
+                          const img = new Image();
+                          img.onload = async () => {
+                            URL.revokeObjectURL(url);
+                            if (img.naturalWidth !== 480 || img.naturalHeight !== 120) {
+                              alert(`Logo muss genau 480 × 120 px sein.\nDieses Bild ist ${img.naturalWidth} × ${img.naturalHeight} px.`);
+                              e.target.value = '';
+                              return;
+                            }
+                            const form = new FormData();
+                            form.append('logo', file);
+                            const token = localStorage.getItem('token');
+                            const res = await fetch(`${API_URL}/api/airline/logo`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
+                            if (res.ok) fetchAllAirlines();
+                            e.target.value = '';
+                          };
+                          img.onerror = () => { URL.revokeObjectURL(url); alert('Datei konnte nicht gelesen werden.'); };
+                          img.src = url;
+                        }}
+                      />
+                    </label>
+                  </div>
 
-                      {/* Identity card: Section header + Code/Name row + full-width Logo */}
-                      <div style={{ background: '#fff', borderBottom: '1px solid #F0F0F0' }}>
-                        <div className="hp-it-section-label">Airline</div>
-                        {/* Code + Name on one line */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.5rem 1.1rem' }}>
-                          <span style={{ fontFamily: 'monospace', fontSize: '1.5rem', fontWeight: 700, color: '#2C2C2C', letterSpacing: '0.05em', flexShrink: 0 }}>{activeAirline.airline_code}</span>
-                          <span style={{ fontSize: '1rem', fontWeight: 600, color: '#2C2C2C', lineHeight: 1.2 }}>{activeAirline.name}</span>
-                        </div>
-                        {/* Full-width logo with hover upload */}
-                        <label
-                          style={{ display: 'block', position: 'relative', cursor: 'pointer', borderTop: '1px solid #F0F0F0' }}
-                          title="Upload logo (480 × 120 px)"
-                        >
-                          {activeAirline.logo_filename
-                            ? <img src={activeAirline.logo_filename.startsWith('http') ? activeAirline.logo_filename : `${API_URL}/airline-logos/${activeAirline.logo_filename}`} alt="logo" style={{ display: 'block', width: '100%', height: 'auto', aspectRatio: '4/1', objectFit: 'contain' }} />
-                            : <div style={{ aspectRatio: '4/1', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#CCC', fontSize: '0.8rem' }}>Logo hochladen (480 × 120 px)</div>
-                          }
-                          <div className="ait-logo-hover-overlay">↑ Upload</div>
-                          <input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" style={{ display: 'none' }}
-                            onChange={async (e) => {
-                              const file = e.target.files?.[0];
-                              if (!file) return;
-                              const url = URL.createObjectURL(file);
-                              const img = new Image();
-                              img.onload = async () => {
-                                URL.revokeObjectURL(url);
-                                if (img.naturalWidth !== 480 || img.naturalHeight !== 120) {
-                                  alert(`Logo muss genau 480 × 120 px sein.\nDieses Bild ist ${img.naturalWidth} × ${img.naturalHeight} px.`);
-                                  e.target.value = '';
-                                  return;
-                                }
-                                const form = new FormData();
-                                form.append('logo', file);
-                                const token = localStorage.getItem('token');
-                                const res = await fetch(`${API_URL}/api/airline/logo`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
-                                if (res.ok) fetchAllAirlines();
-                                e.target.value = '';
-                              };
-                              img.onerror = () => { URL.revokeObjectURL(url); alert('Datei konnte nicht gelesen werden.'); };
-                              img.src = url;
-                            }}
-                          />
-                        </label>
-                      </div>
-
-                      {/* Passengers + Progression + Finances + Network */}
-                      <div style={{ background: '#fff' }}>
-                        <table className="hp-info-table">
-                          <tbody>
-                            <tr className="hp-it-divider">
-                              <td colSpan={2} className="hp-it-section-label">Passengers</td>
-                            </tr>
-                            <tr>
-                              <td className="hp-it-label">Daily</td>
-                              <td className="hp-it-val">{(airlineStats.daily_passengers || 0).toLocaleString()}</td>
-                            </tr>
-                            <tr>
-                              <td className="hp-it-label">Total</td>
-                              <td className="hp-it-val">{(airlineStats.total_passengers || 0).toLocaleString()}</td>
-                            </tr>
-                            <tr>
-                              <td className="hp-it-label">Satisfaction</td>
-                              <td className="hp-it-val">
-                                {airlineStats.avg_satisfaction != null
-                                  ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                                      {scoreToRating(airlineStats.avg_satisfaction)?.toFixed(1)}
-                                      <SatisfactionRating score={airlineStats.avg_satisfaction} hideLabel />
+                  {/* Passengers + Progression + Finances + Network */}
+                  <div style={{ background: '#fff' }}>
+                    <table className="hp-info-table">
+                      <tbody>
+                        <tr className="hp-it-divider">
+                          <td colSpan={2} className="hp-it-section-label">Passengers</td>
+                        </tr>
+                        <tr>
+                          <td className="hp-it-label">Daily</td>
+                          <td className="hp-it-val">{(airlineStats.daily_passengers || 0).toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                          <td className="hp-it-label">Total</td>
+                          <td className="hp-it-val">{(airlineStats.total_passengers || 0).toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                          <td className="hp-it-label">Satisfaction</td>
+                          <td className="hp-it-val">
+                            {airlineStats.avg_satisfaction != null
+                              ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                  {scoreToRating(airlineStats.avg_satisfaction)?.toFixed(1)}
+                                  <SatisfactionRating score={airlineStats.avg_satisfaction} hideLabel />
+                                </span>
+                              : <span style={{ color: '#aaa', fontFamily: 'inherit', fontWeight: 400 }}>—</span>}
+                          </td>
+                        </tr>
+                        <tr className="hp-it-divider">
+                          <td colSpan={2} className="hp-it-section-label">Progression</td>
+                        </tr>
+                        <tr style={{ cursor: 'pointer' }} onClick={() => setShowLevelPopup(true)}>
+                          <td className="hp-it-label">Level</td>
+                          <td className="hp-it-val">
+                            LVL {activeAirline.level || 1}
+                            <span style={{ fontSize: '0.72rem', color: '#888', marginLeft: 6, fontFamily: 'inherit', fontWeight: 400 }}>▸ details</span>
+                          </td>
+                        </tr>
+                        <tr className="hp-it-divider">
+                          <td colSpan={2} className="hp-it-section-label">Finances</td>
+                        </tr>
+                        <tr>
+                          <td className="hp-it-label">Balance</td>
+                          <td className="hp-it-val">${activeAirline.balance.toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                          <td className="hp-it-label">Weekly Revenue</td>
+                          <td className="hp-it-val">${Math.round(airlineStats.weekly_revenue).toLocaleString()}</td>
+                        </tr>
+                        <tr className="hp-it-divider">
+                          <td colSpan={2} className="hp-it-section-label">Network</td>
+                        </tr>
+                        <tr>
+                          <td className="hp-it-label">Home Airport</td>
+                          <td className="hp-it-val">
+                            <AirportLink
+                              code={activeAirline.home_airport_code}
+                              name={activeAirline.home_airport_name}
+                              onNavigate={(code) => navigateToAirport(code, 'dashboard')}
+                            />
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="hp-it-label">Hubs</td>
+                          <td className="hp-it-val">
+                            {airlineStats.hubs.length === 0
+                              ? '—'
+                              : airlineStats.hubs.length <= 3
+                                ? airlineStats.hubs.map((h, i) => (
+                                    <span key={h.code}>
+                                      {i > 0 && ', '}
+                                      <AirportLink code={h.code} onNavigate={(code) => navigateToAirport(code, 'dashboard')} />
                                     </span>
-                                  : <span style={{ color: '#aaa', fontFamily: 'inherit', fontWeight: 400 }}>—</span>}
-                              </td>
-                            </tr>
-                            <tr className="hp-it-divider">
-                              <td colSpan={2} className="hp-it-section-label">Progression</td>
-                            </tr>
-                            <tr style={{ cursor: 'pointer' }} onClick={() => setShowLevelPopup(true)}>
-                              <td className="hp-it-label">Level</td>
-                              <td className="hp-it-val">
-                                LVL {activeAirline.level || 1}
-                                <span style={{ fontSize: '0.72rem', color: '#888', marginLeft: 6, fontFamily: 'inherit', fontWeight: 400 }}>▸ details</span>
-                              </td>
-                            </tr>
-                            <tr className="hp-it-divider">
-                              <td colSpan={2} className="hp-it-section-label">Finances</td>
-                            </tr>
-                            <tr>
-                              <td className="hp-it-label">Balance</td>
-                              <td className="hp-it-val">${activeAirline.balance.toLocaleString()}</td>
-                            </tr>
-                            <tr>
-                              <td className="hp-it-label">Weekly Revenue</td>
-                              <td className="hp-it-val">${Math.round(airlineStats.weekly_revenue).toLocaleString()}</td>
-                            </tr>
-                            <tr className="hp-it-divider">
-                              <td colSpan={2} className="hp-it-section-label">Network</td>
-                            </tr>
-                            <tr>
-                              <td className="hp-it-label">Home Airport</td>
-                              <td className="hp-it-val">
-                                <AirportLink
-                                  code={activeAirline.home_airport_code}
-                                  name={activeAirline.home_airport_name}
-                                  onNavigate={(code) => navigateToAirport(code, 'dashboard')}
-                                />
-                              </td>
-                            </tr>
-                            <tr>
-                              <td className="hp-it-label">Hubs</td>
-                              <td className="hp-it-val">
-                                {airlineStats.hubs.length === 0
-                                  ? '—'
-                                  : airlineStats.hubs.length <= 3
-                                    ? airlineStats.hubs.map((h, i) => (
-                                        <span key={h.code}>
-                                          {i > 0 && ', '}
-                                          <AirportLink code={h.code} onNavigate={(code) => navigateToAirport(code, 'dashboard')} />
-                                        </span>
-                                      ))
-                                    : `${airlineStats.hubs.length} Airports`}
-                              </td>
-                            </tr>
-                            <tr className="hp-it-last">
-                              <td className="hp-it-label">Destinations</td>
-                              <td className="hp-it-val">
-                                {airlineStats.destinations_count} destination{airlineStats.destinations_count !== 1 ? 's' : ''}
-                              </td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-
-                    </div>
-
-                    {/* Right column: Fleet — absolutely positioned so it doesn't affect grid row height */}
-                    <div className="hp-fleet-col" style={{ position: 'relative', overflow: 'hidden' }}>
-                      <div className="hp-fleet-inner" style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: '#fff' }}>
-                      <div className="hp-it-section-label" style={{ flexShrink: 0 }}>Fleet ({activeAirline.fleet_count})</div>
-                      <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
-                        {fleetSummary.length === 0 ? (
-                          <div style={{ padding: '2.5rem 1.1rem', textAlign: 'center', color: '#AAAAAA', fontSize: '0.85rem', fontStyle: 'italic' }}>
-                            No aircraft in fleet
-                          </div>
-                        ) : (
-                          <table className="hp-fleet-table">
-                            <tbody>
-                              {fleetSummary.map((type, i) => (
-                                <tr key={i} style={i > 0 && type.manufacturer !== fleetSummary[i - 1].manufacturer ? { borderTop: '2px solid #F0F0F0' } : {}}>
-                                  <td>
-                                    {type.image_filename && (
-                                      <img src={`/aircraft-images/${type.image_filename}`} className="hp-fleet-img" alt={type.full_name} />
-                                    )}
-                                  </td>
-                                  <td className="hp-fleet-name">{type.full_name}</td>
-                                  <td className="hp-fleet-count">{type.count}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        )}
-                      </div>
-                      </div>
-                    </div>
-
+                                  ))
+                                : `${airlineStats.hubs.length} Airports`}
+                          </td>
+                        </tr>
+                        <tr className="hp-it-last">
+                          <td className="hp-it-label">Destinations</td>
+                          <td className="hp-it-val">
+                            {airlineStats.destinations_count} destination{airlineStats.destinations_count !== 1 ? 's' : ''}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
-
-                  {/* Routes map — full width below both columns */}
-                  <div style={{ background: '#fff', borderTop: '1px solid #F0F0F0', overflow: 'hidden' }}>
-                    <div className="hp-it-section-label" style={{ padding: '6px 1.1rem' }}>Routes</div>
-                    <RoutePreviewMap routes={activeRoutes} hubs={airlineStats.hubs} homeAirport={airlineStats.home_airport} />
-                  </div>
-
                 </div>
 
-              </div>
-
-              {/* Right: Manage navigation */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <div className="info-card" style={{ padding: 0, overflow: 'hidden', marginBottom: 0 }}>
-                  <div style={{ background: '#2C2C2C', padding: '14px 20px', borderRadius: '8px 8px 0 0' }}>
-                    <span className="card-header-bar-title">Manage {activeAirline.name}</span>
+                {/* Fleet card */}
+                <div className="hp-sidebar-card">
+                  <div className="hp-sidebar-title">
+                    <span>Fleet ({activeAirline.fleet_count})</span>
                   </div>
+                  {fleetSummary.length === 0 ? (
+                    <div style={{ padding: '2.5rem 1.1rem', textAlign: 'center', color: '#AAAAAA', fontSize: '0.85rem', fontStyle: 'italic' }}>
+                      No aircraft in fleet
+                    </div>
+                  ) : (
+                    <table className="hp-fleet-table">
+                      <tbody>
+                        {fleetSummary.map((type, i) => (
+                          <tr key={i} style={i > 0 && type.manufacturer !== fleetSummary[i - 1].manufacturer ? { borderTop: '2px solid #F0F0F0' } : {}}>
+                            <td>
+                              {type.image_filename && (
+                                <img src={`/aircraft-images/${type.image_filename}`} className="hp-fleet-img" alt={type.full_name} />
+                              )}
+                            </td>
+                            <td className="hp-fleet-name">{type.full_name}</td>
+                            <td className="hp-fleet-count">{type.count}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+
+                {/* Manage navigation */}
+                <div className="hp-sidebar-card">
+                  <div className="hp-sidebar-title">Manage {activeAirline.name}</div>
                   <div className="fo-nav-list">
                     {[
                       { label: 'Fleet Management', page: 'fleet'      },
@@ -989,11 +964,19 @@ function App() {
                     ))}
                   </div>
                 </div>
+
               </div>
 
-            </div>
+              {/* Right column 70%: Routes + Departures + Arrivals */}
+              <div className="hp-right-col">
 
-            {/* Departures + Arrivals boards — full width below the content row */}
+                {/* Routes */}
+                <div className="hp-sidebar-card">
+                  <div className="hp-sidebar-title">Routes</div>
+                  <RoutePreviewMap routes={activeRoutes} hubs={airlineStats.hubs} homeAirport={airlineStats.home_airport} />
+                </div>
+
+            {/* Departures + Arrivals boards — within right column */}
             <div className="hp-boards-grid">
               <div className="hp-board-wrap">
                 <div className="hp-board-titlebar hp-board-dep">
@@ -1074,6 +1057,9 @@ function App() {
                     </tbody>
                   </table>
                 )}
+              </div>
+            </div>
+
               </div>
             </div>
 

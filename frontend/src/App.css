@@ -636,7 +636,26 @@
 }
 .hp-btn-logout-strip:hover { background: var(--color-surface-page); border-color: #AAAAAA; }
 
-/* Content row: logo left + info right */
+/* Two-column dashboard layout: 30% / 70% */
+.hp-layout-grid {
+  margin-top: 1.5rem;
+  display: grid;
+  grid-template-columns: 3fr 7fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+.hp-left-col,
+.hp-right-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  min-width: 0;
+}
+@media (max-width: 900px) {
+  .hp-layout-grid { grid-template-columns: 1fr; }
+}
+
+/* Legacy two-col content row (kept in case other views still use it) */
 .hp-content-row {
   margin-top: 1.5rem;
   display: grid;
@@ -644,7 +663,6 @@
   gap: 1.5rem;
   align-items: stretch;
 }
-
 @media (max-width: 900px) {
   .hp-content-row { grid-template-columns: 1fr; }
 }
@@ -910,13 +928,9 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
 /* ── Homepage flight boards ─────────────────────────────── */
 
 .hp-boards-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem;
-  margin-top: 1.5rem;
-}
-@media (max-width: 768px) {
-  .hp-boards-grid { grid-template-columns: 1fr; }
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
 }
 
 .hp-board-wrap {

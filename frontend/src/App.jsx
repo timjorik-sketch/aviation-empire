@@ -726,10 +726,8 @@ function App() {
         className="page-hero"
         style={{ backgroundImage: "url('/header-images/Headerimage_Home.png')" }}
       >
-        <div className="page-hero-overlay page-hero-overlay--centered">
-          <div className="page-hero-logo-frame">
-            <img src="/logo/logo_black.png" alt="Apron Empire" className="page-hero-logo page-hero-logo--large" />
-          </div>
+        <div className="page-hero-overlay page-hero-overlay--dark">
+          <img src="/logo/logo_white.png" alt="Apron Empire" className="page-hero-logo page-hero-logo--large" />
         </div>
       </div>
 

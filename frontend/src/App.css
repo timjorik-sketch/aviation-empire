@@ -143,31 +143,20 @@
 .page-hero-logo--large {
   height: 90px;
 }
-/* Black logo on the bare hero image — subtle white glow gives it just enough
-   separation without re-introducing the dark overlay we removed. */
-.page-hero-logo--dark {
-  filter: drop-shadow(0 1px 2px rgba(255,255,255,0.45));
-}
 
-/* Glass frame around a centered logo — used on the dashboard hero so the black
-   logo gets a clean translucent card without re-introducing the dark gradient. */
-.page-hero-logo-frame {
-  background: rgba(255, 255, 255, 0.55);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  backdrop-filter: blur(24px) saturate(180%);
-  padding: 18px 32px;
-  border-radius: var(--radius-lg);
-  border: 1px solid rgba(255, 255, 255, 0.45);
+/* Dark glass variant — used on the dashboard hero so the white logo sits in a
+   translucent dark-gray card at the bottom-left of the bare hero image. */
+.page-hero-overlay--dark {
+  background: rgba(28, 28, 28, 0.55) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
   box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.6) inset,
-    0 12px 32px rgba(0, 0, 0, 0.18),
-    0 2px 6px rgba(0, 0, 0, 0.08);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+    0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    0 12px 32px rgba(0, 0, 0, 0.35),
+    0 2px 6px rgba(0, 0, 0, 0.18) !important;
 }
-.page-hero-logo-frame .page-hero-logo {
-  filter: none;
+.page-hero-overlay--dark h1,
+.page-hero-overlay--dark p {
+  color: white !important;
 }
 .brand-logo {
   display: block;
@@ -216,7 +205,6 @@
   .page-hero-logo { height: 44px; }
   .page-hero-logo--large { height: 56px; }
   .brand-logo { height: 44px; }
-  .page-hero-logo-frame { padding: 12px 22px; }
 }
 
 /* Header */

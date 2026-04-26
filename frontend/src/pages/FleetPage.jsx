@@ -1462,11 +1462,11 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
         .overview-table th {
           padding: 0.6rem 1rem;
           text-align: left;
-          font-weight: 600;
+          font-weight: 700;
           color: #555;
           font-size: 0.8rem;
           text-transform: uppercase;
-          letter-spacing: 0.04em;
+          letter-spacing: 0.08em;
           white-space: nowrap;
         }
 

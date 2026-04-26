@@ -984,7 +984,7 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
 }
 .hp-board-table td {
   padding: 0 0.65rem;
-  height: 34px;
+  height: 38px;
   color: #EDE8D0;
   font-size: 0.7rem;
   border-bottom: 1px solid rgba(255,255,255,0.04);
@@ -1013,8 +1013,8 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
 .hp-board-type { font-size: 0.72rem; font-weight: 500; color: rgba(255,255,255,0.65) !important; }
 
 .hp-board-img {
-  width: 46px;
-  height: 25px;
+  width: 56px;
+  height: 30px;
   object-fit: contain;
   border-radius: 3px;
   background: rgba(255,255,255,0.05);

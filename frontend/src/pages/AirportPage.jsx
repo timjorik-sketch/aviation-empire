@@ -100,7 +100,7 @@ function AirlineChip({ code, logoFilename, dark = true, onClick }) {
         src={logoFilename.startsWith('http') ? logoFilename : `${API_URL}/airline-logos/${logoFilename}`}
         alt={code}
         title={code}
-        style={{ width: 96, height: 25, objectFit: 'contain', display: 'block', ...style }}
+        style={{ width: 110, height: 30, objectFit: 'contain', display: 'block', ...style }}
         onClick={onClick}
       />
     );
@@ -163,7 +163,11 @@ function BoardTable({ type, flights, now, onNavigateToAirport, onAirlineClick })
               <td><AirlineChip code={f.airline_code} logoFilename={f.logo_filename} dark={false} onClick={onAirlineClick ? () => onAirlineClick(f.airline_code) : undefined} /></td>
               <td className="ap-time">{formatBoardTime(time)}</td>
               <td className="ap-apt-col" title={airportName || airportCode}>
-                <AirportLink code={airportCode} onNavigate={onNavigateToAirport} />
+                <AirportLink
+                  code={airportCode}
+                  name={airportName && airportName.length <= 14 ? airportName : undefined}
+                  onNavigate={onNavigateToAirport}
+                />
               </td>
               <td className="ap-fn">{f.flight_number}</td>
               <td className="ap-td-status"><StatusDots cls={f._st.cls} label={f._st.label} /></td>
@@ -690,13 +694,13 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
         }
         .ap-info-table tr.ap-it-last td { border-bottom: none; }
         .ap-it-label { color: #666666; width: 48%; white-space: nowrap; }
-        .ap-it-val { color: #2C2C2C; font-weight: 500; }
+        .ap-it-val { color: #2C2C2C; font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; }
         .ap-it-fee { font-family: monospace; font-weight: 700; color: #2C2C2C; text-align: right; padding-right: 1rem !important; }
         .ap-it-section-col-hd {
           font-size: 0.66rem; font-weight: 600; color: #AAAAAA; text-transform: uppercase;
           letter-spacing: 0.08em; text-align: right; padding-right: 1rem;
         }
-        .ap-it-runway { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+        .ap-it-runway { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; justify-content: flex-end; }
         .ap-it-section-row td {
           background: #F9F9F9; border-bottom: 1px solid #E8E8E8;
           padding: 0.3rem 1rem;
@@ -909,7 +913,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
           font-family: system-ui, sans-serif;
         }
         .ap-board-table td {
-          padding: 0 0.65rem; height: 34px; color: #EDE8D0;
+          padding: 0 0.65rem; height: 38px; color: #EDE8D0;
           font-size: 0.7rem; border-bottom: 1px solid rgba(255,255,255,0.04);
           white-space: nowrap; vertical-align: middle;
         }
@@ -986,7 +990,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
         .ap-al-info-divider td { background: #F9F9F9; padding: 0.3rem 1.1rem; border-bottom: 1px solid #E0E0E0; }
         .ap-al-info-section { font-size: 0.66rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #888; }
         .ap-al-info-label { color: #666666; width: 50%; }
-        .ap-al-info-val { color: #2C2C2C; font-weight: 500; }
+        .ap-al-info-val { color: #2C2C2C; font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; }
         .ap-chip-dark {
           display: inline-block; background: #2C2C2C;
           color: white; font-size: 0.68rem; font-weight: 700;

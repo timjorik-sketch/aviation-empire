@@ -10,7 +10,10 @@ const GROUND_STAFF_BY_CAT = { 1: 2, 2: 4, 3: 7, 4: 10, 5: 14, 6: 18, 7: 22, 8: 2
 
 // Pick a destination-rendering mode based on how wide the board container
 // actually is. Now that Airline (124) + Time (64) + Flight (78) + Status (~110)
-// are all fixed, the destination column gets a predictable remainder.
+// are all fixed, the destination column gets a predictable remainder. At the
+// 700px breakpoint the destination column has ~324px = ~46 monospace chars to
+// play with, so the full-mode threshold can comfortably fit names like
+// "Athens Eleftherios Venizelos Airport (ATH)" (42 chars).
 //
 // Required min widths (enforced by the locked column layout):
 //   full      airline 124 + time 64 + flight 78 + status 110 + dest ~150 = 526px
@@ -146,8 +149,8 @@ function DestinationLabel({ code, name, onNavigate, mode }) {
   }
   // Width-dependent thresholds — based on the destination column's available
   // room after the locked airline/time/flight/status columns are subtracted.
-  const fullMax = mode === 'compact' ? 18 : 34;
-  const cityMax = mode === 'compact' ? 12 : 18;
+  const fullMax = mode === 'compact' ? 18 : 40;
+  const cityMax = mode === 'compact' ? 12 : 22;
 
   if (name.length <= fullMax) {
     return <AirportLink code={code} name={name} onNavigate={onNavigate} />;

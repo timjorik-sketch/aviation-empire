@@ -998,11 +998,15 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
 
         /* Lock the leading two columns so airline → time → destination all
            sit at the same x-offset on every row of every board. Destination
-           column flexes to fill the remaining space. */
+           column flexes to fill the remaining space.
+           Lock the flight column too, so flight → status mirrors the same
+           visual rhythm as airline → time. */
         .ap-board-table th:nth-child(1),
         .ap-board-table td:nth-child(1) { width: 124px; }
         .ap-board-table th:nth-child(2),
         .ap-board-table td:nth-child(2) { width: 64px; }
+        .ap-board-table th:nth-child(4),
+        .ap-board-table td:nth-child(4) { width: 78px; text-align: right; padding-right: 0.45rem !important; }
 
         /* Narrow boards (smartphones): collapse the airline column to a tiny
            code chip so destination + status still fit on the row. */

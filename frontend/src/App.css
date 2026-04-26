@@ -1009,7 +1009,7 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
 .hp-board-fn { font-size: 0.72rem; font-weight: 500; color: #facc15 !important; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
 .hp-board-apt { font-size: 0.72rem; font-weight: 500; color: rgba(255,255,255,0.65) !important; }
 .hp-board-apt button { font-size: 0.72rem; color: rgba(255,255,255,0.65) !important; text-decoration-color: rgba(255,255,255,0.25) !important; }
-.hp-board-time { font-size: 0.72rem !important; font-weight: 500; color: rgba(255,255,255,0.65) !important; font-variant-numeric: tabular-nums; }
+.hp-board-time { font-size: 0.72rem !important; font-weight: 500; color: rgba(255,255,255,0.65) !important; font-variant-numeric: tabular-nums; width: 1%; white-space: nowrap; }
 .hp-board-type { font-size: 0.72rem; font-weight: 500; color: rgba(255,255,255,0.65) !important; }
 
 .hp-board-img {

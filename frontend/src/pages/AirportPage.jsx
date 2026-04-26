@@ -950,7 +950,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
         .ap-fn      { font-size: 0.72rem; font-weight: 500; color: #facc15 !important; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
         .ap-apt-col { font-size: 0.72rem; font-weight: 500; color: rgba(255,255,255,0.65) !important; }
         .ap-apt-col button { font-size: 0.72rem; color: rgba(255,255,255,0.65) !important; text-decoration-color: rgba(255,255,255,0.25) !important; }
-        .ap-time    { font-size: 0.72rem !important; font-weight: 500; color: rgba(255,255,255,0.65) !important; font-variant-numeric: tabular-nums; }
+        .ap-time    { font-size: 0.72rem !important; font-weight: 500; color: rgba(255,255,255,0.65) !important; font-variant-numeric: tabular-nums; width: 1%; white-space: nowrap; }
         .ap-th-status { text-align: right !important; white-space: nowrap; padding-right: 0.65rem !important; }
         .ap-td-status { text-align: right; white-space: nowrap; padding-right: 0.65rem !important; width: 1%; }
         .ap-day-sep-row td { padding: 0; }

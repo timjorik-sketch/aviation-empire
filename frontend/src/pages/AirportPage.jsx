@@ -9,17 +9,18 @@ const API_URL = import.meta.env.VITE_API_URL || '';
 const GROUND_STAFF_BY_CAT = { 1: 2, 2: 4, 3: 7, 4: 10, 5: 14, 6: 18, 7: 22, 8: 25 };
 
 // Pick a destination-rendering mode based on how wide the board container
-// actually is.
+// actually is. Now that Airline (124) + Time (64) + Flight (78) + Status (~110)
+// are all fixed, the destination column gets a predictable remainder.
 //
 // Required min widths (enforced by the locked column layout):
-//   full      airline 124 + time 64 + dest 80 + flight 70 + status 110 = 448px
-//   compact   airline 124 + time 64 + dest 60 + flight 70 + status 110 = 428px
-//   code-only airline  52 + time 56 + dest 40 + flight 60 + status 100 = 308px
+//   full      airline 124 + time 64 + flight 78 + status 110 + dest ~150 = 526px
+//   compact   airline 124 + time 64 + flight 78 + status 110 + dest  ~80 = 456px
+//   code-only airline  52 + time 56 + flight 78 + status 100 + dest  ~40 = 326px
 //
-// Switch points add ~50px headroom so we never sit right on the threshold.
+// Switch points add ~30px headroom so we never sit right on the edge.
 function classifyBoardWidth(w) {
-  if (w < 540) return 'code-only';
-  if (w < 800) return 'compact';
+  if (w < 460) return 'code-only';
+  if (w < 700) return 'compact';
   return 'full';
 }
 
@@ -143,9 +144,10 @@ function DestinationLabel({ code, name, onNavigate, mode }) {
   if (!name || mode === 'code-only') {
     return <AirportLink code={code} onNavigate={onNavigate} />;
   }
-  // Width-dependent thresholds
-  const fullMax = mode === 'compact' ? 12 : 22;
-  const cityMax = mode === 'compact' ? 10 : 14;
+  // Width-dependent thresholds — based on the destination column's available
+  // room after the locked airline/time/flight/status columns are subtracted.
+  const fullMax = mode === 'compact' ? 18 : 34;
+  const cityMax = mode === 'compact' ? 12 : 18;
 
   if (name.length <= fullMax) {
     return <AirportLink code={code} name={name} onNavigate={onNavigate} />;

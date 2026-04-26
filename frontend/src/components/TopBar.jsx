@@ -25,7 +25,7 @@ const styles = {
   arrow:         { fontSize: '1.25rem' },
   balance:       { background: 'white', padding: '0.75rem 1.5rem', borderRadius: '6px', color: '#2C2C2C', border: '1px solid #E0E0E0' },
   balanceLabel:  { marginRight: '0.5rem', color: '#666666' },
-  balanceAmount: { fontWeight: 700, fontSize: '1.1rem' },
+  balanceAmount: { fontWeight: 700, fontSize: '1.1rem', fontVariantNumeric: 'tabular-nums' },
 };
 
 export default function TopBar({ onBack, balance, backLabel = 'Dashboard' }) {

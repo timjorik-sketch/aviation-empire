@@ -1,6 +1,6 @@
 .app {
   min-height: 100vh;
-  background: #F5F5F5;
+  background: var(--color-surface-page);
   padding: 0;
 }
 
@@ -128,7 +128,7 @@
 /* Header */
 .header {
   text-align: center;
-  color: #2C2C2C;
+  color: var(--color-text-primary);
   padding: 32px 0 24px;
 }
 
@@ -140,7 +140,7 @@
 .subtitle {
   font-size: 20px;
   margin: 10px 0 0 0;
-  color: #666666;
+  color: var(--color-text-secondary);
 }
 
 /* Cards */
@@ -150,24 +150,24 @@
   border-radius: 8px;
   padding: 28px;
   margin-bottom: 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-2);
   overflow: hidden;
 }
 
 .welcome-card h2 {
   margin-top: 0;
-  color: #2C2C2C;
+  color: var(--color-text-primary);
 }
 
 .info-card h3 {
   margin-top: 0;
-  color: #2C2C2C;
+  color: var(--color-text-primary);
 }
 
 /* ── Black card header bar ──────────────────────────────── */
 /* Use inside .info-card to get a flush black title bar.    */
 .card-header-bar {
-  background: #2C2C2C;
+  background: var(--color-text-primary);
   color: white;
   padding: 14px 20px;
   margin: -28px -28px 20px;
@@ -188,7 +188,7 @@
 /* Global header-bar button — use class="hdr-btn" on any button inside a black header bar */
 .hdr-btn {
   background: white;
-  color: #2C2C2C;
+  color: var(--color-text-primary);
   border: none;
   padding: 0.65rem 1.25rem;
   border-radius: 6px;
@@ -206,7 +206,7 @@
 .hdr-btn--danger { background: rgba(239,68,68,0.15); color: #fca5a5; border: 1px solid rgba(239,68,68,0.3); font-size: 0.72rem; padding: 0.3rem 0.75rem; }
 .hdr-btn--danger:hover { background: rgba(239,68,68,0.25); }
 /* Fallback: any bare <button> inside .card-header-bar also gets the style */
-.card-header-bar button { background: white; color: #2C2C2C; border: none; padding: 0.65rem 1.25rem; border-radius: 6px; font-size: 0.95rem; font-weight: 600; cursor: pointer; white-space: nowrap; flex-shrink: 0; transition: background 0.15s; }
+.card-header-bar button { background: white; color: var(--color-text-primary); border: none; padding: 0.65rem 1.25rem; border-radius: 6px; font-size: 0.95rem; font-weight: 600; cursor: pointer; white-space: nowrap; flex-shrink: 0; transition: background 0.15s; }
 .card-header-bar button:hover { background: #F0F0F0; }
 
 .info-card ul {
@@ -217,12 +217,12 @@
 .info-card li {
   padding: 12px 0;
   font-size: 18px;
-  border-bottom: 1px solid #E0E0E0;
+  border-bottom: 1px solid var(--color-border);
 }
 
 /* Buttons */
 .btn-logout {
-  background: #2C2C2C;
+  background: var(--color-text-primary);
   color: white;
   border: none;
   padding: 12px 24px;
@@ -240,8 +240,8 @@
 
 .btn-secondary {
   background: white;
-  color: #2C2C2C;
-  border: 1px solid #2C2C2C;
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-text-primary);
   padding: 10px 20px;
   border-radius: 6px;
   font-size: 15px;
@@ -251,7 +251,7 @@
 }
 
 .btn-secondary:hover {
-  background: #2C2C2C;
+  background: var(--color-text-primary);
   color: white;
 }
 
@@ -269,7 +269,7 @@
 .app input[type="number"],
 .app input[type="email"],
 .app input[type="password"] {
-  border: 1px solid #E0E0E0;
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   font-size: 15px;
   transition: border-color 0.3s;
@@ -278,7 +278,7 @@
 .app select:focus,
 .app input:focus {
   outline: none;
-  border-color: #2C2C2C;
+  border-color: var(--color-text-primary);
 }
 
 /* Messages (shared) */
@@ -294,8 +294,8 @@
 /* Balance display (shared) */
 .balance-display {
   background: white;
-  color: #2C2C2C;
-  border: 1px solid #E0E0E0;
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
   padding: 1rem;
   border-radius: 6px;
 }
@@ -317,7 +317,7 @@
 /* Existing airline slot */
 .airline-slot-card {
   background: #F9F9F9;
-  border: 2px solid #E0E0E0;
+  border: 2px solid var(--color-border);
   border-radius: 8px;
   padding: 20px;
   position: relative;
@@ -325,7 +325,7 @@
 }
 
 .airline-slot-card.airline-slot-active {
-  border-color: #2C2C2C;
+  border-color: var(--color-text-primary);
   background: white;
 }
 
@@ -333,7 +333,7 @@
   position: absolute;
   top: 12px;
   right: 12px;
-  background: #2C2C2C;
+  background: var(--color-text-primary);
   color: white;
   font-size: 11px;
   font-weight: 700;
@@ -346,7 +346,7 @@
 .airline-slot-code {
   font-size: 26px;
   font-weight: 800;
-  color: #2C2C2C;
+  color: var(--color-text-primary);
   letter-spacing: 3px;
   margin-bottom: 2px;
 }
@@ -389,7 +389,7 @@
 }
 
 .airline-slot-empty:hover {
-  border-color: #2C2C2C;
+  border-color: var(--color-text-primary);
   background: #FAFAFA;
 }
 
@@ -412,7 +412,7 @@
 }
 
 .airline-slot-empty:hover:not(.airline-slot-maxed) .airline-slot-plus {
-  color: #2C2C2C;
+  color: var(--color-text-primary);
 }
 
 .airline-slot-create-text {
@@ -424,7 +424,7 @@
 }
 
 .airline-slot-empty:hover:not(.airline-slot-maxed) .airline-slot-create-text {
-  color: #2C2C2C;
+  color: var(--color-text-primary);
 }
 
 /* ── Active Airline Info Card ───────────────────────────── */
@@ -437,7 +437,7 @@
 .active-airline-logo {
   width: 110px;
   height: 110px;
-  background: #2C2C2C;
+  background: var(--color-text-primary);
   border-radius: 8px;
   display: flex;
   align-items: center;
@@ -459,7 +459,7 @@
 .active-airline-details h3 {
   margin: 0 0 14px;
   font-size: 20px;
-  color: #2C2C2C;
+  color: var(--color-text-primary);
 }
 
 .active-airline-stats {
@@ -482,7 +482,7 @@
 }
 
 .stat-value {
-  color: #2C2C2C;
+  color: var(--color-text-primary);
   font-size: 14px;
   font-weight: 600;
 }
@@ -509,7 +509,7 @@
 .hp-info-strip {
   background: white;
   border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  box-shadow: var(--shadow-2);
   padding: 24px 28px;
   margin-top: 1.5rem;
   display: flex;
@@ -528,21 +528,21 @@
 .hp-code {
   font-size: 3.5rem;
   font-weight: 900;
-  font-family: monospace;
-  color: #2C2C2C;
+  font-family: var(--font-mono);
+  color: var(--color-text-primary);
   letter-spacing: 0.06em;
   line-height: 1;
 }
 
 
 .hp-id-text { display: flex; flex-direction: column; gap: 4px; }
-.hp-airline-name { font-size: 1.2rem; font-weight: 700; color: #2C2C2C; }
-.hp-airline-sub { font-size: 0.88rem; color: #666666; }
+.hp-airline-name { font-size: 1.2rem; font-weight: 700; color: var(--color-text-primary); }
+.hp-airline-sub { font-size: 0.88rem; color: var(--color-text-secondary); }
 
 .hp-strip-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 .hp-btn-change {
-  background: #2C2C2C;
+  background: var(--color-text-primary);
   color: white;
   border: none;
   padding: 0.5rem 1.1rem;
@@ -558,7 +558,7 @@
 .hp-btn-logout-strip {
   background: transparent;
   color: #555;
-  border: 1px solid #E0E0E0;
+  border: 1px solid var(--color-border);
   padding: 0.5rem 1.1rem;
   border-radius: 6px;
   cursor: pointer;
@@ -567,7 +567,7 @@
   transition: all 0.15s;
   white-space: nowrap;
 }
-.hp-btn-logout-strip:hover { background: #F5F5F5; border-color: #AAAAAA; }
+.hp-btn-logout-strip:hover { background: var(--color-surface-page); border-color: #AAAAAA; }
 
 /* Content row: logo left + info right */
 .hp-content-row {
@@ -585,7 +585,7 @@
 .hp-logo-col {
   border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  box-shadow: var(--shadow-2);
 }
 
 .hp-logo-placeholder {
@@ -604,7 +604,7 @@
 .hp-logo-code {
   font-size: 5rem;
   font-weight: 900;
-  font-family: monospace;
+  font-family: var(--font-mono);
   color: #D0D0D0;
   letter-spacing: 0.1em;
   line-height: 1;
@@ -622,14 +622,14 @@
 .hp-sidebar-card {
   background: white;
   border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  box-shadow: var(--shadow-2);
   overflow: hidden;
   align-self: stretch;
 }
 
 .hp-sidebar-title {
   padding: 0.8rem 1.1rem;
-  background: #2C2C2C;
+  background: var(--color-text-primary);
   color: white;
   font-size: 0.7rem;
   font-weight: 700;
@@ -644,11 +644,11 @@
   vertical-align: middle;
 }
 .hp-info-table tr.hp-it-last td { border-bottom: none; }
-.hp-it-label { color: #666666; width: 48%; white-space: nowrap; }
-.hp-it-val { color: #2C2C2C; font-weight: 500; }
+.hp-it-label { color: var(--color-text-secondary); width: 48%; white-space: nowrap; }
+.hp-it-val { color: var(--color-text-primary); font-weight: 500; font-variant-numeric: tabular-nums; }
 .hp-info-table tr.hp-it-divider td { padding: 0; border-bottom: none; }
 .hp-it-section-label {
-  background: #F0F0F0; color: #666666;
+  background: #F0F0F0; color: var(--color-text-secondary);
   font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
   padding: 5px 1.1rem !important;
 }
@@ -687,12 +687,12 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
   margin-top: 1.5rem;
   background: white;
   border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  box-shadow: var(--shadow-2);
   padding: 48px 28px;
   text-align: center;
 }
-.hp-no-airline h2 { margin: 0 0 8px; color: #2C2C2C; font-size: 1.4rem; }
-.hp-no-airline p { color: #666666; margin: 0 0 24px; }
+.hp-no-airline h2 { margin: 0 0 8px; color: var(--color-text-primary); font-size: 1.4rem; }
+.hp-no-airline p { color: var(--color-text-secondary); margin: 0 0 24px; }
 
 /* Change Airline modal */
 .hp-modal-backdrop {
@@ -719,7 +719,7 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
 }
 
 .hp-modal-header {
-  background: #2C2C2C;
+  background: var(--color-text-primary);
   color: white;
   padding: 0.85rem 1.2rem;
   display: flex;
@@ -759,7 +759,7 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
 
 /* Airline cards in modal */
 .hp-al-card {
-  border: 2px solid #E0E0E0;
+  border: 2px solid var(--color-border);
   border-radius: 8px;
   padding: 16px 20px;
   cursor: pointer;
@@ -769,9 +769,9 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
   justify-content: space-between;
   gap: 1rem;
 }
-.hp-al-card:hover { border-color: #2C2C2C; background: #FAFAFA; }
+.hp-al-card:hover { border-color: var(--color-text-primary); background: #FAFAFA; }
 .hp-al-card.hp-al-active {
-  border-color: #2C2C2C;
+  border-color: var(--color-text-primary);
   background: white;
   cursor: default;
 }
@@ -779,20 +779,20 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
 .hp-al-card-code {
   font-size: 1.6rem;
   font-weight: 900;
-  font-family: monospace;
-  color: #2C2C2C;
+  font-family: var(--font-mono);
+  color: var(--color-text-primary);
   letter-spacing: 0.04em;
   min-width: 60px;
 }
 .hp-al-card-info { display: flex; flex-direction: column; gap: 3px; }
-.hp-al-card-name { font-size: 0.95rem; font-weight: 700; color: #2C2C2C; }
-.hp-al-card-detail { font-size: 0.78rem; color: #666666; }
+.hp-al-card-name { font-size: 0.95rem; font-weight: 700; color: var(--color-text-primary); }
+.hp-al-card-detail { font-size: 0.78rem; color: var(--color-text-secondary); }
 .hp-al-card-badge {
   font-size: 0.65rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  background: #2C2C2C;
+  background: var(--color-text-primary);
   color: white;
   padding: 3px 9px;
   border-radius: 4px;
@@ -814,7 +814,7 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
   font-weight: 500;
   transition: border-color 0.15s, color 0.15s;
 }
-.hp-create-card:hover { border-color: #2C2C2C; color: #2C2C2C; }
+.hp-create-card:hover { border-color: var(--color-text-primary); color: var(--color-text-primary); }
 .hp-create-icon {
   font-size: 1.6rem;
   font-weight: 300;
@@ -822,7 +822,7 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
   line-height: 1;
   transition: color 0.15s;
 }
-.hp-create-card:hover .hp-create-icon { color: #2C2C2C; }
+.hp-create-card:hover .hp-create-icon { color: var(--color-text-primary); }
 
 @media (max-width: 768px) {
   .hp-code { font-size: 2.4rem; }
@@ -884,7 +884,7 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
 .hp-board-table {
   width: 100%;
   border-collapse: collapse;
-  font-family: 'Courier New', Courier, monospace;
+  font-family: var(--font-mono);
 }
 .hp-board-table thead tr {
   background: rgba(255,255,255,0.04);
@@ -924,10 +924,10 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
 }
 .hp-day-sep-row:hover td { background: rgba(255,255,255,0.04) !important; }
 
-.hp-board-fn { font-size: 0.88rem; font-weight: 500; color: #facc15 !important; letter-spacing: 0.04em; }
+.hp-board-fn { font-size: 0.88rem; font-weight: 500; color: #facc15 !important; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
 .hp-board-apt { font-size: 0.88rem; font-weight: 500; color: rgba(255,255,255,0.65) !important; }
 .hp-board-apt button { font-size: 0.88rem; color: rgba(255,255,255,0.65) !important; text-decoration-color: rgba(255,255,255,0.25) !important; }
-.hp-board-time { font-size: 0.88rem !important; font-weight: 500; color: rgba(255,255,255,0.65) !important; }
+.hp-board-time { font-size: 0.88rem !important; font-weight: 500; color: rgba(255,255,255,0.65) !important; font-variant-numeric: tabular-nums; }
 .hp-board-type { font-size: 0.88rem; font-weight: 500; color: rgba(255,255,255,0.65) !important; }
 
 .hp-board-img {
@@ -971,7 +971,7 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
   padding: 0.6rem 1.1rem;
   border-bottom: 1px solid #F0F0F0;
   vertical-align: middle;
-  color: #2C2C2C;
+  color: var(--color-text-primary);
 }
 .hp-fleet-table tr:last-child td { border-bottom: none; }
 .hp-fleet-table tbody tr:hover td { background: transparent; }
@@ -981,7 +981,7 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
   aspect-ratio: 1000/333;
   object-fit: cover;
   border-radius: 3px;
-  background: #F5F5F5;
+  background: var(--color-surface-page);
   display: block;
   flex-shrink: 0;
 }
@@ -989,16 +989,16 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
 .hp-fleet-count {
   text-align: right;
   font-size: 1.05rem;
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-weight: 700;
-  color: #2C2C2C;
+  color: var(--color-text-primary);
   min-width: 28px;
 }
 
 
 /* Manage nav buttons (shared with FlightOperations) */
 .fo-nav-list { display: flex; flex-direction: column; padding: 0.5rem 0; }
-.fo-nav-btn { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1.1rem; background: none; border: none; border-bottom: 1px solid #F2F2F2; cursor: pointer; font-size: 0.88rem; color: #2C2C2C; font-weight: 500; text-align: left; transition: background 0.15s; width: 100%; }
-.fo-nav-btn:hover { background: #F5F5F5; }
+.fo-nav-btn { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1.1rem; background: none; border: none; border-bottom: 1px solid #F2F2F2; cursor: pointer; font-size: 0.88rem; color: var(--color-text-primary); font-weight: 500; text-align: left; transition: background 0.15s; width: 100%; }
+.fo-nav-btn:hover { background: var(--color-surface-page); }
 .fo-nav-btn:last-child { border-bottom: none; }
 .fo-nav-arrow { color: #AAAAAA; font-size: 1.1rem; }

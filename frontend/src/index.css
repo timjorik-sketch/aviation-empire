@@ -11,10 +11,13 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
-  background: #F5F5F5;
+  font-family: var(--font-sans);
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  background: var(--color-surface-page);
   min-height: 100vh;
-  color: #2C2C2C;
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 #root {
@@ -48,9 +51,9 @@ body {
   animation: toast-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
   line-height: 1.45;
 }
-.toast-item--success { background: #16a34a; color: #fff; }
-.toast-item--error   { background: #dc2626; color: #fff; }
-.toast-item--warning { background: #d97706; color: #fff; }
+.toast-item--success { background: var(--color-success); color: var(--color-text-on-dark); }
+.toast-item--error   { background: var(--color-danger);  color: var(--color-text-on-dark); }
+.toast-item--warning { background: var(--color-warning); color: var(--color-text-on-dark); }
 .toast-icon { font-size: 0.9rem; margin-top: 1px; flex-shrink: 0; font-weight: 700; }
 .toast-text { flex: 1; }
 .toast-close {

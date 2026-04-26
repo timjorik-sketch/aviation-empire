@@ -1,0 +1,117 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Apron Empire — Design Tokens
+   Single source of truth for color, typography, spacing, elevation.
+   ───────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* ── Color: text ── */
+  --color-text-primary: #2C2C2C;
+  --color-text-secondary: #666666;
+  --color-text-muted: #888888;
+  --color-text-on-dark: #FFFFFF;
+
+  /* ── Color: surface ── */
+  --color-surface-page: #F5F5F5;
+  --color-surface-card: #FFFFFF;
+  --color-surface-inverse: #2C2C2C;
+
+  /* ── Color: borders ── */
+  --color-border: #E0E0E0;
+  --color-border-subtle: #F0F0F0;
+
+  /* ── Color: semantic ── */
+  --color-success: #16a34a;
+  --color-success-bg: #dcfce7;
+  --color-success-border: #bbf7d0;
+  --color-danger: #dc2626;
+  --color-danger-bg: #fee2e2;
+  --color-danger-border: #fecaca;
+  --color-warning: #d97706;
+  --color-warning-bg: #fef3c7;
+  --color-warning-border: #fde68a;
+  --color-info: #2563eb;
+  --color-info-bg: #eff6ff;
+  --color-info-border: #bfdbfe;
+
+  /* ── Typography: families ── */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* ── Typography: scale (12 / 14 / 16 / 18 / 20 / 24 / 32 / 40) ── */
+  --text-xs: 0.75rem;     /* 12 */
+  --text-sm: 0.875rem;    /* 14 */
+  --text-base: 1rem;      /* 16 */
+  --text-md: 1.125rem;    /* 18 */
+  --text-lg: 1.25rem;     /* 20 */
+  --text-xl: 1.5rem;      /* 24 */
+  --text-2xl: 2rem;       /* 32 */
+  --text-3xl: 2.5rem;     /* 40 */
+
+  /* ── Typography: weights ── */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --weight-extrabold: 800;
+
+  /* ── Spacing (4 / 8 / 12 / 16 / 24 / 32 / 48) ── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  /* ── Radii ── */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-pill: 999px;
+
+  /* ── Elevation (3-level scale) ── */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-2: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.16);
+
+  /* ── Focus ring ── */
+  --focus-ring: 0 0 0 3px rgba(44, 44, 44, 0.18);
+  --focus-ring-danger: 0 0 0 3px rgba(220, 38, 38, 0.22);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Utility classes
+   ───────────────────────────────────────────────────────────────────────── */
+
+.tabular-nums { font-variant-numeric: tabular-nums; }
+.font-mono    { font-family: var(--font-mono); }
+
+/* Cards */
+.card {
+  background: var(--color-surface-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+  margin-bottom: var(--space-4);
+}
+.card-body { padding: var(--space-5); }
+.card-header-dark {
+  background: var(--color-surface-inverse);
+  color: var(--color-text-on-dark);
+  padding: 12px 20px;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Focus ring — applied automatically via :focus-visible on interactive elements */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}

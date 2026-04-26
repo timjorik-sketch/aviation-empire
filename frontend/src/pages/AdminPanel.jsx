@@ -3,26 +3,6 @@ import TopBar from '../components/TopBar.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
-const ADMIN_CARD = {
-  borderRadius: 8,
-  overflow: 'hidden',
-  boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-  marginBottom: 16,
-  background: '#fff',
-};
-const ADMIN_CARD_HEADER = {
-  background: '#2C2C2C',
-  color: '#fff',
-  padding: '12px 20px',
-  fontSize: 13,
-  fontWeight: 700,
-  letterSpacing: '0.08em',
-  textTransform: 'uppercase',
-};
-const ADMIN_CARD_BODY = {
-  padding: 24,
-};
-
 function formatDateTime(dt) {
   if (!dt) return '—';
   const d = new Date(dt);
@@ -64,9 +44,9 @@ function MarketSection() {
   };
 
   return (
-    <div style={ADMIN_CARD}>
-      <div style={ADMIN_CARD_HEADER}>Market</div>
-      <div style={ADMIN_CARD_BODY}>
+    <div className="card">
+      <div className="card-header-dark">Market</div>
+      <div className="card-body">
         <p style={{ margin: '0 0 16px', color: '#666', fontSize: 14 }}>
           Manage the aircraft marketplace inventory.
         </p>
@@ -509,9 +489,9 @@ export default function AdminPanel({ airline, onBack, onNavigate }) {
 
         <MarketSection />
 
-        <div style={ADMIN_CARD}>
-          <div style={ADMIN_CARD_HEADER}>Prices</div>
-          <div style={ADMIN_CARD_BODY}>
+        <div className="card">
+          <div className="card-header-dark">Prices</div>
+          <div className="card-body">
             <p style={{ margin: '0 0 16px', color: '#666', fontSize: 14 }}>
               Route Price Calculator — preview demand, attractiveness and 72h booking forecast for any route.
             </p>
@@ -520,9 +500,9 @@ export default function AdminPanel({ airline, onBack, onNavigate }) {
         </div>
 
         {/* Invite code generation */}
-        <div style={ADMIN_CARD}>
-          <div style={ADMIN_CARD_HEADER}>Generate New Invite Code</div>
-          <div style={ADMIN_CARD_BODY}>
+        <div className="card">
+          <div className="card-header-dark">Generate New Invite Code</div>
+          <div className="card-body">
             <form onSubmit={handleCreate} style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
               <div style={{ flex: '1 1 240px' }}>
                 <label style={{ display: 'block', marginBottom: 6, color: '#666', fontSize: 14, fontWeight: 500 }}>
@@ -545,9 +525,9 @@ export default function AdminPanel({ airline, onBack, onNavigate }) {
         </div>
 
         {/* Invite codes list */}
-        <div style={ADMIN_CARD}>
-          <div style={ADMIN_CARD_HEADER}>Invite Codes ({codes.length})</div>
-          <div style={ADMIN_CARD_BODY}>
+        <div className="card">
+          <div className="card-header-dark">Invite Codes ({codes.length})</div>
+          <div className="card-body">
           {loading ? (
             <p style={{ color: '#666' }}>Loading…</p>
           ) : codes.length === 0 ? (

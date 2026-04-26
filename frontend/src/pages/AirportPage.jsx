@@ -100,7 +100,7 @@ function AirlineChip({ code, logoFilename, dark = true, onClick }) {
         src={logoFilename.startsWith('http') ? logoFilename : `${API_URL}/airline-logos/${logoFilename}`}
         alt={code}
         title={code}
-        style={{ width: 84, height: 22, objectFit: 'contain', display: 'block', ...style }}
+        style={{ width: 96, height: 25, objectFit: 'contain', display: 'block', ...style }}
         onClick={onClick}
       />
     );
@@ -162,8 +162,8 @@ function BoardTable({ type, flights, now, onNavigateToAirport, onAirlineClick })
             <tr key={f.id}>
               <td><AirlineChip code={f.airline_code} logoFilename={f.logo_filename} dark={false} onClick={onAirlineClick ? () => onAirlineClick(f.airline_code) : undefined} /></td>
               <td className="ap-time">{formatBoardTime(time)}</td>
-              <td className="ap-apt-col">
-                <AirportLink code={airportCode} name={airportName || undefined} onNavigate={onNavigateToAirport} />
+              <td className="ap-apt-col" title={airportName || airportCode}>
+                <AirportLink code={airportCode} onNavigate={onNavigateToAirport} />
               </td>
               <td className="ap-fn">{f.flight_number}</td>
               <td className="ap-td-status"><StatusDots cls={f._st.cls} label={f._st.label} /></td>
@@ -844,11 +844,11 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
         }
         .ap-btn-close:hover { background: #F5F5F5; border-color: #AAAAAA; }
 
-        /* ── Two-column layout: 35% / 65% ── */
+        /* ── Two-column layout: 30% / 70% ── */
         .ap-layout-grid {
           margin-top: 1.5rem;
           display: grid;
-          grid-template-columns: 35fr 65fr;
+          grid-template-columns: 3fr 7fr;
           gap: 1.5rem;
           align-items: start;
         }
@@ -909,20 +909,20 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
           font-family: system-ui, sans-serif;
         }
         .ap-board-table td {
-          padding: 0 0.75rem; height: 34px; color: #EDE8D0;
-          font-size: 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.04);
+          padding: 0 0.65rem; height: 34px; color: #EDE8D0;
+          font-size: 0.7rem; border-bottom: 1px solid rgba(255,255,255,0.04);
           white-space: nowrap; vertical-align: middle;
         }
         .ap-board-table tbody tr:last-child td { border-bottom: none; }
         .ap-board-table tbody tr:hover td { background: rgba(255,255,255,0.03); }
         .ap-board-table tbody tr.ap-row-done td { opacity: 0.45; }
 
-        .ap-fn      { font-size: 0.78rem; font-weight: 500; color: #facc15 !important; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
-        .ap-apt-col { font-size: 0.78rem; font-weight: 500; color: rgba(255,255,255,0.65) !important; }
-        .ap-apt-col button { font-size: 0.78rem; color: rgba(255,255,255,0.65) !important; text-decoration-color: rgba(255,255,255,0.25) !important; }
-        .ap-time    { font-size: 0.78rem !important; font-weight: 500; color: rgba(255,255,255,0.65) !important; font-variant-numeric: tabular-nums; }
-        .ap-th-status { text-align: right !important; white-space: nowrap; padding-right: 0.85rem !important; }
-        .ap-td-status { text-align: right; white-space: nowrap; padding-right: 0.85rem !important; width: 1%; }
+        .ap-fn      { font-size: 0.72rem; font-weight: 500; color: #facc15 !important; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
+        .ap-apt-col { font-size: 0.72rem; font-weight: 500; color: rgba(255,255,255,0.65) !important; }
+        .ap-apt-col button { font-size: 0.72rem; color: rgba(255,255,255,0.65) !important; text-decoration-color: rgba(255,255,255,0.25) !important; }
+        .ap-time    { font-size: 0.72rem !important; font-weight: 500; color: rgba(255,255,255,0.65) !important; font-variant-numeric: tabular-nums; }
+        .ap-th-status { text-align: right !important; white-space: nowrap; padding-right: 0.65rem !important; }
+        .ap-td-status { text-align: right; white-space: nowrap; padding-right: 0.65rem !important; width: 1%; }
         .ap-day-sep-row td { padding: 0; }
         .ap-day-sep-cell {
           padding: 0.35rem 0.75rem !important;

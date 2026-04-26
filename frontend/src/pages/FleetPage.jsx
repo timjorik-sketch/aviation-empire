@@ -1097,42 +1097,50 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
           to { transform: rotate(360deg); }
         }
 
-        /* Hero Section — Variante A (compact banner) */
+        /* Hero Section — Variante C (glass caption) */
         .fleet-hero {
+          position: relative;
           width: 100%;
           height: 200px;
-          background: linear-gradient(rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.65) 100%),
-                      url('/header-images/Headerimage_Fleet.png');
+          background: url('/header-images/Headerimage_Fleet.png');
           background-size: cover;
           background-position: center 30%;
-          display: flex;
-          align-items: flex-end;
-          justify-content: flex-start;
-          padding: 0 0 24px 32px;
         }
 
         .fleet-hero-overlay {
+          position: absolute;
+          bottom: 0;
+          left: 32px;
+          max-width: calc(100% - 64px);
+          background: rgba(255, 255, 255, 0.92);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          padding: 14px 22px;
+          border-radius: 8px 8px 0 0;
+          border-left: 4px solid #2563eb;
+          box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.06);
           text-align: left;
-          color: white;
         }
 
         .fleet-hero h1 {
-          font-size: 1.75rem !important;
+          font-size: 1.5rem !important;
           margin: 0 !important;
-          text-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
+          text-shadow: none !important;
           font-weight: 700 !important;
           text-transform: uppercase !important;
           letter-spacing: 0.08em !important;
-          color: #fff !important;
+          color: var(--color-text-primary) !important;
         }
 
         .fleet-hero p {
-          font-size: 0.85rem !important;
-          margin-top: 0.4rem !important;
-          opacity: 0.85 !important;
+          font-size: 0.78rem !important;
+          margin-top: 0.3rem !important;
+          opacity: 1 !important;
           font-weight: 500 !important;
           text-transform: uppercase !important;
           letter-spacing: 0.08em !important;
+          color: var(--color-text-secondary) !important;
+          text-shadow: none !important;
         }
 
         /* Container */
@@ -1363,15 +1371,20 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
         @media (max-width: 768px) {
           .fleet-hero {
             height: 140px;
-            padding: 0 0 18px 20px;
+          }
+
+          .fleet-hero-overlay {
+            left: 16px;
+            max-width: calc(100% - 32px);
+            padding: 11px 16px;
           }
 
           .fleet-hero h1 {
-            font-size: 1.25rem !important;
+            font-size: 1.05rem !important;
           }
 
           .fleet-hero p {
-            font-size: 0.7rem !important;
+            font-size: 0.65rem !important;
           }
 
           .fleet-section {

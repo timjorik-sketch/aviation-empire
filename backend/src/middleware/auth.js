@@ -15,13 +15,19 @@ export const authMiddleware = async (req, res, next) => {
     req.userId = decoded.userId;
     req.username = decoded.username;
 
-    // Inject active airline context so route handlers don't need to look it up
+    // Inject active airline context so route handlers don't need to look it up.
+    // Also enforce is_banned per-request (audit M6): without this, banned users
+    // keep API access for the lifetime of any JWT issued before the ban.
     try {
       const userResult = await pool.query(
-        'SELECT active_airline_id FROM users WHERE id = $1',
+        'SELECT active_airline_id, is_banned FROM users WHERE id = $1',
         [req.userId]
       );
-      const activeAirlineId = userResult.rows[0]?.active_airline_id;
+      const userRow = userResult.rows[0];
+      if (userRow?.is_banned) {
+        return res.status(403).json({ error: 'Account suspended' });
+      }
+      const activeAirlineId = userRow?.active_airline_id;
       if (activeAirlineId) {
         const airlineResult = await pool.query(
           'SELECT id, airline_code, level FROM airlines WHERE id = $1 AND user_id = $2',
@@ -35,7 +41,9 @@ export const authMiddleware = async (req, res, next) => {
         }
       }
     } catch (e) {
-      // DB error in middleware — still allow request through (auth succeeded)
+      // DB error in middleware — still allow request through (auth succeeded).
+      // Note: this fail-open path means a DB outage briefly bypasses the ban
+      // check. Acceptable trade-off vs. taking the whole API down.
     }
 
     next();

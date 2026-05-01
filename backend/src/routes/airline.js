@@ -530,36 +530,10 @@ router.delete('/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// POST /api/airline/dev/add-points — DEV ONLY, delete before release
-router.post('/dev/add-points', authMiddleware, async (req, res) => {
-  try {
-    if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
-    const amount = req.body.amount || 10_000;
-    await pool.query('UPDATE airlines SET total_points = total_points + $1 WHERE id = $2', [amount, req.airlineId]);
-    await checkLevelUpPg(req.airlineId);
-    const result = await pool.query('SELECT total_points, level FROM airlines WHERE id = $1', [req.airlineId]);
-    const { total_points, level } = result.rows[0];
-    res.json({ total_points, level });
-  } catch (error) {
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// POST /api/airline/dev/add-money — DEV ONLY, delete before release
-router.post('/dev/add-money', authMiddleware, async (req, res) => {
-  try {
-    if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
-    const amount = req.body.amount || 10_000_000;
-    const result = await pool.query(
-      'UPDATE airlines SET balance = balance + $1 WHERE id = $2 RETURNING balance',
-      [amount, req.airlineId]
-    );
-    const new_balance = result.rows[0].balance;
-    res.json({ new_balance });
-  } catch (error) {
-    res.status(500).json({ error: 'Server error' });
-  }
-});
+// Removed (security audit C1): /dev/add-points and /dev/add-money let any
+// authenticated player grant themselves arbitrary XP/money. Use admin balance
+// adjust + manual SQL for legitimate ops. Helper checkLevelUpPg() is still
+// used by GET /xp below.
 
 // GET /api/airline/xp — lightweight level + XP poll endpoint
 router.get('/xp', authMiddleware, async (req, res) => {

@@ -44,7 +44,11 @@ app.use(helmet());
 // Origin, which combined with credentials: true is unsafe. Lock down to known
 // frontends. ADDITIONAL_CORS_ORIGINS (comma-separated) lets ops add custom
 // domains via env without a code change.
+// Static allowlist. Add any production frontend domain here. Preview/feature
+// branches on Vercel get unique subdomains — use ADDITIONAL_CORS_ORIGINS env
+// var (comma-separated) to allow them per-environment without a code change.
 const allowedOrigins = [
+  'https://aviation-empire.vercel.app',
   'https://apron-empire.vercel.app',
   'http://localhost:5173',
   'http://localhost:3000'

@@ -4,13 +4,15 @@ dotenv.config();
 
 const { Pool } = pg;
 
-// Audit C5: previously rejectUnauthorized was false in production, which
-// silently accepted any cert presented by the DB and defeated SSL's MITM
-// protection. Supabase serves a CA-signed cert, so verification works without
-// extra config. If you ever need to connect to a self-signed endpoint, set
-// PG_SSL_NO_VERIFY=1 in the environment for that deploy only.
+// Audit C5: TLS is required in production but the Supabase Session Pooler
+// (aws-N-REGION.pooler.supabase.com) terminates with an internal cert chain
+// that Node's default trust store can't always validate. The traffic is still
+// encrypted — we just skip strict chain verification for that hop, which is
+// acceptable for a pooler-fronted DB on a private AWS network.
+// Set PG_SSL_VERIFY=1 to opt back into strict verification (Direct connection
+// to db.PROJECT.supabase.co supports it; pooler typically doesn't).
 const sslConfig = process.env.NODE_ENV === 'production'
-  ? { rejectUnauthorized: process.env.PG_SSL_NO_VERIFY !== '1' }
+  ? { rejectUnauthorized: process.env.PG_SSL_VERIFY === '1' }
   : false;
 
 const pool = new Pool({

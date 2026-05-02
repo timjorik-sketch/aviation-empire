@@ -460,12 +460,12 @@ router.get('/stats', authMiddleware, async (req, res) => {
     `, [req.airlineId]);
     const daily_passengers = parseInt(dailyPaxResult.rows[0].coalesce) || 0;
 
-    // Total passengers (all completed flights)
+    // Total passengers (lifetime counter — survives aircraft scrap / cascade deletes)
     const totalPaxResult = await pool.query(`
-      SELECT COALESCE(SUM(seats_sold), 0) FROM flights
-      WHERE airline_id = $1 AND status = 'completed'
+      SELECT COALESCE(total_passengers_lifetime, 0) AS total_passengers_lifetime
+      FROM airlines WHERE id = $1
     `, [req.airlineId]);
-    const total_passengers = parseInt(totalPaxResult.rows[0].coalesce) || 0;
+    const total_passengers = parseInt(totalPaxResult.rows[0]?.total_passengers_lifetime) || 0;
 
     // Home airport coordinates
     const homeResult = await pool.query(`

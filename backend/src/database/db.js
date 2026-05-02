@@ -334,6 +334,9 @@ async function initDatabase() {
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS active_airline_id INTEGER REFERENCES airlines(id)`,
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS last_payroll_at TIMESTAMPTZ`,
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS logo_filename TEXT`,
+    `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS total_passengers_lifetime BIGINT DEFAULT 0`,
+    `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS total_revenue_lifetime NUMERIC DEFAULT 0`,
+    `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS lifetime_backfilled_at TIMESTAMPTZ`,
     // users table
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS active_airline_id INTEGER REFERENCES airlines(id)`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE`,
@@ -398,6 +401,25 @@ async function initDatabase() {
     `ALTER TABLE used_aircraft_market ADD COLUMN IF NOT EXISTS seller_type TEXT DEFAULT 'system'`,
   ];
   await runStatements(alterCols, 'alter cols');
+
+  // ── flights.aircraft_id: switch from CASCADE to SET NULL so historical
+  //    flight records (and their seats_sold/revenue) survive aircraft scrap.
+  const fkFixes = [
+    `ALTER TABLE flights ALTER COLUMN aircraft_id DROP NOT NULL`,
+    `ALTER TABLE flights DROP CONSTRAINT IF EXISTS flights_aircraft_id_fkey`,
+    `ALTER TABLE flights ADD CONSTRAINT flights_aircraft_id_fkey FOREIGN KEY (aircraft_id) REFERENCES aircraft(id) ON DELETE SET NULL`,
+  ];
+  await runStatements(fkFixes, 'flights FK to SET NULL');
+
+  // ── One-time backfill of airline lifetime counters from existing flights.
+  //    Guarded by lifetime_backfilled_at — runs once per airline.
+  await safeQuery(`
+    UPDATE airlines a SET
+      total_passengers_lifetime = COALESCE((SELECT SUM(seats_sold) FROM flights WHERE airline_id = a.id AND status = 'completed'), 0),
+      total_revenue_lifetime    = COALESCE((SELECT SUM(revenue)    FROM flights WHERE airline_id = a.id AND status = 'completed'), 0),
+      lifetime_backfilled_at    = NOW()
+    WHERE lifetime_backfilled_at IS NULL
+  `, null, 'lifetime backfill');
 
   // ── SEED service_item_types (upsert) ─────────────────────────────────────────
   await safeQuery(`

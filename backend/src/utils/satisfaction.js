@@ -69,31 +69,42 @@ function evalCabin(cabin, items, seatType, distKm) {
 }
 
 /**
+ * Load a service profile's items grouped by cabin_class. Pull this once and
+ * pass via `preloadedItems` to calcFlightSatisfaction() when scoring many
+ * flights against the same profile (avoids N+1 — see serviceProfiles PUT).
+ */
+async function loadProfileItems(serviceProfileId) {
+  const profileItems = { economy: new Set(), business: new Set(), first: new Set() };
+  if (!serviceProfileId) return profileItems;
+  try {
+    const { rows } = await pool.query(`
+      SELECT i.cabin_class, t.item_name
+      FROM service_profile_items i
+      JOIN service_item_types t ON i.item_type_id = t.id
+      WHERE i.profile_id = $1
+    `, [serviceProfileId]);
+    for (const row of rows) {
+      if (profileItems[row.cabin_class]) profileItems[row.cabin_class].add(row.item_name);
+    }
+  } catch (e) { /* no items */ }
+  return profileItems;
+}
+
+/**
  * Calculate passenger satisfaction score and violations for a flight.
- * Now async — uses PostgreSQL pool directly.
+ * If `preloadedItems` (from loadProfileItems) is supplied, no DB call happens —
+ * use that path when scoring many flights for the same profile in a loop.
  */
 async function calcFlightSatisfaction({
   distKm, serviceProfileId, condition,
   ecoSeats, bizSeats, firstSeats,
   ecoSeatType, bizSeatType, firstSeatType,
+  preloadedItems,
 }) {
   const totalSeats = (ecoSeats || 0) + (bizSeats || 0) + (firstSeats || 0);
   if (totalSeats === 0) return { score: 100, violations: [] };
 
-  const profileItems = { economy: new Set(), business: new Set(), first: new Set() };
-  if (serviceProfileId) {
-    try {
-      const { rows } = await pool.query(`
-        SELECT i.cabin_class, t.item_name
-        FROM service_profile_items i
-        JOIN service_item_types t ON i.item_type_id = t.id
-        WHERE i.profile_id = $1
-      `, [serviceProfileId]);
-      for (const row of rows) {
-        if (profileItems[row.cabin_class]) profileItems[row.cabin_class].add(row.item_name);
-      }
-    } catch (e) { /* no items */ }
-  }
+  const profileItems = preloadedItems || await loadProfileItems(serviceProfileId);
 
   const cabinSeats = { economy: ecoSeats || 0, business: bizSeats || 0, first: firstSeats || 0 };
   const seatTypes  = {
@@ -169,4 +180,4 @@ function getSatisfactionMultiplier(score) {
   return 0.50;
 }
 
-export { calcFlightSatisfaction, getAirlineSatisfactionScore, getSatisfactionMultiplier };
+export { calcFlightSatisfaction, loadProfileItems, getAirlineSatisfactionScore, getSatisfactionMultiplier };

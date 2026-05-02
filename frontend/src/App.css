@@ -1022,6 +1022,11 @@ label:hover .ait-logo-hover-overlay { opacity: 1; }
 .hp-day-sep-row:hover td { background: rgba(255,255,255,0.04) !important; }
 
 .hp-board-fn { font-size: 0.72rem; font-weight: 500; color: #facc15 !important; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 600px) {
+  .hp-board-table th:nth-child(4),
+  .hp-board-table td.hp-board-fn { display: none; }
+}
 .hp-board-apt { font-size: 0.72rem; font-weight: 500; color: rgba(255,255,255,0.65) !important; }
 .hp-board-apt button { font-size: 0.72rem; color: rgba(255,255,255,0.65) !important; text-decoration-color: rgba(255,255,255,0.25) !important; }
 .hp-board-time { font-size: 0.72rem !important; font-weight: 500; color: rgba(255,255,255,0.65) !important; font-variant-numeric: tabular-nums; width: 1%; white-space: nowrap; }

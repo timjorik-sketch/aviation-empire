@@ -1,7 +1,7 @@
 import express from 'express';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
-import { calcFlightSatisfaction } from '../utils/satisfaction.js';
+import { calcFlightSatisfaction, loadProfileItems } from '../utils/satisfaction.js';
 
 const router = express.Router();
 
@@ -147,84 +147,113 @@ router.put('/:id', authMiddleware, async (req, res) => {
     await pool.query('UPDATE airline_service_profiles SET name = $1 WHERE id = $2', [name.trim(), profileId]);
     await pool.query('DELETE FROM service_profile_items WHERE profile_id = $1', [profileId]);
 
+    // Bulk insert items in a single query (was: N round-trips in a for-loop).
     if (Array.isArray(items) && items.length > 0) {
-      for (const item of items) {
-        if (item.item_type_id && item.cabin_class) {
-          await pool.query(
-            'INSERT INTO service_profile_items (profile_id, item_type_id, cabin_class) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
-            [profileId, item.item_type_id, item.cabin_class]
-          );
-        }
+      const validItems = items.filter(it => it.item_type_id && it.cabin_class);
+      if (validItems.length > 0) {
+        const params = [profileId];
+        const placeholders = validItems.map((it, i) => {
+          params.push(it.item_type_id, it.cabin_class);
+          return `($1, $${i * 2 + 2}, $${i * 2 + 3})`;
+        }).join(', ');
+        await pool.query(
+          `INSERT INTO service_profile_items (profile_id, item_type_id, cabin_class)
+           VALUES ${placeholders}
+           ON CONFLICT DO NOTHING`,
+          params
+        );
       }
     }
 
-    // Recalculate satisfaction_score for all future flights using this profile
-    const futureFlightsResult = await pool.query(`
-      SELECT f.id, f.aircraft_id,
-             COALESCE(r.distance_km, ws_r.distance_km, 1000) AS distance_km
+    // ── Recalculate satisfaction for affected future flights ─────────────────
+    // Previously this ran 4 sequential queries per flight (N+1 problem) and
+    // could take 30-60s for ~200 flights. Now: 3 queries total regardless of
+    // flight count, with the satisfaction calc done in JS against in-memory data.
+
+    // 1) One JOIN pulls every flight + aircraft + cabin class row at once.
+    //    Multiple cabin-class rows per flight are grouped in JS below.
+    const flightDataResult = await pool.query(`
+      SELECT
+        f.id AS flight_id,
+        f.aircraft_id,
+        COALESCE(r.distance_km, ws_r.distance_km, 1000) AS distance_km,
+        ac.condition,
+        at.max_passengers,
+        acc.class_type,
+        acc.actual_capacity,
+        acc.seat_type
       FROM flights f
       LEFT JOIN routes r ON f.route_id = r.id
       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
       LEFT JOIN routes ws_r ON ws.route_id = ws_r.id
+      LEFT JOIN aircraft ac ON f.aircraft_id = ac.id
+      LEFT JOIN aircraft_types at ON ac.aircraft_type_id = at.id
+      LEFT JOIN airline_cabin_classes acc ON acc.profile_id = ac.airline_cabin_profile_id
       WHERE f.service_profile_id = $1 AND f.status IN ('scheduled', 'boarding')
     `, [profileId]);
 
-    const toUpdate = futureFlightsResult.rows.map(r => ({
-      id: r.id, aircraft_id: r.aircraft_id, distance_km: parseInt(r.distance_km) || 1000
-    }));
-
-    for (const f of toUpdate) {
-      let ecoSeats = 0, bizSeats = 0, firstSeats = 0;
-      let ecoSeatType = 'economy', bizSeatType = 'business', firstSeatType = 'first';
-      let condition = 100;
-
-      if (f.aircraft_id) {
-        const acResult = await pool.query(`
-          SELECT ac.airline_cabin_profile_id, ac.condition, at.max_passengers
-          FROM aircraft ac JOIN aircraft_types at ON ac.aircraft_type_id = at.id
-          WHERE ac.id = $1
-        `, [f.aircraft_id]);
-
-        if (acResult.rows[0]) {
-          const ar = acResult.rows[0];
-          const cabinProfileId = ar.airline_cabin_profile_id;
-          condition = ar.condition ?? 100;
-          const maxPax = ar.max_passengers ?? 100;
-
-          if (cabinProfileId) {
-            const clResult = await pool.query(
-              'SELECT class_type, actual_capacity, seat_type FROM airline_cabin_classes WHERE profile_id = $1',
-              [cabinProfileId]
-            );
-            for (const cr of clResult.rows) {
-              if (cr.class_type === 'economy')       { ecoSeats = cr.actual_capacity; if (cr.seat_type) ecoSeatType = cr.seat_type; }
-              else if (cr.class_type === 'business') { bizSeats = cr.actual_capacity; if (cr.seat_type) bizSeatType = cr.seat_type; }
-              else if (cr.class_type === 'first')    { firstSeats = cr.actual_capacity; if (cr.seat_type) firstSeatType = cr.seat_type; }
-            }
-          }
-          if (ecoSeats + bizSeats + firstSeats === 0) ecoSeats = maxPax;
-        }
+    // Group rows by flight_id (1 flight → up to 3 cabin-class rows).
+    const flightsById = new Map();
+    for (const row of flightDataResult.rows) {
+      let f = flightsById.get(row.flight_id);
+      if (!f) {
+        f = {
+          id: row.flight_id,
+          distance_km: parseInt(row.distance_km) || 1000,
+          condition: row.condition ?? 100,
+          maxPax: row.max_passengers ?? 100,
+          ecoSeats: 0, bizSeats: 0, firstSeats: 0,
+          ecoSeatType: 'economy', bizSeatType: 'business', firstSeatType: 'first',
+        };
+        flightsById.set(row.flight_id, f);
       }
+      if (row.class_type === 'economy')       { f.ecoSeats   = row.actual_capacity; if (row.seat_type) f.ecoSeatType   = row.seat_type; }
+      else if (row.class_type === 'business') { f.bizSeats   = row.actual_capacity; if (row.seat_type) f.bizSeatType   = row.seat_type; }
+      else if (row.class_type === 'first')    { f.firstSeats = row.actual_capacity; if (row.seat_type) f.firstSeatType = row.seat_type; }
+    }
+
+    // 2) Load profile items once — same set for all flights of this profile.
+    const preloadedItems = await loadProfileItems(profileId);
+
+    // 3) Score every flight against the in-memory items + cabin data.
+    const updates = [];
+    for (const f of flightsById.values()) {
+      // Fallback: aircraft has no cabin profile → put everyone in economy.
+      if (f.ecoSeats + f.bizSeats + f.firstSeats === 0) f.ecoSeats = f.maxPax;
 
       const { score, violations } = await calcFlightSatisfaction({
         distKm: f.distance_km,
         serviceProfileId: profileId,
-        condition,
-        ecoSeats,
-        bizSeats,
-        firstSeats,
-        ecoSeatType,
-        bizSeatType,
-        firstSeatType,
+        condition: f.condition,
+        ecoSeats: f.ecoSeats,
+        bizSeats: f.bizSeats,
+        firstSeats: f.firstSeats,
+        ecoSeatType: f.ecoSeatType,
+        bizSeatType: f.bizSeatType,
+        firstSeatType: f.firstSeatType,
+        preloadedItems,
       });
+      updates.push({ id: f.id, score, violations: JSON.stringify(violations) });
+    }
 
+    // 4) Single bulk UPDATE via UPDATE ... FROM (VALUES ...).
+    if (updates.length > 0) {
+      const params = [];
+      const valuesSql = updates.map((u, i) => {
+        params.push(u.id, u.score, u.violations);
+        return `($${i * 3 + 1}::int, $${i * 3 + 2}::int, $${i * 3 + 3}::jsonb)`;
+      }).join(', ');
       await pool.query(
-        'UPDATE flights SET satisfaction_score = $1, violated_rules = $2 WHERE id = $3',
-        [score, JSON.stringify(violations), f.id]
+        `UPDATE flights AS f
+         SET satisfaction_score = v.score,
+             violated_rules     = v.violations
+         FROM (VALUES ${valuesSql}) AS v(id, score, violations)
+         WHERE f.id = v.id`,
+        params
       );
     }
 
-    res.json({ message: 'Profile updated', recalculated_flights: toUpdate.length });
+    res.json({ message: 'Profile updated', recalculated_flights: updates.length });
   } catch (error) {
     console.error('Update profile error:', error);
     res.status(500).json({ error: 'Server error' });

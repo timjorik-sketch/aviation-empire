@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS airlines (
   image_score INTEGER DEFAULT 100,
   level INTEGER DEFAULT 1,
   total_points INTEGER DEFAULT 0,
+  total_passengers_lifetime BIGINT DEFAULT 0,
+  total_revenue_lifetime NUMERIC DEFAULT 0,
+  lifetime_backfilled_at TIMESTAMPTZ,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -92,7 +95,7 @@ CREATE TABLE IF NOT EXISTS flights (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   airline_id INTEGER NOT NULL,
   route_id INTEGER NOT NULL,
-  aircraft_id INTEGER NOT NULL,
+  aircraft_id INTEGER,
   flight_number TEXT NOT NULL,
   departure_time DATETIME NOT NULL,
   arrival_time DATETIME NOT NULL,
@@ -105,7 +108,7 @@ CREATE TABLE IF NOT EXISTS flights (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (airline_id) REFERENCES airlines(id) ON DELETE CASCADE,
   FOREIGN KEY (route_id) REFERENCES routes(id) ON DELETE CASCADE,
-  FOREIGN KEY (aircraft_id) REFERENCES aircraft(id) ON DELETE CASCADE
+  FOREIGN KEY (aircraft_id) REFERENCES aircraft(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS transactions (

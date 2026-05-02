@@ -1205,7 +1205,7 @@ async function processFlights() {
       SELECT f.id, f.airline_id, f.seats_sold, f.ticket_price, f.aircraft_id,
              COALESCE(r.arrival_airport, ws.arrival_airport) as arrival_airport,
              f.service_profile_id, f.departure_time, f.arrival_time,
-             f.booking_revenue_collected, f.flight_number,
+             f.booking_revenue_collected, f.flight_number, COALESCE(f.revenue, 0) as flight_revenue,
              COALESCE(r.departure_airport, ws.departure_airport) as departure_airport,
              COALESCE(r.distance_km, ws_r.distance_km, 0) as distance_km,
              COALESCE(at.wake_turbulence_category, 'M') as wake_cat,
@@ -1248,6 +1248,7 @@ async function processFlights() {
       arrival_time: row.arrival_time,
       booking_revenue_collected: row.booking_revenue_collected,
       flight_number: row.flight_number,
+      flight_revenue: row.flight_revenue,
       departure_airport: row.departure_airport,
       distance_km: row.distance_km,
       wake_cat: row.wake_cat,
@@ -1323,6 +1324,14 @@ async function processFlights() {
           );
         }
 
+        await pool.query(
+          `UPDATE airlines SET
+             total_passengers_lifetime = total_passengers_lifetime + $1,
+             total_revenue_lifetime    = total_revenue_lifetime    + $2
+           WHERE id = $3`,
+          [flight.seats_sold || 0, flight.flight_revenue || 0, flight.airline_id]
+        );
+
         console.log(`Flight ${flight.id} (${flight.flight_number}) landed. Landing: $${landingFee.toLocaleString()}, Ground: $${groundHandling.toLocaleString()}, ATC: $${atcFee.toLocaleString()}, Fuel: $${fuelCost.toLocaleString()}, Catering: $${cateringCost.toLocaleString()}, Total costs: $${totalCosts.toLocaleString()}`);
       } else {
         const revenue = flight.seats_sold * flight.ticket_price;
@@ -1352,6 +1361,14 @@ async function processFlights() {
         }
 
         await pool.query('UPDATE airlines SET balance = balance + $1 WHERE id = $2', [netRevenue, flight.airline_id]);
+
+        await pool.query(
+          `UPDATE airlines SET
+             total_passengers_lifetime = total_passengers_lifetime + $1,
+             total_revenue_lifetime    = total_revenue_lifetime    + $2
+           WHERE id = $3`,
+          [flight.seats_sold || 0, revenue, flight.airline_id]
+        );
 
         console.log(`Flight ${flight.id} completed (legacy). Revenue: $${revenue.toLocaleString()}, Catering: $${cateringCost.toLocaleString()}, Net: $${netRevenue.toLocaleString()}`);
       }

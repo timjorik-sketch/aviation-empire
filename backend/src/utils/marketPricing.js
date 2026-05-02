@@ -43,11 +43,11 @@ function interpolateAnchors(km, anchors) {
   return anchors[anchors.length - 1].v;
 }
 
-function calcBaseRate(d) {
+export function calcBaseRate(d) {
   return interpolateAnchors(d, BASE_RATE_ANCHORS);
 }
 
-function calcAirportPremium(cat1, cat2) {
+export function calcAirportPremium(cat1, cat2) {
   const P = { 8: 1.5, 7: 1.4, 6: 1.3, 5: 1.2, 4: 1.15, 3: 1.05, 2: 1.0, 1: 0.9 };
   return ((P[cat1] || 1.0) + (P[cat2] || 1.0)) / 2;
 }

@@ -3,7 +3,7 @@ import { body, validationResult } from 'express-validator';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 import { calcFlightSatisfaction, getAirlineSatisfactionScore, getSatisfactionMultiplier } from '../utils/satisfaction.js';
-import { calcMarketPrices } from '../utils/marketPricing.js';
+import { calcMarketPrices, calcBaseRate, calcAirportPremium } from '../utils/marketPricing.js';
 
 const router = express.Router();
 

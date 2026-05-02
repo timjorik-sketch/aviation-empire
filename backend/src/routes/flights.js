@@ -1693,7 +1693,7 @@ router.get('/client-feedback', authMiddleware, async (req, res) => {
       WHERE f.airline_id = $1
         AND f.status = 'completed'
         AND f.satisfaction_score IS NOT NULL
-        AND f.satisfaction_score < 85
+        AND f.satisfaction_score < 100
         AND f.violated_rules IS NOT NULL
         AND f.arrival_time >= NOW() - INTERVAL '24 hours'
       ORDER BY f.arrival_time DESC

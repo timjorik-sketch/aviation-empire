@@ -619,6 +619,7 @@ function CabinProfiles({ airline, onBack, backLabel = 'Dashboard' }) {
         @media (max-width: 640px) {
           .cp-hero { height: 160px; }
           .cp-form-card { padding: 20px; }
+          .cp-form-title { margin: -20px -20px 24px; }
           .cp-seat-btn { min-width: 64px; }
         }
       `}</style>

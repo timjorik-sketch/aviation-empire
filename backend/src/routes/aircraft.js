@@ -3,6 +3,7 @@ import { body, validationResult } from 'express-validator';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 import { calculateFlightDuration } from './flights.js';
+import { validatePriceClamp } from '../utils/marketPricing.js';
 
 const router = express.Router();
 
@@ -1380,6 +1381,17 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
     );
     for (const r of routeResult.rows) routeCache.set(r.id, r);
 
+    // Audit C2: load airport categories once for the price-band check below.
+    const uniqueAirports = [...new Set(
+      [...routeCache.values()].flatMap(r => [r.departure_airport, r.arrival_airport])
+    )];
+    const aptResult = await pool.query(
+      'SELECT iata_code, category FROM airports WHERE iata_code = ANY($1)',
+      [uniqueAirports]
+    );
+    const airportCategories = new Map();
+    for (const row of aptResult.rows) airportCategories.set(row.iata_code, row.category ?? 1);
+
     const [existResult, maintResult] = await Promise.all([
       pool.query(`SELECT day_of_week, departure_time, arrival_time FROM weekly_schedule WHERE aircraft_id = $1`, [aircraftId]),
       pool.query(`SELECT day_of_week, start_minutes, duration_minutes FROM maintenance_schedule WHERE aircraft_id = $1 AND airline_id = $2`, [aircraftId, airlineId]),
@@ -1447,6 +1459,23 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
         if (depMin < nw.arrMin + GROUND_MIN && nw.depMin < arrMin + GROUND_MIN) {
           return res.status(400).json({ error: `Flight at ${departure_time} overlaps with another flight in this batch` });
         }
+      }
+
+      // Audit C2: enforce price band per scheduled flight.
+      const depCat = airportCategories.get(route.departure_airport) ?? 1;
+      const arrCat = airportCategories.get(route.arrival_airport) ?? 1;
+      const priceErr = validatePriceClamp({
+        distKm: route.distance_km,
+        depCat, arrCat,
+        eco:   economy_price,
+        biz:   business_price,
+        first: first_price,
+      });
+      if (priceErr) {
+        return res.status(400).json({
+          error: `Flight ${route.flight_number}: ${priceErr.error}`,
+          bounds: priceErr.bounds,
+        });
       }
 
       newBatch.push({ dow, depMin, arrMin });
@@ -1591,6 +1620,34 @@ router.patch('/:id/schedule/:entryId', authMiddleware, async (req, res) => {
         const mEnd = mStart + row.duration_minutes;
         if (effectiveDepMin < mEnd && mStart < effectiveArrMin) {
           return res.status(400).json({ error: 'Edit would overlap with a maintenance window' });
+        }
+      }
+    }
+
+    // Audit C2: clamp prices on schedule edit. Look up the existing route
+    // (this entry can't change route_id, so the existing one applies).
+    if ((economy_price !== undefined || business_price !== undefined || first_price !== undefined) && existingRouteId) {
+      const r = await pool.query(
+        'SELECT distance_km, departure_airport, arrival_airport FROM routes WHERE id = $1',
+        [existingRouteId]
+      );
+      if (r.rows[0]) {
+        const a = await pool.query(
+          'SELECT iata_code, category FROM airports WHERE iata_code IN ($1, $2)',
+          [r.rows[0].departure_airport, r.rows[0].arrival_airport]
+        );
+        const catMap = {};
+        for (const row of a.rows) catMap[row.iata_code] = row.category ?? 1;
+        const priceErr = validatePriceClamp({
+          distKm: r.rows[0].distance_km,
+          depCat: catMap[r.rows[0].departure_airport] ?? 1,
+          arrCat: catMap[r.rows[0].arrival_airport] ?? 1,
+          eco:   economy_price,
+          biz:   business_price,
+          first: first_price,
+        });
+        if (priceErr) {
+          return res.status(400).json({ error: priceErr.error, bounds: priceErr.bounds });
         }
       }
     }

@@ -2,8 +2,24 @@ import express from 'express';
 import { body, validationResult } from 'express-validator';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
+import { validatePriceClamp } from '../utils/marketPricing.js';
 
 const router = express.Router();
+
+// Audit C2: ticket prices were trusted from the client with only `> 0` checks,
+// letting players set $0 (grief) or $1M (break demand model) tickets and break
+// the in-game economy. fetchAirportCategories + clampPricesOrThrow look up the
+// route's airport categories, compute the fair-market band (0.5×–2×), and
+// reject out-of-range prices. Used by POST /create and PATCH /:id.
+async function fetchAirportCategories(depCode, arrCode) {
+  const r = await pool.query(
+    'SELECT iata_code, category FROM airports WHERE iata_code IN ($1, $2)',
+    [depCode, arrCode]
+  );
+  const map = {};
+  for (const row of r.rows) map[row.iata_code] = row.category ?? 1;
+  return { depCat: map[depCode] ?? 1, arrCat: map[arrCode] ?? 1 };
+}
 
 // Calculate distance between two airports using Haversine formula
 async function calculateDistance(dep, arr) {
@@ -226,6 +242,15 @@ router.post('/create',
       const biz = business_price || null;
       const fir = first_price || null;
 
+      // Audit C2: clamp prices to fair-market band so the demand model can't
+      // be broken by absurd values. Reject the request rather than silently
+      // adjusting — gives the player clear feedback on what's allowed.
+      const { depCat, arrCat } = await fetchAirportCategories(departure_airport, arrival_airport);
+      const priceErr = validatePriceClamp({ distKm: distance, depCat, arrCat, eco, biz, first: fir });
+      if (priceErr) {
+        return res.status(400).json({ error: priceErr.error, bounds: priceErr.bounds });
+      }
+
       // ── Insert outbound route ──────────────────────────────────────────────
       const insertResult = await pool.query(
         'INSERT INTO routes (airline_id, departure_airport, arrival_airport, flight_number, distance_km, economy_price, business_price, first_price) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id',
@@ -309,12 +334,29 @@ router.patch('/:id',
       const airlineId = req.airlineId;
       if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
+      // Need distance + airport categories for price clamping (audit C2).
       const routeResult = await pool.query(
-        'SELECT id FROM routes WHERE id = $1 AND airline_id = $2',
+        'SELECT id, distance_km, departure_airport, arrival_airport FROM routes WHERE id = $1 AND airline_id = $2',
         [routeId, airlineId]
       );
       if (!routeResult.rows[0]) {
         return res.status(404).json({ error: 'Route not found' });
+      }
+      const routeRow = routeResult.rows[0];
+
+      // Audit C2: clamp price updates to fair-market band.
+      if (economy_price !== undefined || business_price !== undefined || first_price !== undefined) {
+        const { depCat, arrCat } = await fetchAirportCategories(routeRow.departure_airport, routeRow.arrival_airport);
+        const priceErr = validatePriceClamp({
+          distKm: routeRow.distance_km,
+          depCat, arrCat,
+          eco:   economy_price,
+          biz:   business_price,
+          first: first_price,
+        });
+        if (priceErr) {
+          return res.status(400).json({ error: priceErr.error, bounds: priceErr.bounds });
+        }
       }
 
       const updates = [];

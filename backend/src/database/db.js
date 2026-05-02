@@ -960,16 +960,28 @@ async function initDatabase() {
   await safeQuery(`DROP TABLE IF EXISTS cabin_profiles`, null, 'drop cabin_profiles');
 
   // ── BOOTSTRAP ADMINS ─────────────────────────────────────────────────────────
-  await safeQuery(
-    `UPDATE users SET is_admin = TRUE WHERE email = $1`,
-    ['timjorik@gmail.com'],
-    'bootstrap admin (email)'
+  // Audit M7: only re-grant on a fresh DB. If an admin already exists, this is
+  // a no-op — prevents re-elevating these accounts after a deliberate demote
+  // and prevents a hostile registration (claiming the seeded email/username
+  // late) from inheriting admin rights on the next boot.
+  const { rows: adminRows } = await safeQuery(
+    'SELECT COUNT(*)::int AS cnt FROM users WHERE is_admin = TRUE',
+    null,
+    'admin count'
   );
-  await safeQuery(
-    `UPDATE users SET is_admin = TRUE WHERE LOWER(username) = LOWER($1)`,
-    ['Aclobe'],
-    'bootstrap admin (Aclobe)'
-  );
+  const adminCount = adminRows[0]?.cnt ?? 0;
+  if (adminCount === 0) {
+    await safeQuery(
+      `UPDATE users SET is_admin = TRUE WHERE email = $1`,
+      ['timjorik@gmail.com'],
+      'bootstrap admin (email)'
+    );
+    await safeQuery(
+      `UPDATE users SET is_admin = TRUE WHERE LOWER(username) = LOWER($1)`,
+      ['Aclobe'],
+      'bootstrap admin (Aclobe)'
+    );
+  }
 
   // ── AUTO-SET active_airline_id for existing users ────────────────────────────
   await safeQuery(`

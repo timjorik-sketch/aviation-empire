@@ -192,6 +192,11 @@ router.patch('/players/:id/admin', async (req, res) => {
 });
 
 // Adjust airline balance (positive = add, negative = subtract)
+// Audit M1: cap to ±$10B per call to prevent fat-finger overflows, and tag
+// the transaction with the acting admin's user id so the action is traceable
+// in the transactions table without an external audit log.
+const ADMIN_BALANCE_CAP = 10_000_000_000;
+
 router.post('/players/:id/adjust-balance', async (req, res) => {
   try {
     const userId = parseInt(req.params.id, 10);
@@ -200,6 +205,11 @@ router.post('/players/:id/adjust-balance', async (req, res) => {
     if (!airline_id) return res.status(400).json({ error: 'airline_id required' });
     if (!Number.isFinite(amt) || amt === 0) {
       return res.status(400).json({ error: 'amount must be a non-zero number' });
+    }
+    if (Math.abs(amt) > ADMIN_BALANCE_CAP) {
+      return res.status(400).json({
+        error: `amount exceeds cap of ±$${ADMIN_BALANCE_CAP.toLocaleString()}`,
+      });
     }
 
     const airlineResult = await pool.query(
@@ -216,9 +226,10 @@ router.post('/players/:id/adjust-balance', async (req, res) => {
       [amt, airline_id]
     );
 
-    const description = note && note.toString().trim()
-      ? `Admin adjustment: ${note.toString().trim()}`
-      : 'Admin balance adjustment';
+    const noteText = note && note.toString().trim();
+    const description = noteText
+      ? `Admin adjustment by user#${req.userId}: ${noteText}`
+      : `Admin balance adjustment by user#${req.userId}`;
     await pool.query(
       `INSERT INTO transactions (airline_id, type, amount, description)
        VALUES ($1, 'other', $2, $3)`,

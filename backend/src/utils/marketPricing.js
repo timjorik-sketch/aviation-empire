@@ -61,53 +61,39 @@ export function calcMarketPrices(distKm, depCat, arrCat) {
   };
 }
 
-// Acceptable player-set bounds around the market reference.
-//
-// Lower 0.5× lets you discount aggressively (e.g. promo) without breaking the
-// demand model — anything below is griefing. Upper 2.0× lets you charge a
-// premium (e.g. business-heavy cabin on a leisure route) without breaking
-// pax demand at the high end. HARD_MIN is a per-class floor; market×0.5
-// could otherwise collapse to $0 on cheap short-haul anchors.
-const LOWER_FACTOR = 0.5;
-const UPPER_FACTOR = 2.0;
-const HARD_MIN = 5;
-
-export function getPriceBounds(distKm, depCat, arrCat) {
-  const market = calcMarketPrices(distKm, depCat, arrCat);
-  const bound = (m) => ({
-    market: m,
-    min: Math.max(HARD_MIN, Math.round(m * LOWER_FACTOR)),
-    max: Math.round(m * UPPER_FACTOR),
-  });
-  return { eco: bound(market.eco), biz: bound(market.biz), first: bound(market.first) };
-}
+// Player-set price range. Flat $0–$20,000 across all cabin classes — no
+// market reference, no per-route adjustment. The market price is intentionally
+// hidden from players; surfacing it (even just in error messages) leaks game
+// internals. Upper cap of $20k keeps the demand model from blowing up on
+// absurd values; everything else is the player's call.
+const HARD_MIN = 0;
+const HARD_MAX = 20_000;
 
 /**
- * Validate user-supplied prices against the market band. Returns null on
- * success; returns { error, details } on the first violation. Each price
- * argument may be null/undefined (e.g. business_price not set on an
- * eco-only route) — only set values are checked.
+ * Validate user-supplied prices. Returns null on success; returns { error }
+ * on the first violation. Each price argument may be null/undefined (e.g.
+ * business_price not set on an eco-only route) — only set values are checked.
+ *
+ * The signature still accepts distKm/depCat/arrCat for backwards compat with
+ * existing call sites, but the values are no longer used.
  */
-export function validatePriceClamp({ distKm, depCat, arrCat, eco, biz, first }) {
-  if (!distKm || distKm <= 0) return null; // can't clamp without a distance — skip rather than block
-  const bounds = getPriceBounds(distKm, depCat, arrCat);
-
-  const check = (label, value, b) => {
+export function validatePriceClamp({ eco, biz, first }) {
+  const check = (label, value) => {
     if (value === null || value === undefined) return null;
     const v = Number(value);
     if (!Number.isFinite(v)) return `${label} price must be a number`;
-    if (v < b.min) return `${label} price $${v} is below the minimum $${b.min} for this route (market: $${b.market})`;
-    if (v > b.max) return `${label} price $${v} exceeds the maximum $${b.max} for this route (market: $${b.market})`;
+    if (v < HARD_MIN) return `${label} price must be at least $${HARD_MIN}`;
+    if (v > HARD_MAX) return `${label} price must be at most $${HARD_MAX.toLocaleString()}`;
     return null;
   };
 
-  for (const [label, value, b] of [
-    ['Economy',  eco,   bounds.eco],
-    ['Business', biz,   bounds.biz],
-    ['First',    first, bounds.first],
+  for (const [label, value] of [
+    ['Economy',  eco],
+    ['Business', biz],
+    ['First',    first],
   ]) {
-    const msg = check(label, value, b);
-    if (msg) return { error: msg, bounds };
+    const msg = check(label, value);
+    if (msg) return { error: msg };
   }
   return null;
 }

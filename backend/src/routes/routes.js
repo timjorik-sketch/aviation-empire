@@ -6,20 +6,9 @@ import { validatePriceClamp } from '../utils/marketPricing.js';
 
 const router = express.Router();
 
-// Audit C2: ticket prices were trusted from the client with only `> 0` checks,
-// letting players set $0 (grief) or $1M (break demand model) tickets and break
-// the in-game economy. fetchAirportCategories + clampPricesOrThrow look up the
-// route's airport categories, compute the fair-market band (0.5×–2×), and
-// reject out-of-range prices. Used by POST /create and PATCH /:id.
-async function fetchAirportCategories(depCode, arrCode) {
-  const r = await pool.query(
-    'SELECT iata_code, category FROM airports WHERE iata_code IN ($1, $2)',
-    [depCode, arrCode]
-  );
-  const map = {};
-  for (const row of r.rows) map[row.iata_code] = row.category ?? 1;
-  return { depCat: map[depCode] ?? 1, arrCat: map[arrCode] ?? 1 };
-}
+// Audit C2: prices accepted from the client are clamped to a flat $0–$20,000
+// range via validatePriceClamp from utils/marketPricing.js. No market
+// reference is exposed to the client (game-design choice).
 
 // Calculate distance between two airports using Haversine formula
 async function calculateDistance(dep, arr) {
@@ -136,9 +125,9 @@ router.post('/create',
   body('arrival_airport').matches(/^[A-Z]{3}$/).withMessage('Invalid arrival airport code'),
   body('flight_number_suffix').matches(/^\d{4}$/).withMessage('Flight number must be exactly 4 digits'),
   body('return_flight_number_suffix').optional({ nullable: true }).matches(/^\d{4}$/).withMessage('Return flight number must be exactly 4 digits'),
-  body('economy_price').isFloat({ min: 1 }).withMessage('Economy price must be positive'),
-  body('business_price').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('Business price must be positive'),
-  body('first_price').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('First class price must be positive'),
+  body('economy_price').isFloat({ min: 0, max: 20000 }).withMessage('Economy price must be between $0 and $20,000'),
+  body('business_price').optional({ nullable: true }).isFloat({ min: 0, max: 20000 }).withMessage('Business price must be between $0 and $20,000'),
+  body('first_price').optional({ nullable: true }).isFloat({ min: 0, max: 20000 }).withMessage('First class price must be between $0 and $20,000'),
   async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -242,13 +231,11 @@ router.post('/create',
       const biz = business_price || null;
       const fir = first_price || null;
 
-      // Audit C2: clamp prices to fair-market band so the demand model can't
-      // be broken by absurd values. Reject the request rather than silently
-      // adjusting — gives the player clear feedback on what's allowed.
-      const { depCat, arrCat } = await fetchAirportCategories(departure_airport, arrival_airport);
-      const priceErr = validatePriceClamp({ distKm: distance, depCat, arrCat, eco, biz, first: fir });
+      // Audit C2: enforce the flat $0–$20,000 player-set range. No market
+      // reference is exposed to the client.
+      const priceErr = validatePriceClamp({ eco, biz, first: fir });
       if (priceErr) {
-        return res.status(400).json({ error: priceErr.error, bounds: priceErr.bounds });
+        return res.status(400).json({ error: priceErr.error });
       }
 
       // ── Insert outbound route ──────────────────────────────────────────────
@@ -318,9 +305,9 @@ router.post('/create',
 // Update route prices
 router.patch('/:id',
   authMiddleware,
-  body('economy_price').optional().isFloat({ min: 1 }).withMessage('Economy price must be positive'),
-  body('business_price').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('Business price must be positive'),
-  body('first_price').optional({ nullable: true }).isFloat({ min: 1 }).withMessage('First class price must be positive'),
+  body('economy_price').optional().isFloat({ min: 0, max: 20000 }).withMessage('Economy price must be between $0 and $20,000'),
+  body('business_price').optional({ nullable: true }).isFloat({ min: 0, max: 20000 }).withMessage('Business price must be between $0 and $20,000'),
+  body('first_price').optional({ nullable: true }).isFloat({ min: 0, max: 20000 }).withMessage('First class price must be between $0 and $20,000'),
   async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -334,28 +321,23 @@ router.patch('/:id',
       const airlineId = req.airlineId;
       if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
-      // Need distance + airport categories for price clamping (audit C2).
       const routeResult = await pool.query(
-        'SELECT id, distance_km, departure_airport, arrival_airport FROM routes WHERE id = $1 AND airline_id = $2',
+        'SELECT id FROM routes WHERE id = $1 AND airline_id = $2',
         [routeId, airlineId]
       );
       if (!routeResult.rows[0]) {
         return res.status(404).json({ error: 'Route not found' });
       }
-      const routeRow = routeResult.rows[0];
 
-      // Audit C2: clamp price updates to fair-market band.
+      // Audit C2: enforce flat $0–$20,000 range on price updates.
       if (economy_price !== undefined || business_price !== undefined || first_price !== undefined) {
-        const { depCat, arrCat } = await fetchAirportCategories(routeRow.departure_airport, routeRow.arrival_airport);
         const priceErr = validatePriceClamp({
-          distKm: routeRow.distance_km,
-          depCat, arrCat,
           eco:   economy_price,
           biz:   business_price,
           first: first_price,
         });
         if (priceErr) {
-          return res.status(400).json({ error: priceErr.error, bounds: priceErr.bounds });
+          return res.status(400).json({ error: priceErr.error });
         }
       }
 

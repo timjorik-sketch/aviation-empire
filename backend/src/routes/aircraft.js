@@ -1381,16 +1381,8 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
     );
     for (const r of routeResult.rows) routeCache.set(r.id, r);
 
-    // Audit C2: load airport categories once for the price-band check below.
-    const uniqueAirports = [...new Set(
-      [...routeCache.values()].flatMap(r => [r.departure_airport, r.arrival_airport])
-    )];
-    const aptResult = await pool.query(
-      'SELECT iata_code, category FROM airports WHERE iata_code = ANY($1)',
-      [uniqueAirports]
-    );
-    const airportCategories = new Map();
-    for (const row of aptResult.rows) airportCategories.set(row.iata_code, row.category ?? 1);
+    // (Audit C2 used to load airport categories here; flat $0–$20k range
+    // doesn't need them anymore, but the rest of the schedule logic stays.)
 
     const [existResult, maintResult] = await Promise.all([
       pool.query(`SELECT day_of_week, departure_time, arrival_time FROM weekly_schedule WHERE aircraft_id = $1`, [aircraftId]),
@@ -1461,12 +1453,8 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
         }
       }
 
-      // Audit C2: enforce price band per scheduled flight.
-      const depCat = airportCategories.get(route.departure_airport) ?? 1;
-      const arrCat = airportCategories.get(route.arrival_airport) ?? 1;
+      // Audit C2: enforce flat $0–$20,000 player price range.
       const priceErr = validatePriceClamp({
-        distKm: route.distance_km,
-        depCat, arrCat,
         eco:   economy_price,
         biz:   business_price,
         first: first_price,
@@ -1474,7 +1462,6 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
       if (priceErr) {
         return res.status(400).json({
           error: `Flight ${route.flight_number}: ${priceErr.error}`,
-          bounds: priceErr.bounds,
         });
       }
 
@@ -1624,31 +1611,15 @@ router.patch('/:id/schedule/:entryId', authMiddleware, async (req, res) => {
       }
     }
 
-    // Audit C2: clamp prices on schedule edit. Look up the existing route
-    // (this entry can't change route_id, so the existing one applies).
-    if ((economy_price !== undefined || business_price !== undefined || first_price !== undefined) && existingRouteId) {
-      const r = await pool.query(
-        'SELECT distance_km, departure_airport, arrival_airport FROM routes WHERE id = $1',
-        [existingRouteId]
-      );
-      if (r.rows[0]) {
-        const a = await pool.query(
-          'SELECT iata_code, category FROM airports WHERE iata_code IN ($1, $2)',
-          [r.rows[0].departure_airport, r.rows[0].arrival_airport]
-        );
-        const catMap = {};
-        for (const row of a.rows) catMap[row.iata_code] = row.category ?? 1;
-        const priceErr = validatePriceClamp({
-          distKm: r.rows[0].distance_km,
-          depCat: catMap[r.rows[0].departure_airport] ?? 1,
-          arrCat: catMap[r.rows[0].arrival_airport] ?? 1,
-          eco:   economy_price,
-          biz:   business_price,
-          first: first_price,
-        });
-        if (priceErr) {
-          return res.status(400).json({ error: priceErr.error, bounds: priceErr.bounds });
-        }
+    // Audit C2: enforce flat $0–$20,000 range on price edit.
+    if (economy_price !== undefined || business_price !== undefined || first_price !== undefined) {
+      const priceErr = validatePriceClamp({
+        eco:   economy_price,
+        biz:   business_price,
+        first: first_price,
+      });
+      if (priceErr) {
+        return res.status(400).json({ error: priceErr.error });
       }
     }
 

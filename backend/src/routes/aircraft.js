@@ -7,21 +7,41 @@ import { calculateFlightDuration } from './flights.js';
 const router = express.Router();
 
 // ── Route sync helper ─────────────────────────────────────────────────────────
+// The route is source-of-truth for prices. When syncing from an aircraft schedule,
+// a null input means "this aircraft has no such cabin class" — preserve any
+// existing route/schedule/flight price for that class instead of overwriting it.
 async function syncRoutePrices(routeId, ecoPrice, bizPrice, firPrice, serviceProfileId) {
+  const eco = ecoPrice ?? null;
+  const biz = bizPrice ?? null;
+  const fir = firPrice ?? null;
+  const sp  = serviceProfileId ?? null;
   await pool.query(
-    'UPDATE routes SET economy_price = $1, business_price = $2, first_price = $3, service_profile_id = $4 WHERE id = $5',
-    [ecoPrice, bizPrice ?? null, firPrice ?? null, serviceProfileId ?? null, routeId]
+    `UPDATE routes SET
+       economy_price = COALESCE($1, economy_price),
+       business_price = COALESCE($2, business_price),
+       first_price = COALESCE($3, first_price),
+       service_profile_id = COALESCE($4, service_profile_id)
+     WHERE id = $5`,
+    [eco, biz, fir, sp, routeId]
   );
   await pool.query(
-    'UPDATE weekly_schedule SET economy_price = $1, business_price = $2, first_price = $3, service_profile_id = $4 WHERE route_id = $5',
-    [ecoPrice, bizPrice ?? null, firPrice ?? null, serviceProfileId ?? null, routeId]
+    `UPDATE weekly_schedule SET
+       economy_price = COALESCE($1, economy_price),
+       business_price = COALESCE($2, business_price),
+       first_price = COALESCE($3, first_price),
+       service_profile_id = COALESCE($4, service_profile_id)
+     WHERE route_id = $5`,
+    [eco, biz, fir, sp, routeId]
   );
   await pool.query(`
-    UPDATE flights SET economy_price = $1, business_price = $2, first_price = $3
+    UPDATE flights SET
+      economy_price = COALESCE($1, economy_price),
+      business_price = COALESCE($2, business_price),
+      first_price = COALESCE($3, first_price)
     WHERE status IN ('scheduled', 'boarding')
       AND (route_id = $4 OR weekly_schedule_id IN (SELECT id FROM weekly_schedule WHERE route_id = $5))
       AND booked_economy = 0 AND booked_business = 0 AND booked_first = 0
-  `, [ecoPrice, bizPrice ?? null, firPrice ?? null, routeId, routeId]);
+  `, [eco, biz, fir, routeId, routeId]);
 }
 
 // ── Used Aircraft Market helpers ──────────────────────────────────────────────

@@ -424,11 +424,20 @@ router.get('/profile', authMiddleware, async (req, res) => {
 });
 
 // Change password
-router.patch('/change-password', authMiddleware, async (req, res) => {
+router.patch('/change-password',
+  authMiddleware,
+  // Audit M3: validators bring change-password in line with /register's
+  // strength rules, prevent oversized payload abuse, and centralise error
+  // shape so the client gets the same response format everywhere.
+  body('currentPassword').isString().isLength({ min: 1, max: 200 }),
+  body('newPassword').isString().isLength({ min: 6, max: 200 }),
+  async (req, res) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: 'Both passwords required (new must be at least 6 characters)' });
+    }
     const { currentPassword, newPassword } = req.body;
-    if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Both passwords required' });
-    if (newPassword.length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters' });
 
     const result = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.userId]);
     if (!result.rows[0]) return res.status(404).json({ error: 'User not found' });
@@ -448,11 +457,19 @@ router.patch('/change-password', authMiddleware, async (req, res) => {
 });
 
 // Change email
-router.patch('/change-email', authMiddleware, async (req, res) => {
+router.patch('/change-email',
+  authMiddleware,
+  // Audit M3: replace hand-rolled regex with express-validator's isEmail() so
+  // edge cases match how /register and /forgot-password validate addresses.
+  body('currentPassword').isString().isLength({ min: 1, max: 200 }),
+  body('newEmail').isEmail().normalizeEmail(),
+  async (req, res) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: 'Password and a valid new email are required' });
+    }
     const { currentPassword, newEmail } = req.body;
-    if (!currentPassword || !newEmail) return res.status(400).json({ error: 'Password and new email required' });
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) return res.status(400).json({ error: 'Invalid email address' });
 
     const result = await pool.query('SELECT password_hash FROM users WHERE id = $1', [req.userId]);
     if (!result.rows[0]) return res.status(404).json({ error: 'User not found' });

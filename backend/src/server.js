@@ -24,6 +24,7 @@ import marketAnalysesRouter, { startMarketAnalysesProcessor } from './routes/mar
 import leaderboardsRoutes from './routes/leaderboards.js';
 import adminRoutes from './routes/admin.js';
 import interestRoutes from './routes/interest.js';
+import { globalLimiter, authLimiter, interestLimiter } from './middleware/rateLimiters.js';
 
 dotenv.config();
 
@@ -71,6 +72,14 @@ app.use(cors({
 // and tighter to reduce memory pressure from oversized payloads.
 app.use(express.json({ limit: '64kb' }));
 app.use(express.static(path.join(__dirname, '../public')));
+
+// Rate limiting (audit C3, H6). Order matters: tighter limiters first so they
+// take precedence on overlapping paths, then the generic global ceiling on
+// everything under /api.
+app.use('/api/auth', authLimiter);
+app.use('/api/interest', interestLimiter);
+app.use('/api', globalLimiter);
+
 app.use('/api/auth', authRoutes);
 app.use('/api/airline', airlineRoutes);
 app.use('/api/aircraft', aircraftRoutes);

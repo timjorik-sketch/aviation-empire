@@ -885,7 +885,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
   const handleCancelTransfer = async (transferRowId) => {
     const realId = String(transferRowId).replace(/^transfer_/, '');
-    if (!confirm('Cancel this transfer flight? The cost will be refunded.')) return;
     setError('');
     try {
       const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/transfer/${realId}`, {
@@ -980,7 +979,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
   const handleCancelMaintenance = async (f) => {
     const maintId = f.id.split('_')[1]; // "maint_<id>_<weekOffset>"
-    if (!confirm('Cancel this maintenance entry? It will be removed from the weekly schedule.')) return;
     try {
       const res = await fetch(`${API_URL}/api/maintenance/${maintId}`, { method: 'DELETE', headers });
       const data = await res.json();
@@ -992,16 +990,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   };
 
   const handleCancelFlight = async (flight) => {
-    const totalPax = (flight.booked_economy || 0) + (flight.booked_business || 0) + (flight.booked_first || 0);
-    const penalty = Math.round(
-      (flight.booked_economy  || 0) * (flight.economy_price  || 0) * 1.2 +
-      (flight.booked_business || 0) * (flight.business_price || flight.economy_price || 0) * 1.2 +
-      (flight.booked_first    || 0) * (flight.first_price    || flight.economy_price || 0) * 1.2
-    );
-    const msg = totalPax > 0
-      ? `Cancel flight ${flight.flight_number}?\n\n${totalPax} passenger(s) will be refunded at 120%.\nCancellation penalty: $${penalty.toLocaleString()}\n\nThis cannot be undone.`
-      : `Cancel flight ${flight.flight_number}? No passengers booked — no penalty.`;
-    if (!confirm(msg)) return;
     setError('');
     try {
       const res = await fetch(`${API_URL}/api/flights/${flight.id}/cancel`, {
@@ -1021,7 +1009,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   };
 
   const handleDeleteCancelledFlight = async (flight) => {
-    if (!confirm(`Delete cancelled flight ${flight.flight_number} from the list?`)) return;
     setError('');
     try {
       const res = await fetch(`${API_URL}/api/flights/${flight.id}`, {

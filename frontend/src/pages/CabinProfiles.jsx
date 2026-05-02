@@ -537,7 +537,7 @@ function CabinProfiles({ airline, onBack, backLabel = 'Dashboard' }) {
           overflow: hidden;
         }
         .cp-class-config-header {
-          padding: 10px 16px; margin: -20px -20px 14px;
+          padding: 12px 20px; margin: -20px -20px 16px;
           background: #2C2C2C;
         }
         .cp-class-config-header h3 { margin: 0; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: white; }

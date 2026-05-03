@@ -2,6 +2,8 @@ import express from 'express';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 import adminMiddleware from '../middleware/admin.js';
+import { logEvent, reqInfo } from '../utils/auditLog.js';
+import { XP_THRESHOLDS } from './flights.js';
 
 const router = express.Router();
 
@@ -51,6 +53,8 @@ router.post('/invite-codes', async (req, res) => {
            RETURNING id, code, created_at, note, revoked`,
           [code, req.userId, note || null]
         );
+        logEvent({ eventType: 'admin_invite_create', actorUserId: req.userId, ...reqInfo(req),
+          metadata: { code_id: result.rows[0].id, has_note: !!note } });
         return res.status(201).json({ code: result.rows[0] });
       } catch (err) {
         if (err.code === '23505') { attempt++; continue; }
@@ -136,11 +140,11 @@ router.get('/players', async (req, res) => {
   }
 });
 
-// Get airlines owned by a player (used for money-adjust modal)
+// Get airlines owned by a player (used for the Update User modal)
 router.get('/players/:id/airlines', async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, name, airline_code, balance, level
+      `SELECT id, name, airline_code, balance, level, total_points
        FROM airlines WHERE user_id = $1 ORDER BY id ASC`,
       [req.params.id]
     );
@@ -164,6 +168,8 @@ router.patch('/players/:id/ban', async (req, res) => {
       [id]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Player not found' });
+    logEvent({ eventType: 'admin_ban_toggle', actorUserId: req.userId, targetUserId: id,
+      ...reqInfo(req), metadata: { is_banned: result.rows[0].is_banned } });
     res.json({ id: result.rows[0].id, is_banned: result.rows[0].is_banned });
   } catch (e) {
     console.error('Toggle ban error:', e);
@@ -184,6 +190,8 @@ router.patch('/players/:id/admin', async (req, res) => {
       [id]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Player not found' });
+    logEvent({ eventType: 'admin_role_toggle', actorUserId: req.userId, targetUserId: id,
+      ...reqInfo(req), metadata: { is_admin: result.rows[0].is_admin } });
     res.json({ id: result.rows[0].id, is_admin: result.rows[0].is_admin });
   } catch (e) {
     console.error('Toggle admin error:', e);
@@ -236,9 +244,122 @@ router.post('/players/:id/adjust-balance', async (req, res) => {
       [airline_id, amt, description]
     );
 
+    logEvent({ eventType: 'admin_balance_adjust', actorUserId: req.userId, targetUserId: userId,
+      ...reqInfo(req), metadata: { airline_id, amount: amt, note: noteText || null } });
+
     res.json({ id: updated.rows[0].id, balance: updated.rows[0].balance });
   } catch (e) {
     console.error('Adjust balance error:', e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Adjust airline XP / total_points (positive = add, negative = subtract).
+// Recomputes level afterwards so a points bump can trigger a level-up and a
+// negative adjustment can demote the airline if it drops below the threshold.
+const ADMIN_POINTS_CAP = 10_000_000;
+
+router.post('/players/:id/adjust-points', async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id, 10);
+    const { airline_id, amount, note } = req.body || {};
+    const amt = Math.trunc(Number(amount));
+    if (!airline_id) return res.status(400).json({ error: 'airline_id required' });
+    if (!Number.isFinite(amt) || amt === 0) {
+      return res.status(400).json({ error: 'amount must be a non-zero integer' });
+    }
+    if (Math.abs(amt) > ADMIN_POINTS_CAP) {
+      return res.status(400).json({
+        error: `amount exceeds cap of ±${ADMIN_POINTS_CAP.toLocaleString()} points`,
+      });
+    }
+
+    const airlineResult = await pool.query(
+      'SELECT id, total_points, user_id FROM airlines WHERE id = $1',
+      [airline_id]
+    );
+    if (!airlineResult.rows[0]) return res.status(404).json({ error: 'Airline not found' });
+    if (airlineResult.rows[0].user_id !== userId) {
+      return res.status(400).json({ error: 'Airline does not belong to this player' });
+    }
+
+    const newTotal = Math.max(0, Number(airlineResult.rows[0].total_points || 0) + amt);
+
+    let newLevel = 1;
+    while (newLevel < XP_THRESHOLDS.length && newTotal >= XP_THRESHOLDS[newLevel]) {
+      newLevel++;
+    }
+
+    const updated = await pool.query(
+      `UPDATE airlines SET total_points = $1, level = $2 WHERE id = $3
+       RETURNING id, total_points, level`,
+      [newTotal, newLevel, airline_id]
+    );
+
+    const noteText = note && note.toString().trim();
+    logEvent({ eventType: 'admin_points_adjust', actorUserId: req.userId, targetUserId: userId,
+      ...reqInfo(req), metadata: { airline_id, amount: amt, new_total: newTotal,
+        new_level: newLevel, note: noteText || null } });
+
+    res.json({
+      id: updated.rows[0].id,
+      total_points: updated.rows[0].total_points,
+      level: updated.rows[0].level,
+    });
+  } catch (e) {
+    console.error('Adjust points error:', e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ── AUDIT LOG VIEWER ────────────────────────────────────────────────────────
+// Paginated list of recent audit events. Read-only — no editing or deleting.
+// Default page size 50, max 200. Optional ?event_type=... filter.
+router.get('/audit-log', async (req, res) => {
+  try {
+    const pageRaw = parseInt(req.query.page, 10);
+    const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+    const sizeRaw = parseInt(req.query.page_size, 10);
+    const pageSize = Math.min(200, Number.isFinite(sizeRaw) && sizeRaw > 0 ? sizeRaw : 50);
+    const offset = (page - 1) * pageSize;
+    const eventType = (req.query.event_type || '').toString().trim();
+
+    const whereParts = [];
+    const params = [];
+    if (eventType) {
+      params.push(eventType);
+      whereParts.push(`event_type = $${params.length}`);
+    }
+    const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
+
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM audit_log ${whereSql}`,
+      params
+    );
+    const total = countResult.rows[0].total;
+
+    const listParams = [...params, pageSize, offset];
+    const result = await pool.query(
+      `SELECT al.id, al.created_at, al.event_type,
+              al.actor_user_id,  ua.username AS actor_username,
+              al.target_user_id, ut.username AS target_username,
+              al.ip, al.user_agent, al.metadata
+       FROM audit_log al
+       LEFT JOIN users ua ON al.actor_user_id  = ua.id
+       LEFT JOIN users ut ON al.target_user_id = ut.id
+       ${whereSql}
+       ORDER BY al.id DESC
+       LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
+      listParams
+    );
+
+    res.json({
+      events: result.rows,
+      page, pageSize, total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    });
+  } catch (e) {
+    console.error('List audit log error:', e);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -254,6 +375,8 @@ router.delete('/invite-codes/:id', async (req, res) => {
     if (result.rows[0].used_by) return res.status(400).json({ error: 'Code already used — cannot revoke' });
     if (result.rows[0].revoked) return res.status(400).json({ error: 'Already revoked' });
     await pool.query('UPDATE invite_codes SET revoked = TRUE WHERE id = $1', [req.params.id]);
+    logEvent({ eventType: 'admin_invite_revoke', actorUserId: req.userId, ...reqInfo(req),
+      metadata: { code_id: parseInt(req.params.id, 10) } });
     res.json({ message: 'Revoked' });
   } catch (e) {
     console.error('Revoke code error:', e);

@@ -62,13 +62,14 @@ export default function AdminPlayers({ airline, onBack }) {
   const [error, setError] = useState('');
   const [actingId, setActingId] = useState(null);
 
-  const [moneyModalPlayer, setMoneyModalPlayer] = useState(null);
-  const [moneyAirlines, setMoneyAirlines] = useState([]);
-  const [moneyAirlineId, setMoneyAirlineId] = useState('');
-  const [moneyAmount, setMoneyAmount] = useState('');
-  const [moneyNote, setMoneyNote] = useState('');
-  const [moneyLoading, setMoneyLoading] = useState(false);
-  const [moneyError, setMoneyError] = useState('');
+  // "Update User" modal — overview of the player's airlines with per-airline
+  // adjust-money / adjust-points actions.
+  const [updatePlayer, setUpdatePlayer] = useState(null);
+  const [updateAirlines, setUpdateAirlines] = useState([]);
+  const [updateLoading, setUpdateLoading] = useState(false);
+  const [updateError, setUpdateError] = useState('');
+  // Inline form state per airline: { [airlineId]: { mode: 'money'|'points', amount, note, busy, error } }
+  const [adjustForms, setAdjustForms] = useState({});
 
   const fetchPlayers = useCallback(async (p = page, s = appliedSearch) => {
     setLoading(true);
@@ -146,14 +147,19 @@ export default function AdminPlayers({ airline, onBack }) {
     }
   };
 
-  const openMoneyModal = async (player) => {
-    setMoneyModalPlayer(player);
-    setMoneyAirlines([]);
-    setMoneyAirlineId('');
-    setMoneyAmount('');
-    setMoneyNote('');
-    setMoneyError('');
-    setMoneyLoading(true);
+  const closeUpdateModal = () => {
+    setUpdatePlayer(null);
+    setUpdateAirlines([]);
+    setAdjustForms({});
+    setUpdateError('');
+  };
+
+  const openUpdateModal = async (player) => {
+    setUpdatePlayer(player);
+    setUpdateAirlines([]);
+    setAdjustForms({});
+    setUpdateError('');
+    setUpdateLoading(true);
     const token = localStorage.getItem('token');
     try {
       const res = await fetch(`${API_URL}/api/admin/players/${player.id}/airlines`, {
@@ -161,46 +167,65 @@ export default function AdminPlayers({ airline, onBack }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load airlines');
-      setMoneyAirlines(data.airlines || []);
-      if ((data.airlines || []).length > 0) setMoneyAirlineId(String(data.airlines[0].id));
+      setUpdateAirlines(data.airlines || []);
     } catch (e) {
-      setMoneyError(e.message);
+      setUpdateError(e.message);
     } finally {
-      setMoneyLoading(false);
+      setUpdateLoading(false);
     }
   };
 
-  const submitMoney = async (e) => {
-    e.preventDefault();
-    setMoneyError('');
-    const amt = Number(moneyAmount);
-    if (!moneyAirlineId) { setMoneyError('Select an airline'); return; }
-    if (!Number.isFinite(amt) || amt === 0) { setMoneyError('Enter a non-zero amount'); return; }
-    setMoneyLoading(true);
+  const setForm = (airlineId, patch) => {
+    setAdjustForms(prev => ({
+      ...prev,
+      [airlineId]: { mode: null, amount: '', note: '', busy: false, error: '', ...prev[airlineId], ...patch },
+    }));
+  };
+
+  const startAdjust = (airlineId, mode) => {
+    setForm(airlineId, { mode, amount: '', note: '', error: '' });
+  };
+
+  const cancelAdjust = (airlineId) => {
+    setForm(airlineId, { mode: null, amount: '', note: '', error: '' });
+  };
+
+  const submitAdjust = async (airlineId) => {
+    const form = adjustForms[airlineId];
+    if (!form || !form.mode) return;
+    const amt = Number(form.amount);
+    if (!Number.isFinite(amt) || amt === 0) {
+      setForm(airlineId, { error: 'Enter a non-zero amount' });
+      return;
+    }
+    setForm(airlineId, { busy: true, error: '' });
     const token = localStorage.getItem('token');
+    const path = form.mode === 'points' ? 'adjust-points' : 'adjust-balance';
     try {
-      const res = await fetch(`${API_URL}/api/admin/players/${moneyModalPlayer.id}/adjust-balance`, {
+      const res = await fetch(`${API_URL}/api/admin/players/${updatePlayer.id}/${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          airline_id: Number(moneyAirlineId),
-          amount: amt,
-          note: moneyNote.trim() || null,
+          airline_id: airlineId,
+          amount: form.mode === 'points' ? Math.trunc(amt) : amt,
+          note: form.note.trim() || null,
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed');
-      setMoneyAirlines(list => list.map(a => a.id === data.id ? { ...a, balance: data.balance } : a));
-      setMoneyAmount('');
-      setMoneyNote('');
+      setUpdateAirlines(list => list.map(a => a.id === data.id
+        ? {
+            ...a,
+            balance: data.balance ?? a.balance,
+            total_points: data.total_points ?? a.total_points,
+            level: data.level ?? a.level,
+          }
+        : a));
+      setForm(airlineId, { mode: null, amount: '', note: '', busy: false, error: '' });
     } catch (e) {
-      setMoneyError(e.message);
-    } finally {
-      setMoneyLoading(false);
+      setForm(airlineId, { busy: false, error: e.message });
     }
   };
-
-  const selectedAirline = moneyAirlines.find(a => String(a.id) === moneyAirlineId);
 
   return (
     <div className="app">
@@ -248,7 +273,6 @@ export default function AdminPlayers({ airline, onBack }) {
                   <th style={{ padding: '10px 8px' }}>Name</th>
                   <th style={{ padding: '10px 8px' }}>Email</th>
                   <th style={{ padding: '10px 8px', textAlign: 'center' }}>Airlines</th>
-                  <th style={{ padding: '10px 8px', textAlign: 'center' }}>Level</th>
                   <th style={{ padding: '10px 8px' }}>Status</th>
                   <th style={{ padding: '10px 8px' }}>Role</th>
                   <th style={{ padding: '10px 8px', textAlign: 'right' }}>Actions</th>
@@ -256,13 +280,12 @@ export default function AdminPlayers({ airline, onBack }) {
               </thead>
               <tbody>
                 {players.length === 0 && !loading ? (
-                  <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: '#666' }}>No players found.</td></tr>
+                  <tr><td colSpan={6} style={{ padding: 24, textAlign: 'center', color: '#666' }}>No players found.</td></tr>
                 ) : players.map(p => (
                   <tr key={p.id} style={{ borderBottom: '1px solid #F0F0F0' }}>
                     <td style={{ padding: '12px 8px', fontWeight: 600 }}>{p.username}</td>
                     <td style={{ padding: '12px 8px', color: '#666' }}>{p.email}</td>
                     <td style={{ padding: '12px 8px', textAlign: 'center' }}>{p.airline_count}</td>
-                    <td style={{ padding: '12px 8px', textAlign: 'center' }}>{p.airline_count > 0 ? p.max_level : '—'}</td>
                     <td style={{ padding: '12px 8px' }}>
                       <span style={{
                         background: p.is_banned ? '#fee' : '#dcfce7',
@@ -296,7 +319,7 @@ export default function AdminPlayers({ airline, onBack }) {
                         {p.is_banned ? 'Unban' : 'Ban'}
                       </button>
                       <button
-                        onClick={() => openMoneyModal(p)}
+                        onClick={() => openUpdateModal(p)}
                         disabled={p.airline_count === 0}
                         title={p.airline_count === 0 ? 'Player has no airline' : ''}
                         style={{
@@ -308,7 +331,7 @@ export default function AdminPlayers({ airline, onBack }) {
                           marginRight: 6
                         }}
                       >
-                        Adjust Money
+                        Update User
                       </button>
                       <button
                         onClick={() => toggleAdmin(p)}
@@ -334,91 +357,140 @@ export default function AdminPlayers({ airline, onBack }) {
         </div>
       </div>
 
-      {moneyModalPlayer && (
+      {updatePlayer && (
         <div
-          onClick={() => setMoneyModalPlayer(null)}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+          onClick={closeUpdateModal}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}
         >
-          <form
+          <div
             onClick={e => e.stopPropagation()}
-            onSubmit={submitMoney}
-            style={{ background: '#fff', borderRadius: 8, padding: 24, width: 'min(460px, 92vw)', boxShadow: '0 8px 24px rgba(0,0,0,0.2)' }}
+            style={{ background: '#fff', borderRadius: 8, padding: 24, width: 'min(640px, 96vw)', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 8px 24px rgba(0,0,0,0.2)' }}
           >
-            <h3 style={{ margin: '0 0 4px', color: '#2C2C2C' }}>Adjust Balance</h3>
-            <p style={{ margin: '0 0 16px', color: '#666', fontSize: 13 }}>
-              Player: <strong>{moneyModalPlayer.username}</strong>
-            </p>
-
-            {moneyError && (
-              <div style={{ background: '#fee', color: '#c33', padding: 10, borderRadius: 6, marginBottom: 12, border: '1px solid #fcc', fontSize: 13 }}>
-                {moneyError}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+              <div>
+                <h3 style={{ margin: '0 0 4px', color: '#2C2C2C' }}>Update User</h3>
+                <p style={{ margin: 0, color: '#666', fontSize: 13 }}>
+                  Player: <strong>{updatePlayer.username}</strong> · {updatePlayer.email}
+                </p>
               </div>
-            )}
-
-            <label style={{ display: 'block', marginBottom: 6, color: '#666', fontSize: 13, fontWeight: 500 }}>
-              Airline
-            </label>
-            <select
-              value={moneyAirlineId}
-              onChange={e => setMoneyAirlineId(e.target.value)}
-              disabled={moneyLoading || moneyAirlines.length === 0}
-              style={{ width: '100%', padding: 10, border: '1px solid #E0E0E0', borderRadius: 6, fontSize: 14, marginBottom: 12 }}
-            >
-              {moneyAirlines.length === 0 && <option>— None —</option>}
-              {moneyAirlines.map(a => (
-                <option key={a.id} value={a.id}>
-                  {a.name} ({a.airline_code}) — Lvl {a.level}
-                </option>
-              ))}
-            </select>
-
-            {selectedAirline && (
-              <div style={{ background: '#F5F5F5', padding: 12, borderRadius: 6, marginBottom: 12, fontSize: 14 }}>
-                Current balance: <strong>{formatMoney(selectedAirline.balance)}</strong>
-              </div>
-            )}
-
-            <label style={{ display: 'block', marginBottom: 6, color: '#666', fontSize: 13, fontWeight: 500 }}>
-              Amount (positive = add, negative = subtract)
-            </label>
-            <input
-              type="number"
-              step="1"
-              value={moneyAmount}
-              onChange={e => setMoneyAmount(e.target.value)}
-              placeholder="e.g. 1000000 or -500000"
-              style={{ width: '100%', padding: 10, border: '1px solid #E0E0E0', borderRadius: 6, fontSize: 14, marginBottom: 12, boxSizing: 'border-box' }}
-            />
-
-            <label style={{ display: 'block', marginBottom: 6, color: '#666', fontSize: 13, fontWeight: 500 }}>
-              Note (optional)
-            </label>
-            <input
-              type="text"
-              value={moneyNote}
-              onChange={e => setMoneyNote(e.target.value)}
-              placeholder="Reason for adjustment"
-              style={{ width: '100%', padding: 10, border: '1px solid #E0E0E0', borderRadius: 6, fontSize: 14, marginBottom: 20, boxSizing: 'border-box' }}
-            />
-
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button
                 type="button"
-                onClick={() => setMoneyModalPlayer(null)}
-                style={{ background: '#F5F5F5', color: '#2C2C2C', border: '1px solid #E0E0E0', padding: '10px 16px', borderRadius: 6, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+                onClick={closeUpdateModal}
+                style={{ background: 'transparent', border: 'none', fontSize: 22, color: '#666', cursor: 'pointer', lineHeight: 1, padding: 4 }}
+                aria-label="Close"
               >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={moneyLoading || moneyAirlines.length === 0}
-                className="btn-primary"
-                style={{ width: 'auto', padding: '10px 20px', margin: 0 }}
-              >
-                {moneyLoading ? 'Saving…' : 'Confirm'}
+                ×
               </button>
             </div>
-          </form>
+
+            {updateError && (
+              <div style={{ background: '#fee', color: '#c33', padding: 10, borderRadius: 6, marginBottom: 12, border: '1px solid #fcc', fontSize: 13 }}>
+                {updateError}
+              </div>
+            )}
+
+            {updateLoading ? (
+              <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>Loading airlines…</div>
+            ) : updateAirlines.length === 0 ? (
+              <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>This player has no airlines.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {updateAirlines.map(a => {
+                  const f = adjustForms[a.id] || { mode: null, amount: '', note: '', busy: false, error: '' };
+                  return (
+                    <div key={a.id} style={{ border: '1px solid #E0E0E0', borderRadius: 8, padding: 16, background: '#FAFAFA' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                        <div style={{ fontWeight: 700, color: '#2C2C2C', fontSize: 15 }}>
+                          {a.name} <span style={{ color: '#666', fontWeight: 500 }}>({a.airline_code})</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 16, color: '#666', fontSize: 13 }}>
+                          <span>Level <strong style={{ color: '#2C2C2C' }}>{a.level}</strong></span>
+                          <span>Balance <strong style={{ color: '#2C2C2C' }}>{formatMoney(a.balance)}</strong></span>
+                          <span>Points <strong style={{ color: '#2C2C2C' }}>{Number(a.total_points || 0).toLocaleString()}</strong></span>
+                        </div>
+                      </div>
+
+                      {f.mode === null ? (
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button
+                            type="button"
+                            onClick={() => startAdjust(a.id, 'money')}
+                            style={{ background: '#2C2C2C', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                          >
+                            Adjust Money
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => startAdjust(a.id, 'points')}
+                            style={{ background: '#fff', color: '#2C2C2C', border: '1px solid #2C2C2C', padding: '8px 14px', borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                          >
+                            Adjust Points
+                          </button>
+                        </div>
+                      ) : (
+                        <form
+                          onSubmit={e => { e.preventDefault(); submitAdjust(a.id); }}
+                          style={{ display: 'flex', flexDirection: 'column', gap: 8, background: '#fff', padding: 12, borderRadius: 6, border: '1px solid #E0E0E0' }}
+                        >
+                          <div style={{ fontSize: 13, fontWeight: 600, color: '#2C2C2C' }}>
+                            {f.mode === 'money' ? 'Adjust Money' : 'Adjust Points'} — positive adds, negative subtracts
+                          </div>
+                          {f.error && (
+                            <div style={{ background: '#fee', color: '#c33', padding: 8, borderRadius: 4, border: '1px solid #fcc', fontSize: 12 }}>
+                              {f.error}
+                            </div>
+                          )}
+                          <input
+                            type="number"
+                            step={f.mode === 'points' ? '1' : '1'}
+                            value={f.amount}
+                            onChange={e => setForm(a.id, { amount: e.target.value })}
+                            placeholder={f.mode === 'money' ? 'e.g. 1000000 or -500000' : 'e.g. 5000 or -1000'}
+                            autoFocus
+                            style={{ padding: 8, border: '1px solid #E0E0E0', borderRadius: 4, fontSize: 14 }}
+                          />
+                          <input
+                            type="text"
+                            value={f.note}
+                            onChange={e => setForm(a.id, { note: e.target.value })}
+                            placeholder="Note (optional)"
+                            style={{ padding: 8, border: '1px solid #E0E0E0', borderRadius: 4, fontSize: 14 }}
+                          />
+                          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                            <button
+                              type="button"
+                              onClick={() => cancelAdjust(a.id)}
+                              disabled={f.busy}
+                              style={{ background: '#F5F5F5', color: '#2C2C2C', border: '1px solid #E0E0E0', padding: '8px 14px', borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={f.busy}
+                              style={{ background: '#2C2C2C', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: 4, fontSize: 13, fontWeight: 600, cursor: f.busy ? 'default' : 'pointer', opacity: f.busy ? 0.6 : 1 }}
+                            >
+                              {f.busy ? 'Saving…' : 'Confirm'}
+                            </button>
+                          </div>
+                        </form>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+              <button
+                type="button"
+                onClick={closeUpdateModal}
+                style={{ background: '#F5F5F5', color: '#2C2C2C', border: '1px solid #E0E0E0', padding: '10px 16px', borderRadius: 6, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

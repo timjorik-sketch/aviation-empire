@@ -32,7 +32,7 @@ function buildScheduleRows(slots) {
     days.sort((a, b) => a - b);
     let label;
     if (days.length === 7) {
-      label = 'Täglich';
+      label = 'Daily';
     } else {
       // Split into consecutive runs, format each as range or single day
       const runs = [];
@@ -51,10 +51,10 @@ function buildScheduleRows(slots) {
     return { label, times };
   });
 
-  // Sort rows: täglich first, then by first day index
+  // Sort rows: daily first, then by first day index
   rows.sort((a, b) => {
-    if (a.label === 'täglich') return -1;
-    if (b.label === 'täglich') return 1;
+    if (a.label === 'Daily') return -1;
+    if (b.label === 'Daily') return 1;
     return 0;
   });
   return rows;

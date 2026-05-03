@@ -521,11 +521,11 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
                       <div className="am-used-list-label">Select a listing:</div>
                       <div className="am-used-list">
                         <div className="am-ul-header">
-                          <span>Kennung</span>
-                          <span>Alter</span>
-                          <span>Standort</span>
-                          <span>Verkäufer</span>
-                          <span style={{textAlign:'right'}}>Preis</span>
+                          <span>Registration</span>
+                          <span>Age</span>
+                          <span>Location</span>
+                          <span>Seller</span>
+                          <span style={{textAlign:'right'}}>Price</span>
                         </div>
                         {modalUsedListings.map(l => {
                           const isSelected = selectedUsedListing?.id === l.id;

@@ -305,8 +305,8 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
       setFleetOverview(prev => prev.map(a => a.id !== ac.id ? a : {
         ...a, is_listed_for_sale: 0, listed_price: null
       }));
-      setSuccessMsg(`${ac.registration}: Verkauf beendet.`);
-    } catch (e) { setErrorMsg(e.message || 'Fehler beim Beenden des Verkaufs'); }
+      setSuccessMsg(`${ac.registration}: Sale ended.`);
+    } catch (e) { setErrorMsg(e.message || 'Failed to end sale'); }
   };
 
   const handleSort = (col) => {
@@ -525,7 +525,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
               <svg viewBox="0 0 24 24" fill="currentColor" className="empty-icon">
                 <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
               </svg>
-              <p>Keine Flugzeuge in deiner Flotte</p>
+              <p>No aircraft in your fleet</p>
               <button className="btn-buy-aircraft" style={{ marginTop: '1rem' }} onClick={onOpenMarketplace}>
                 + Buy your first aircraft
               </button>
@@ -731,8 +731,8 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                               )}
                               {group.forSale ? (
                                 <>
-                                  <th>Verkaufspreis</th>
-                                  <th>Aktion</th>
+                                  <th>Sale Price</th>
+                                  <th>Action</th>
                                 </>
                               ) : group.inProduction ? (
                                 <>
@@ -820,7 +820,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                                           className="ov-btn-schedule"
                                           onClick={() => handleCancelListing(ac)}
                                         >
-                                          Verkauf beenden
+                                          End Sale
                                         </button>
                                       </td>
                                     </>

@@ -354,7 +354,7 @@ async function processPayroll() {
       if (totalCost > 0) {
         await pool.query(
           "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
-          [airline.id, -totalCost, `Wöchentliche Personalkosten`]
+          [airline.id, -totalCost, `Weekly Payroll`]
         );
         console.log(`[Payroll] ${airline.name}: -$${totalCost.toLocaleString()} weekly payroll`);
       }

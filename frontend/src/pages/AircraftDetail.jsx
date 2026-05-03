@@ -1271,9 +1271,9 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                   <button
                     className="ad-btn-clear-sched"
                     onClick={() => {
-                      if (!selectedCabinProfileId) { setError('Kein Kabinenprofil zugewiesen'); return; }
-                      if (!crewAssigned)           { setError('Kein Personal zugewiesen'); return; }
-                      if (schedule.length === 0)   { setError('Kein Flug geplant'); return; }
+                      if (!selectedCabinProfileId) { setError('No cabin profile assigned'); return; }
+                      if (!crewAssigned)           { setError('No crew assigned'); return; }
+                      if (schedule.length === 0)   { setError('No flights scheduled'); return; }
                       handleToggleActive();
                     }}>
                     Activate
@@ -1440,7 +1440,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     className="ad-btn-clear-sched"
                     disabled={crewHiring}
                     onClick={() => {
-                      if (!selectedCabinProfileId) { setError('Kein Kabinenprofil zugewiesen'); return; }
+                      if (!selectedCabinProfileId) { setError('No cabin profile assigned'); return; }
                       handleHireCrew();
                     }}
                   >
@@ -1635,8 +1635,8 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
             <div className="sched-no-cabin-warning">
               <div className="sched-no-cabin-icon">✈</div>
               <div className="sched-no-cabin-text">
-                <strong>Kein Kabinenprofil zugewiesen</strong>
-                <p>Flüge können erst geplant werden, wenn diesem Flugzeug ein Kabinenprofil zugewiesen wurde. Weise zuerst ein Kabinenprofil im Bereich <em>Flugzeugdetails → Kabinenausstattung</em> zu.</p>
+                <strong>No cabin profile assigned</strong>
+                <p>Flights can only be scheduled once a cabin profile has been assigned to this aircraft. Assign a cabin profile first in the <em>Aircraft Details → Cabin Configuration</em> section.</p>
               </div>
             </div>
           )}

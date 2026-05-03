@@ -440,7 +440,7 @@ function App() {
     dashboard: 'Dashboard',
     fleet: 'Fleet',
     flights: 'Flight Operations',
-    'flight-schedule': 'Flugplan',
+    'flight-schedule': 'Flight Schedule',
     finances: 'Finances',
     routes: 'Route Planning',
     hubs: 'Network',
@@ -885,7 +885,13 @@ function App() {
                             form.append('logo', file);
                             const token = localStorage.getItem('token');
                             const res = await fetch(`${API_URL}/api/airline/logo`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
-                            if (res.ok) fetchAllAirlines();
+                            if (res.ok) {
+                              fetchAllAirlines();
+                            } else {
+                              let msg = `Upload fehlgeschlagen (${res.status})`;
+                              try { const j = await res.json(); if (j?.error) msg += `: ${j.error}`; } catch {}
+                              alert(msg);
+                            }
                             e.target.value = '';
                           };
                           img.onerror = () => { URL.revokeObjectURL(url); alert('Datei konnte nicht gelesen werden.'); };

@@ -601,7 +601,7 @@ router.post('/logo', authMiddleware, (req, res) => {
       res.json({ logo_filename: publicUrl, logo_url: publicUrl });
     } catch (error) {
       console.error('Logo upload error:', error);
-      res.status(500).json({ error: 'Server error' });
+      res.status(500).json({ error: error?.message || 'Server error' });
     }
   });
 });

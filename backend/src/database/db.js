@@ -928,6 +928,34 @@ async function initDatabase() {
     }
   }
 
+  // SXF → BER consolidation (Berlin Schönefeld closed in 2020 and became Terminal 5 of BER)
+  {
+    const { rows: sxfRows } = await safeQuery(`SELECT 1 FROM airports WHERE iata_code='SXF'`, null, 'check SXF');
+    if (sxfRows.length) {
+      const reassign = [
+        ['aircraft', 'home_airport'],
+        ['aircraft', 'current_location'],
+        ['routes', 'departure_airport'],
+        ['routes', 'arrival_airport'],
+        ['weekly_schedule', 'departure_airport'],
+        ['weekly_schedule', 'arrival_airport'],
+        ['airline_destinations', 'airport_code'],
+        ['personnel', 'airport_code'],
+        ['airport_slots', 'airport_code'],
+        ['slot_usage', 'airport_code'],
+        ['transfer_flights', 'departure_airport'],
+        ['transfer_flights', 'arrival_airport'],
+        ['airport_expansions', 'airport_code'],
+        ['expansion_usage', 'airport_code'],
+        ['used_aircraft_market', 'location'],
+      ];
+      for (const [tbl, col] of reassign) {
+        await safeQuery(`UPDATE ${tbl} SET ${col}='BER' WHERE ${col}='SXF'`, null, `SXF→BER ${tbl}.${col}`);
+      }
+      await safeQuery(`DELETE FROM airports WHERE iata_code='SXF'`, null, 'delete SXF');
+    }
+  }
+
   // ── AIRPORT FEE SEED (runs after coordinate seed so category is correct) ─────
   const CAT_FEES = {
     8:[850,2900,7300,600,1200,2150], 7:[700,2400,5900,550,1075,1825],

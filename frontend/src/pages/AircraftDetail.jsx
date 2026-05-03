@@ -2166,7 +2166,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
           { label: 'Economy',  seats: f.booked_economy  ?? 0, cap: f.eco_capacity ?? 0, price: f.economy_price  ?? 0, rev: ecoRev  },
           { label: 'Business', seats: f.booked_business ?? 0, cap: f.biz_capacity ?? 0, price: f.business_price ?? 0, rev: bizRev  },
           { label: 'First',    seats: f.booked_first    ?? 0, cap: f.fir_capacity ?? 0, price: f.first_price    ?? 0, rev: firstRev },
-        ].filter(c => c.price > 0);
+        ].filter(c => c.cap > 0);
 
         const cancelPenalty = isCancelled ? Math.round(
           (f.booked_economy  ?? 0) * (f.economy_price  ?? 0) * 1.2 +

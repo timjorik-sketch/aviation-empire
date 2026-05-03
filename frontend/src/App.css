@@ -20,6 +20,10 @@
 .ap-hero,
 .ep-hero {
   position: relative;
+  /* Aligns the floating glass caption with the .container / page content edge
+     (max-width 1100px, padding 24px). On wider viewports the calc grows so the
+     glass tracks the centered content; on narrower ones max() clamps to 24px. */
+  --hero-edge: max(24px, calc((100% - 1100px) / 2 + 24px));
 }
 
 .page-hero {
@@ -40,8 +44,8 @@
 .ep-hero-overlay {
   position: absolute !important;
   bottom: 28px !important;
-  left: 32px !important;
-  max-width: calc(100% - 64px) !important;
+  left: var(--hero-edge) !important;
+  max-width: calc(100% - 2 * var(--hero-edge)) !important;
   background: rgba(255, 255, 255, 0.55) !important;
   backdrop-filter: blur(24px) saturate(180%) !important;
   -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
@@ -168,6 +172,17 @@
 @media (max-width: 768px) {
   .page-hero { height: 180px; }
 
+  .page-hero,
+  .fleet-hero,
+  .cp-hero,
+  .sp-hero,
+  .am-hero,
+  .ad-hero,
+  .ap-hero,
+  .ep-hero {
+    --hero-edge: 16px;
+  }
+
   .page-hero-overlay,
   .fleet-hero-overlay,
   .cp-hero-overlay,
@@ -177,8 +192,6 @@
   .ap-hero-overlay,
   .ep-hero-overlay {
     bottom: 18px !important;
-    left: 16px !important;
-    max-width: calc(100% - 32px) !important;
     padding: 13px 18px !important;
   }
 

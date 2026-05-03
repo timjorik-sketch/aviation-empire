@@ -6,6 +6,7 @@ import { body, validationResult } from 'express-validator';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 import { sendPasswordResetEmail, sendVerificationEmail } from '../utils/email.js';
+import { logEvent, reqInfo } from '../utils/auditLog.js';
 
 function hashToken(raw) {
   return crypto.createHash('sha256').update(raw).digest('hex');
@@ -111,6 +112,10 @@ router.post('/register',
         { expiresIn: '7d' }
       );
 
+      // Audit: register success. We don't log the password / token.
+      logEvent({ eventType: 'register_success', actorUserId: userId, ...reqInfo(req),
+        metadata: { username, email, invite_code_id: inviteRow.id } });
+
       res.status(201).json({
         message: 'User created successfully',
         token,
@@ -143,6 +148,10 @@ router.post('/login',
       );
 
       if (!findResult.rows[0]) {
+        // Audit: login failed because no such user. Log the *attempted*
+        // username so we can spot enumeration attempts; no password.
+        logEvent({ eventType: 'login_failure', ...reqInfo(req),
+          metadata: { reason: 'unknown_user', attempted: String(username).slice(0, 64) } });
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
@@ -151,10 +160,14 @@ router.post('/login',
       // Check password
       const validPassword = await bcrypt.compare(password, user.password_hash);
       if (!validPassword) {
+        logEvent({ eventType: 'login_failure', actorUserId: user.id, ...reqInfo(req),
+          metadata: { reason: 'wrong_password' } });
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
       if (user.is_banned) {
+        logEvent({ eventType: 'login_failure', actorUserId: user.id, ...reqInfo(req),
+          metadata: { reason: 'banned' } });
         return res.status(403).json({ error: 'This account has been banned.' });
       }
 
@@ -167,6 +180,8 @@ router.post('/login',
         process.env.JWT_SECRET,
         { expiresIn: '7d' }
       );
+
+      logEvent({ eventType: 'login_success', actorUserId: user.id, ...reqInfo(req) });
 
       res.json({
         message: 'Login successful',
@@ -206,7 +221,13 @@ router.post('/forgot-password',
         [email]
       );
       const user = userResult.rows[0];
-      if (!user || user.is_banned) return genericOk();
+      if (!user || user.is_banned) {
+        // Still log the request — a flood of these against unknown emails
+        // is a strong enumeration signal.
+        logEvent({ eventType: 'password_reset_requested', ...reqInfo(req),
+          metadata: { matched: false } });
+        return genericOk();
+      }
 
       // Rate-limit: skip new email if one was issued within 60s
       const recent = await pool.query(
@@ -215,7 +236,11 @@ router.post('/forgot-password',
          ORDER BY created_at DESC LIMIT 1`,
         [user.id]
       );
-      if (recent.rows[0]) return genericOk();
+      if (recent.rows[0]) {
+        logEvent({ eventType: 'password_reset_requested', actorUserId: user.id, ...reqInfo(req),
+          metadata: { matched: true, throttled: true } });
+        return genericOk();
+      }
 
       // Invalidate any older unused tokens for this user
       await pool.query(
@@ -231,6 +256,8 @@ router.post('/forgot-password',
          VALUES ($1, $2, NOW() + INTERVAL '1 hour')`,
         [user.id, tokenHash]
       );
+      logEvent({ eventType: 'password_reset_requested', actorUserId: user.id, ...reqInfo(req),
+        metadata: { matched: true, throttled: false } });
 
       const base = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
       const resetUrl = `${base}/?reset_token=${rawToken}`;
@@ -306,6 +333,8 @@ router.post('/reset-password',
         [user.id]
       );
 
+      logEvent({ eventType: 'password_reset_completed', actorUserId: user.id, ...reqInfo(req) });
+
       res.json({ message: 'Password has been reset. You can now log in.' });
     } catch (error) {
       console.error('Reset password error:', error);
@@ -356,6 +385,8 @@ router.post('/verify-email',
          WHERE user_id = $1 AND used_at IS NULL`,
         [row.user_id]
       );
+
+      logEvent({ eventType: 'email_verified', actorUserId: row.user_id, ...reqInfo(req) });
 
       res.json({ message: 'Email verified. Thanks!' });
     } catch (error) {
@@ -448,6 +479,8 @@ router.patch('/change-password',
 
     const newHash = await bcrypt.hash(newPassword, 10);
     await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [newHash, req.userId]);
+
+    logEvent({ eventType: 'password_changed', actorUserId: req.userId, ...reqInfo(req) });
 
     res.json({ message: 'Password changed successfully' });
   } catch (error) {

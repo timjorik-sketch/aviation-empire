@@ -11,11 +11,12 @@
 
 import rateLimit from 'express-rate-limit';
 
-// Generic ceiling for any caller. Generous enough that real users never hit it,
-// tight enough to slow down scrapers and abusive bots.
+// Generic ceiling for any caller. Sized for an interactive game: an active
+// session loads multiple pages, polls XP/finances, and refreshes airport
+// boards every 30s. 300/15min was hitting real users on normal browsing.
 export const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 300,
+  max: 1500,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' },

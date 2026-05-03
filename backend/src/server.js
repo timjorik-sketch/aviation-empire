@@ -32,12 +32,12 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Trust Railway's reverse proxy so req.ip reflects the real client IP.
-// Railway's ingress sits behind multiple hops (edge LB + container router),
-// so trust proxy: 1 only sees the innermost hop and req.ip drifts per
-// request — which neutralises rate limiting. Use 'true' to walk the full
-// X-Forwarded-For chain and pick the leftmost entry (real client). Spoofing
-// would require bypassing Railway's edge, which isn't reachable directly.
-app.set('trust proxy', true);
+// Use a numeric hop count (1) rather than `true`: express-rate-limit rejects
+// `true` as ERR_ERL_PERMISSIVE_TRUST_PROXY because it lets any client spoof
+// X-Forwarded-For and bypass IP-based limits. Railway terminates TLS at one
+// edge proxy in front of the container, so trusting exactly 1 hop yields the
+// real client IP without trusting client-supplied header entries.
+app.set('trust proxy', 1);
 
 // Don't advertise the framework — small win, removes one fingerprinting hint.
 app.disable('x-powered-by');

@@ -177,6 +177,7 @@ router.get('/all', authMiddleware, async (req, res) => {
     const result = await pool.query(`
       SELECT a.id, a.name, a.airline_code, a.home_airport_code, a.balance,
              a.image_score, a.level, a.total_points, a.created_at,
+             a.acknowledged_level,
              ap.name AS home_airport_name,
              (SELECT COUNT(*) FROM aircraft ac WHERE ac.airline_id = a.id) AS fleet_count,
              a.logo_filename
@@ -195,6 +196,7 @@ router.get('/all', authMiddleware, async (req, res) => {
       image_score: row.image_score,
       level: row.level,
       total_points: row.total_points,
+      acknowledged_level: row.acknowledged_level ?? row.level,
       created_at: row.created_at,
       home_airport_name: row.home_airport_name,
       fleet_count: parseInt(row.fleet_count),
@@ -271,7 +273,7 @@ router.post('/',
 
       // Create airline with RETURNING
       const insertResult = await pool.query(
-        'INSERT INTO airlines (user_id, name, airline_code, home_airport_code) VALUES ($1, $2, $3, $4) RETURNING id',
+        'INSERT INTO airlines (user_id, name, airline_code, home_airport_code, acknowledged_level) VALUES ($1, $2, $3, $4, 1) RETURNING id',
         [req.userId, name, airline_code, home_airport_code]
       );
       const newId = insertResult.rows[0].id;
@@ -540,11 +542,28 @@ router.get('/xp', authMiddleware, async (req, res) => {
   try {
     if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
     await checkLevelUpPg(req.airlineId);
-    const result = await pool.query('SELECT level, total_points FROM airlines WHERE id = $1', [req.airlineId]);
+    const result = await pool.query('SELECT level, total_points, acknowledged_level FROM airlines WHERE id = $1', [req.airlineId]);
     if (!result.rows[0]) return res.status(404).json({ error: 'Airline not found' });
-    const { level, total_points } = result.rows[0];
-    res.json({ level, total_points });
+    const { level, total_points, acknowledged_level } = result.rows[0];
+    res.json({ level, total_points, acknowledged_level: acknowledged_level ?? level });
   } catch (error) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// POST /api/airline/acknowledge-level — mark the current level as seen so the
+// celebration popup does not reappear on subsequent loads.
+router.post('/acknowledge-level', authMiddleware, async (req, res) => {
+  try {
+    if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
+    const result = await pool.query(
+      'UPDATE airlines SET acknowledged_level = level WHERE id = $1 RETURNING level, acknowledged_level',
+      [req.airlineId]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Airline not found' });
+    res.json({ acknowledged_level: result.rows[0].acknowledged_level, level: result.rows[0].level });
+  } catch (error) {
+    console.error('Acknowledge level error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });

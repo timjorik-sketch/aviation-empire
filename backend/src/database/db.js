@@ -311,6 +311,23 @@ async function initDatabase() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
     `CREATE INDEX IF NOT EXISTS idx_interest_clicks_ip_time ON interest_clicks(ip_hash, created_at)`,
+    // Audit-log: persistent record of security-relevant events (logins,
+    // admin actions, bans, password resets). Survives Railway log rotation
+    // and is queryable for forensic investigation. Inserted by
+    // utils/auditLog.js logEvent() — failures must never break the request.
+    `CREATE TABLE IF NOT EXISTS audit_log (
+      id BIGSERIAL PRIMARY KEY,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      event_type TEXT NOT NULL,
+      actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      target_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      ip TEXT,
+      user_agent TEXT,
+      metadata JSONB
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log (created_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_audit_log_actor ON audit_log (actor_user_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_audit_log_event_type ON audit_log (event_type)`,
   ];
   await runStatements(extraTables, 'extra tables');
 
@@ -337,6 +354,7 @@ async function initDatabase() {
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS total_passengers_lifetime BIGINT DEFAULT 0`,
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS total_revenue_lifetime NUMERIC DEFAULT 0`,
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS lifetime_backfilled_at TIMESTAMPTZ`,
+    `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS acknowledged_level INTEGER`,
     // users table
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS active_airline_id INTEGER REFERENCES airlines(id)`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE`,
@@ -420,6 +438,13 @@ async function initDatabase() {
       lifetime_backfilled_at    = NOW()
     WHERE lifetime_backfilled_at IS NULL
   `, null, 'lifetime backfill');
+
+  // ── One-time backfill of acknowledged_level: existing airlines should not
+  //    get retroactive level-up popups for levels they already passed.
+  //    Idempotent: runs once per row (NULL → current level).
+  await safeQuery(`
+    UPDATE airlines SET acknowledged_level = level WHERE acknowledged_level IS NULL
+  `, null, 'acknowledged_level backfill');
 
   // ── SEED service_item_types (upsert) ─────────────────────────────────────────
   await safeQuery(`

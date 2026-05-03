@@ -275,7 +275,7 @@ router.post('/players/:id/adjust-points', async (req, res) => {
     }
 
     const airlineResult = await pool.query(
-      'SELECT id, total_points, user_id FROM airlines WHERE id = $1',
+      'SELECT id, total_points, level, user_id FROM airlines WHERE id = $1',
       [airline_id]
     );
     if (!airlineResult.rows[0]) return res.status(404).json({ error: 'Airline not found' });
@@ -283,6 +283,7 @@ router.post('/players/:id/adjust-points', async (req, res) => {
       return res.status(400).json({ error: 'Airline does not belong to this player' });
     }
 
+    const oldLevel = Number(airlineResult.rows[0].level || 1);
     const newTotal = Math.max(0, Number(airlineResult.rows[0].total_points || 0) + amt);
 
     let newLevel = 1;
@@ -290,11 +291,23 @@ router.post('/players/:id/adjust-points', async (req, res) => {
       newLevel++;
     }
 
-    const updated = await pool.query(
-      `UPDATE airlines SET total_points = $1, level = $2 WHERE id = $3
-       RETURNING id, total_points, level`,
-      [newTotal, newLevel, airline_id]
-    );
+    // If we raise the level, force acknowledged_level back to the old level so
+    // the player gets the level-up celebration on next poll/login. Without
+    // this, an airline whose acknowledged_level was NULL (or already equal to
+    // the new level for any reason) would silently skip the popup.
+    const updated = newLevel > oldLevel
+      ? await pool.query(
+          `UPDATE airlines SET total_points = $1, level = $2,
+                  acknowledged_level = LEAST(COALESCE(acknowledged_level, $3), $3)
+           WHERE id = $4
+           RETURNING id, total_points, level, acknowledged_level`,
+          [newTotal, newLevel, oldLevel, airline_id]
+        )
+      : await pool.query(
+          `UPDATE airlines SET total_points = $1, level = $2 WHERE id = $3
+           RETURNING id, total_points, level, acknowledged_level`,
+          [newTotal, newLevel, airline_id]
+        );
 
     const noteText = note && note.toString().trim();
     logEvent({ eventType: 'admin_points_adjust', actorUserId: req.userId, targetUserId: userId,

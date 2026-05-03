@@ -2,6 +2,7 @@ import express from 'express';
 import { body, validationResult } from 'express-validator';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
+import adminMiddleware from '../middleware/admin.js';
 import { calculateFlightDuration } from './flights.js';
 import { validatePriceClamp } from '../utils/marketPricing.js';
 
@@ -2220,9 +2221,27 @@ router.delete('/:id/cancel-listing', authMiddleware, async (req, res) => {
   }
 });
 
-// Removed (security audit C1): /dev/clear-market and /dev/fill-market let any
-// authenticated player wipe or repopulate the global used-aircraft market.
-// fillUsedMarket() is still exported for the scheduled refresh job.
+// POST /api/aircraft/dev/clear-market — admin-only: wipe used aircraft market
+router.post('/dev/clear-market', authMiddleware, adminMiddleware, async (_req, res) => {
+  try {
+    await pool.query('DELETE FROM used_aircraft_market');
+    res.json({ message: 'Market cleared' });
+  } catch(e) {
+    console.error('Clear market error:', e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// POST /api/aircraft/dev/fill-market — admin-only: repopulate used aircraft market
+router.post('/dev/fill-market', authMiddleware, adminMiddleware, async (_req, res) => {
+  try {
+    const added = await fillUsedMarket();
+    res.json({ message: added > 0 ? `${added} new listings added` : 'Nothing added — every type already has listings' });
+  } catch(e) {
+    console.error('Fill market error:', e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 
 // GET /api/aircraft/types/available — all types unlocked for the airline's current level
 router.get('/types/available', authMiddleware, async (req, res) => {

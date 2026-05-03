@@ -45,6 +45,7 @@ import RoutePreviewMap from './components/RoutePreviewMap.jsx';
 import Leaderboards from './pages/Leaderboards';
 import AdminPanel from './pages/AdminPanel';
 import AdminPlayers from './pages/AdminPlayers';
+import AdminInvites from './pages/AdminInvites';
 import SatisfactionRating, { getSatColor, scoreToRating } from './components/SatisfactionRating.jsx';
 import './App.css';
 
@@ -195,9 +196,9 @@ function App() {
   const [arrivals, setArrivals] = useState([]);
   const [fleetSummary, setFleetSummary] = useState([]);
   const [activeRoutes, setActiveRoutes] = useState([]);
-  const [levelUpNotif, setLevelUpNotif] = useState(null);
   const [showLevelPopup, setShowLevelPopup] = useState(false);
   const [nextLevelAircraft, setNextLevelAircraft] = useState([]);
+  const [levelUpCelebration, setLevelUpCelebration] = useState(null); // { newLevel, unlocked: [...] }
 
   useEffect(() => {
     const savedUser = localStorage.getItem('user');
@@ -293,7 +294,9 @@ function App() {
       .catch(() => setNextLevelAircraft([]));
   }, [showLevelPopup, activeAirline?.level]);
 
-  // Poll XP/level every 30s while an airline is active
+  // Poll XP/level every 30s while an airline is active. The level-up popup
+  // is driven by `level > acknowledged_level` (see effect below) — this poll
+  // only refreshes the values; it does not trigger UI directly.
   useEffect(() => {
     if (!activeAirline) return;
     const token = localStorage.getItem('token');
@@ -301,20 +304,51 @@ function App() {
       try {
         const res = await fetch(`${API_URL}/api/airline/xp`, { headers: { Authorization: `Bearer ${token}` } });
         if (!res.ok) return;
-        const { level, total_points } = await res.json();
-        setActiveAirline(prev => {
-          if (!prev) return prev;
-          if (level > prev.level) setLevelUpNotif({ newLevel: level });
-          return { ...prev, level, total_points };
-        });
+        const { level, total_points, acknowledged_level } = await res.json();
+        setActiveAirline(prev => prev ? { ...prev, level, total_points, acknowledged_level } : prev);
         setAirlines(prev => prev.map(a =>
-          a.id === activeAirline.id ? { ...a, level, total_points } : a
+          a.id === activeAirline.id ? { ...a, level, total_points, acknowledged_level } : a
         ));
       } catch { /* ignore */ }
     };
     const id = setInterval(poll, 30_000);
     return () => clearInterval(id);
   }, [activeAirline?.id]);
+
+  // Show celebration popup once when current level exceeds the last
+  // acknowledged level. Dismissal persists via POST /acknowledge-level.
+  useEffect(() => {
+    if (!activeAirline) return;
+    if (levelUpCelebration) return; // already showing
+    const lvl = activeAirline.level || 1;
+    const ack = activeAirline.acknowledged_level ?? lvl;
+    if (lvl <= ack) return;
+    const token = localStorage.getItem('token');
+    fetch(`${API_URL}/api/aircraft/types`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(data => {
+        const unlocked = (data.aircraft_types || []).filter(t => t.required_level === lvl);
+        setLevelUpCelebration({ newLevel: lvl, unlocked });
+      })
+      .catch(() => setLevelUpCelebration({ newLevel: lvl, unlocked: [] }));
+  }, [activeAirline?.id, activeAirline?.level, activeAirline?.acknowledged_level]);
+
+  const dismissLevelCelebration = async () => {
+    setLevelUpCelebration(null);
+    if (!activeAirline) return;
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch(`${API_URL}/api/airline/acknowledge-level`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const { acknowledged_level } = await res.json();
+        setActiveAirline(prev => prev ? { ...prev, acknowledged_level } : prev);
+        setAirlines(prev => prev.map(a => a.id === activeAirline.id ? { ...a, acknowledged_level } : a));
+      }
+    } catch { /* ignore */ }
+  };
 
   useEffect(() => {
     if (!activeAirline) { setDepartures([]); setArrivals([]); setFleetSummary([]); setAirlineStats({ destinations_count: 0, hubs: [], home_airport: null, weekly_revenue: 0, avg_satisfaction: null, daily_passengers: 0, total_passengers: 0 }); setActiveRoutes([]); return; }
@@ -553,6 +587,9 @@ function App() {
   if (currentPage === 'admin-players') {
     return <AdminPlayers airline={activeAirline} onBack={() => setCurrentPage('admin')} />;
   }
+  if (currentPage === 'admin-invites') {
+    return <AdminInvites airline={activeAirline} onBack={() => setCurrentPage('admin')} />;
+  }
 
   const closeChangeModal = () => { setShowChangeModal(false); setShowCreateForm(false); };
 
@@ -628,26 +665,53 @@ function App() {
   return (
     <div className="app">
 
-      {/* ── Level-up toast ── */}
-      {levelUpNotif && (
-        <div style={{
-          position: 'fixed', bottom: '2rem', right: '2rem', zIndex: 9999,
-          background: '#2C2C2C', color: '#fff', borderRadius: '10px',
-          padding: '1rem 1.5rem', boxShadow: '0 4px 24px rgba(0,0,0,0.25)',
-          display: 'flex', alignItems: 'center', gap: '12px', minWidth: 260,
-          animation: 'fadeInUp 0.3s ease',
-        }}>
-          <div style={{ fontSize: '2rem', lineHeight: 1 }}>🏆</div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: '1rem' }}>Level Up!</div>
-            <div style={{ fontSize: '0.85rem', color: '#ccc', marginTop: 2 }}>
-              You reached <strong style={{ color: '#fff' }}>Level {levelUpNotif.newLevel}</strong>
+      {/* ── Level-up celebration popup ── */}
+      {levelUpCelebration && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}
+             onClick={dismissLevelCelebration}>
+          <div style={{ background: '#fff', borderRadius: 12, width: '100%', maxWidth: 520, padding: '2rem', boxShadow: '0 8px 40px rgba(0,0,0,0.3)' }}
+               onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.25rem' }}>
+              <div>
+                <div style={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999' }}>Level Up</div>
+                <div style={{ fontSize: '1.6rem', fontWeight: 700, color: '#2C2C2C', lineHeight: 1.15, marginTop: 4 }}>
+                  Congratulations! You reached <span style={{ whiteSpace: 'nowrap' }}>Level {levelUpCelebration.newLevel}</span>
+                </div>
+              </div>
+              <button onClick={dismissLevelCelebration}
+                style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#999', lineHeight: 1, marginLeft: 8 }}>×</button>
             </div>
+
+            {levelUpCelebration.unlocked.length > 0 ? (
+              <div>
+                <div style={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', marginBottom: 8 }}>
+                  Newly unlocked aircraft
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
+                  {levelUpCelebration.unlocked.map(ac => (
+                    <div key={ac.id} style={{ background: '#F5F5F5', borderRadius: 8, overflow: 'hidden', border: '1px solid #E8E8E8' }}>
+                      <img src={`/aircraft-images/${ac.image_filename}`} alt=""
+                        style={{ width: '100%', aspectRatio: '1000/333', objectFit: 'cover', display: 'block', background: '#E8E8E8' }}
+                        onError={e => { e.target.style.background='#E0E0E0'; e.target.style.display='block'; e.target.src=''; }} />
+                      <div style={{ padding: '6px 8px' }}>
+                        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#2C2C2C', lineHeight: 1.2 }}>{ac.full_name}</div>
+                        <div style={{ fontSize: '0.7rem', color: '#888', marginTop: 2 }}>{ac.max_passengers} pax · {ac.range_km.toLocaleString()} km</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div style={{ fontSize: '0.85rem', color: '#666', padding: '0.5rem 0' }}>
+                No new aircraft at this level — but your progress is recognized.
+              </div>
+            )}
+
+            <button onClick={dismissLevelCelebration}
+              style={{ marginTop: '1.5rem', width: '100%', background: '#2C2C2C', color: '#fff', border: 'none', borderRadius: 6, padding: '10px 16px', fontWeight: 700, fontSize: '0.9rem', cursor: 'pointer' }}>
+              Continue
+            </button>
           </div>
-          <button
-            onClick={() => setLevelUpNotif(null)}
-            style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#999', cursor: 'pointer', fontSize: '1.2rem', lineHeight: 1 }}
-          >×</button>
         </div>
       )}
 

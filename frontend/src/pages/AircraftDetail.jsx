@@ -1304,7 +1304,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                   );
                 }
                 // Only use actual flights (not maintenance) for Boarding/Taxiing state
-                const nextFlight = scheduledFlights.find(f => f._type !== 'maintenance' && f.status !== 'completed' && f.status !== 'in-flight');
+                const nextFlight = scheduledFlights.find(f => f._type !== 'maintenance' && f.status !== 'completed' && f.status !== 'in-flight' && f.status !== 'cancelled');
                 const depSt = nextFlight ? computeDepStatus(nextFlight.departure_time, nowMs) : null;
                 const gst = (depSt && depSt.cls !== 'scheduled')
                   ? depSt

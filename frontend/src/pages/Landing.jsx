@@ -298,11 +298,17 @@ export default function Landing({ onLogin, onRegister, onForgotPassword }) {
       <main className="landing-marketing">
         <section className="landing-hero">
           <img src="/logo/logo_black.png" alt="Apron Empire" className="landing-marketing-logo" />
-          <span className="landing-eyebrow">Airline Management Simulation</span>
+          <span className="landing-eyebrow">Free Airline Manager Browsergame</span>
           <h1 className="landing-h1">Build Your Airline Empire</h1>
           <p className="landing-sub">
             Take control of your own airline. Buy aircraft, plan routes, manage crews,
-            and compete with players worldwide in this realistic browser-based simulation.
+            and compete with players worldwide in this realistic browser-based airline
+            management simulation. Free to play — no download required.
+          </p>
+          <p className="landing-sub" lang="de">
+            Apron Empire ist ein kostenloses Airline-Manager-Browsergame: Baue deine
+            eigene Fluggesellschaft auf, kaufe Flugzeuge, plane Routen zu über 2.200
+            echten Flughäfen und konkurriere mit Spielern weltweit — direkt im Browser.
           </p>
         </section>
 

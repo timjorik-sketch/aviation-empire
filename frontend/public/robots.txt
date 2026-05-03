@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+
+# Block common admin / private routes (state-routed SPA, but listed for hygiene)
+Disallow: /admin
+Disallow: /admin-players
+Disallow: /admin-invites
+
+Sitemap: https://apronempire.com/sitemap.xml

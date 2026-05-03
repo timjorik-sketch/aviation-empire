@@ -122,18 +122,19 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
       const flights = flightsData.flights || [];
 
       // Build lookup: aircraft_registration → active flight
-      // Includes scheduled/boarding flights whose dep time has passed (DB lag → flight is effectively in the air)
+      // Treats scheduled/boarding flights whose dep time has passed (DB lag) as in-flight
       const activeByReg = {};
       const nowMs = Date.now();
       for (const f of flights) {
-        if (f.status === 'boarding' || f.status === 'in-flight') {
+        const depMs = f.departure_time ? new Date(f.departure_time).getTime() : null;
+        const arrMs = f.arrival_time   ? new Date(f.arrival_time).getTime()   : null;
+        const inWindow = depMs != null && arrMs != null && depMs <= nowMs && nowMs < arrMs;
+        if (f.status === 'in-flight') {
           activeByReg[f.aircraft_registration] = f;
-        } else if (f.status === 'scheduled' && f.departure_time && f.arrival_time) {
-          const depMs = new Date(f.departure_time).getTime();
-          const arrMs = new Date(f.arrival_time).getTime();
-          if (depMs <= nowMs && nowMs < arrMs) {
-            activeByReg[f.aircraft_registration] = f;
-          }
+        } else if (f.status === 'boarding') {
+          activeByReg[f.aircraft_registration] = inWindow ? { ...f, status: 'in-flight' } : f;
+        } else if (f.status === 'scheduled' && inWindow) {
+          activeByReg[f.aircraft_registration] = { ...f, status: 'in-flight' };
         }
       }
 
@@ -330,7 +331,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
   };
 
   const getLocationText = (ac) => {
-    if (ac.active_fn) return `${ac.active_fn}: ${ac.active_dep} → ${ac.active_arr}`;
+    if (ac.active_fn && ac.active_flight_status === 'in-flight') return `${ac.active_fn}: ${ac.active_dep} → ${ac.active_arr}`;
     const locCode = ac.current_location || ac.home_airport;
     if (locCode) {
       const name = airportName(locCode);

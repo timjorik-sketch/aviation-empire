@@ -647,8 +647,7 @@ function App() {
     if (diffMin > 30)   return { label: 'On Time',   cls: 'ontime' };
     if (diffMin > 3)    return { label: 'Boarding',  cls: 'board' };
     if (diffMin >= 0)   return { label: 'Taxiing',   cls: 'board' };
-    if (diffMin >= -1)  return { label: 'Departed',  cls: 'arr' };
-    return null;
+    return { label: 'Delayed', cls: 'board' };
   }
   function getArrStatus(f) {
     const now = Date.now();

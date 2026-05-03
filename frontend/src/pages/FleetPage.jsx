@@ -122,10 +122,18 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
       const flights = flightsData.flights || [];
 
       // Build lookup: aircraft_registration → active flight
+      // Includes scheduled/boarding flights whose dep time has passed (DB lag → flight is effectively in the air)
       const activeByReg = {};
+      const nowMs = Date.now();
       for (const f of flights) {
         if (f.status === 'boarding' || f.status === 'in-flight') {
           activeByReg[f.aircraft_registration] = f;
+        } else if (f.status === 'scheduled' && f.departure_time && f.arrival_time) {
+          const depMs = new Date(f.departure_time).getTime();
+          const arrMs = new Date(f.arrival_time).getTime();
+          if (depMs <= nowMs && nowMs < arrMs) {
+            activeByReg[f.aircraft_registration] = f;
+          }
         }
       }
 
@@ -322,7 +330,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
   };
 
   const getLocationText = (ac) => {
-    if (ac.active_fn && ac.active_flight_status === 'in-flight') return `${ac.active_fn}: ${ac.active_dep} → ${ac.active_arr}`;
+    if (ac.active_fn) return `${ac.active_fn}: ${ac.active_dep} → ${ac.active_arr}`;
     const locCode = ac.current_location || ac.home_airport;
     if (locCode) {
       const name = airportName(locCode);

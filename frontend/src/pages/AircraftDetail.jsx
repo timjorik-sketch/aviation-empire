@@ -124,8 +124,7 @@ function computeDepStatus(depISO, now) {
   if (diffMin > 30)  return { label: 'On Time',   cls: 'ontime',    color: '#22c55e' };
   if (diffMin > 3)   return { label: 'Boarding',  cls: 'boarding',  color: '#eab308' };
   if (diffMin >= 0)  return { label: 'Taxiing',   cls: 'taxiing',   color: '#eab308' };
-  if (diffMin >= -1) return { label: 'Departed',  cls: 'departed',  color: '#22c55e' };
-  return { label: 'Departed', cls: 'departed', color: '#22c55e' };
+  return { label: 'Delayed',  cls: 'boarding',  color: '#eab308' };
 }
 
 function computeArrStatus(depISO, arrISO, now) {

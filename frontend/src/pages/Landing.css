@@ -104,13 +104,13 @@
 
 .landing-marketing-logo {
   display: block;
-  height: 56px;
+  height: 73px;
   width: auto;
   margin-bottom: 24px;
 }
 
 @media (max-width: 768px) {
-  .landing-marketing-logo { height: 44px; margin-bottom: 16px; }
+  .landing-marketing-logo { height: 57px; margin-bottom: 16px; }
 }
 
 .landing-eyebrow {
@@ -127,7 +127,7 @@
 }
 
 .landing-h1 {
-  font-size: 48px;
+  font-size: 38px;
   line-height: 1.1;
   font-weight: 800;
   margin: 0 0 20px;
@@ -321,7 +321,7 @@
   }
 
   .landing-h1 {
-    font-size: 36px;
+    font-size: 29px;
   }
 
   .landing-sub {
@@ -347,7 +347,7 @@
   }
 
   .landing-h1 {
-    font-size: 30px;
+    font-size: 24px;
   }
 
   .landing-featrow {

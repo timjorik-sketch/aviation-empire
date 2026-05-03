@@ -53,6 +53,8 @@ app.use(helmet());
 // branches on Vercel get unique subdomains — use ADDITIONAL_CORS_ORIGINS env
 // var (comma-separated) to allow them per-environment without a code change.
 const allowedOrigins = [
+  'https://apronempire.com',
+  'https://www.apronempire.com',
   'https://aviation-empire.vercel.app',
   'https://apron-empire.vercel.app',
   'http://localhost:5173',

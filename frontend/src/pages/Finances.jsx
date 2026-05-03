@@ -191,6 +191,7 @@ export default function Finances({ airline, onBack, onNavigateToAirport, onNavig
   const [error, setError]         = useState('');
   const [fuelHistory, setFuelHistory] = useState({ prices: [], currentPrice: 0 });
   const [profitability, setProfitability] = useState({ top: [], bottom: [] });
+  const [expandedGroups, setExpandedGroups] = useState(() => new Set());
 
   useEffect(() => {
     fetchDashboard();
@@ -242,6 +243,50 @@ export default function Finances({ airline, onBack, onNavigateToAirport, onNavig
   const rb = data?.revenue_breakdown || {};
   const ops = data?.ops_stats || {};
   const txs = data?.transactions || [];
+
+  // Group consecutive "Flight Costs - …" entries into one expandable summary row.
+  // The flight processor lands many flights per tick, each writing its own
+  // transaction — without grouping, a busy tick floods out other entries.
+  const groupedTxs = (() => {
+    const out = [];
+    let i = 0;
+    while (i < txs.length) {
+      const cur = txs[i];
+      if (cur.description?.startsWith('Flight Costs - ')) {
+        let j = i;
+        while (j < txs.length && txs[j].description?.startsWith('Flight Costs - ')) j++;
+        const children = txs.slice(i, j);
+        if (children.length === 1) {
+          out.push({ kind: 'single', tx: cur });
+        } else {
+          const groupId = `fc-${cur.id}`;
+          const sumAmount = children.reduce((s, c) => s + c.amount, 0);
+          out.push({
+            kind: 'group',
+            id: groupId,
+            count: children.length,
+            amount: sumAmount,
+            created_at: cur.created_at,
+            balance_after: cur.balance_after,
+            children,
+          });
+        }
+        i = j;
+      } else {
+        out.push({ kind: 'single', tx: cur });
+        i++;
+      }
+    }
+    return out;
+  })();
+
+  const toggleGroup = (id) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
 
   // KPI card helper
   const KpiCard = ({ label, value, prev, inverse, note }) => (
@@ -479,26 +524,66 @@ export default function Finances({ airline, onBack, onNavigateToAirport, onNavig
                   </tr>
                 </thead>
                 <tbody>
-                  {txs.map((tx, i) => {
-                    const isCredit = tx.amount > 0;
-                    const dt = new Date(tx.created_at);
-                    const dateStr = dt.toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' });
-                    const timeStr = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' });
-                    return (
-                      <tr key={tx.id} style={{ background: i % 2 === 0 ? '#fff' : '#FAFAFA' }}>
-                        <td style={{ padding: '0.45rem 0.75rem', borderBottom: '1px solid #F2F2F2', color: '#666', whiteSpace: 'nowrap' }}>
-                          {dateStr} <span style={{ color: '#AAA' }}>{timeStr}</span>
-                        </td>
-                        <td style={{ padding: '0.45rem 0.75rem', borderBottom: '1px solid #F2F2F2', color: '#2C2C2C' }}>{tx.description}</td>
-                        <td style={{ padding: '0.45rem 0.75rem', borderBottom: '1px solid #F2F2F2', textAlign: 'right', fontWeight: 600, color: isCredit ? '#16a34a' : '#dc2626', whiteSpace: 'nowrap' }}>
-                          {isCredit ? '+' : ''}{fmt(tx.amount)}
-                        </td>
-                        <td style={{ padding: '0.45rem 0.75rem', borderBottom: '1px solid #F2F2F2', textAlign: 'right', color: '#555', whiteSpace: 'nowrap' }}>
-                          {fmt(tx.balance_after)}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {(() => {
+                    const rows = [];
+                    let zebra = 0;
+                    const fmtDateTime = (iso) => {
+                      const dt = new Date(iso);
+                      return {
+                        date: dt.toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' }),
+                        time: dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' }),
+                      };
+                    };
+                    const renderTxRow = (tx, opts = {}) => {
+                      const isCredit = tx.amount > 0;
+                      const { date, time } = fmtDateTime(tx.created_at);
+                      const bg = opts.child ? '#F8FAFC' : (zebra++ % 2 === 0 ? '#fff' : '#FAFAFA');
+                      return (
+                        <tr key={`tx-${tx.id}`} style={{ background: bg }}>
+                          <td style={{ padding: '0.45rem 0.75rem', borderBottom: '1px solid #F2F2F2', color: '#666', whiteSpace: 'nowrap', paddingLeft: opts.child ? '2rem' : '0.75rem' }}>
+                            {date} <span style={{ color: '#AAA' }}>{time}</span>
+                          </td>
+                          <td style={{ padding: '0.45rem 0.75rem', borderBottom: '1px solid #F2F2F2', color: opts.child ? '#555' : '#2C2C2C' }}>{tx.description}</td>
+                          <td style={{ padding: '0.45rem 0.75rem', borderBottom: '1px solid #F2F2F2', textAlign: 'right', fontWeight: 600, color: isCredit ? '#16a34a' : '#dc2626', whiteSpace: 'nowrap' }}>
+                            {isCredit ? '+' : ''}{fmt(tx.amount)}
+                          </td>
+                          <td style={{ padding: '0.45rem 0.75rem', borderBottom: '1px solid #F2F2F2', textAlign: 'right', color: '#555', whiteSpace: 'nowrap' }}>
+                            {opts.child ? '' : fmt(tx.balance_after)}
+                          </td>
+                        </tr>
+                      );
+                    };
+                    for (const item of groupedTxs) {
+                      if (item.kind === 'single') {
+                        rows.push(renderTxRow(item.tx));
+                      } else {
+                        const { date, time } = fmtDateTime(item.created_at);
+                        const expanded = expandedGroups.has(item.id);
+                        const bg = zebra++ % 2 === 0 ? '#fff' : '#FAFAFA';
+                        rows.push(
+                          <tr key={`grp-${item.id}`} style={{ background: bg, cursor: 'pointer' }} onClick={() => toggleGroup(item.id)}>
+                            <td style={{ padding: '0.45rem 0.75rem', borderBottom: '1px solid #F2F2F2', color: '#666', whiteSpace: 'nowrap' }}>
+                              {date} <span style={{ color: '#AAA' }}>{time}</span>
+                            </td>
+                            <td style={{ padding: '0.45rem 0.75rem', borderBottom: '1px solid #F2F2F2', color: '#2C2C2C' }}>
+                              <span style={{ display: 'inline-block', width: '0.9rem', color: '#888', fontSize: '0.7rem', transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
+                              {' '}Flight Costs <span style={{ color: '#888', fontWeight: 500 }}>({item.count} flights)</span>
+                            </td>
+                            <td style={{ padding: '0.45rem 0.75rem', borderBottom: '1px solid #F2F2F2', textAlign: 'right', fontWeight: 600, color: '#dc2626', whiteSpace: 'nowrap' }}>
+                              {fmt(item.amount)}
+                            </td>
+                            <td style={{ padding: '0.45rem 0.75rem', borderBottom: '1px solid #F2F2F2', textAlign: 'right', color: '#555', whiteSpace: 'nowrap' }}>
+                              {fmt(item.balance_after)}
+                            </td>
+                          </tr>
+                        );
+                        if (expanded) {
+                          for (const child of item.children) rows.push(renderTxRow(child, { child: true }));
+                        }
+                      }
+                    }
+                    return rows;
+                  })()}
                 </tbody>
               </table>
             </div>

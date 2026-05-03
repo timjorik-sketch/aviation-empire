@@ -901,7 +901,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                                   ) : (
                                     <>
                                       <td className="ov-location">
-                                        {status === 'in-flight' ? (
+                                        {ac.active_flight_status === 'in-flight' ? (
                                           <span className="ov-inflight">
                                             ✈ {ac.active_fn && <>{ac.active_fn}: </>}
                                             {ac.active_dep} → {ac.active_arr}

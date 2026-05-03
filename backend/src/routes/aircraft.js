@@ -733,7 +733,13 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
       LEFT JOIN airports dep ON dep.iata_code = COALESCE(r.departure_airport, ws.departure_airport)
       LEFT JOIN airports arr ON arr.iata_code = COALESCE(r.arrival_airport, ws.arrival_airport)
-      WHERE f.aircraft_id = $1 AND f.status = 'in-flight'
+      WHERE f.aircraft_id = $1
+        AND (
+          f.status = 'in-flight'
+          OR (f.status IN ('scheduled', 'boarding')
+              AND f.departure_time <= NOW()
+              AND f.arrival_time > NOW())
+        )
       ORDER BY f.departure_time DESC LIMIT 1
     `, [aircraftId]);
     if (cfResult.rows[0]) {

@@ -832,29 +832,28 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
                         const textColor = pct >= 90 ? '#991b1b' : pct >= 70 ? '#92400e' : '#166534';
                         return (
                           <div key={e.id} className="hd-primary-row">
-                            <div className="hd-primary-row-head">
-                              <div className="hd-primary-iata">{e.airport_code}</div>
-                              <span className="hub-tile-level-badge">Level {e.expansion_level}</span>
-                            </div>
-                            <div className="hd-primary-name">{e.airport_name || '—'}</div>
-                            <div style={{ marginTop: 6 }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                                <span style={{ color: '#666' }}>Capacity</span>
-                                <span style={{ color: textColor, fontWeight: 600 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div className="hd-primary-row-head">
+                                  <div className="hd-primary-iata">{e.airport_code}</div>
+                                  <span className="hub-tile-level-badge">Level {e.expansion_level}</span>
+                                </div>
+                                <div className="hd-primary-name">{e.airport_name || '—'}</div>
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                                <button
+                                  className="hd-btn-sm"
+                                  onClick={() => { setManageHub(e); setManageAction(null); setManageError(''); }}
+                                >
+                                  Manage
+                                </button>
+                                <span style={{ fontSize: 12, color: textColor, fontWeight: 600, whiteSpace: 'nowrap' }}>
                                   {e.week_usage.toLocaleString()}/{e.capacity.toLocaleString()} ({pct}%){pct >= 90 ? ' ⚠' : ''}
                                 </span>
                               </div>
-                              <div className="hd-secondary-bar-bg">
-                                <div className="hd-secondary-bar-fill" style={{ width: `${pct}%`, background: barColor }} />
-                              </div>
                             </div>
-                            <div style={{ marginTop: 10 }}>
-                              <button
-                                className="hd-btn-sm"
-                                onClick={() => { setManageHub(e); setManageAction(null); setManageError(''); }}
-                              >
-                                Manage
-                              </button>
+                            <div className="hd-secondary-bar-bg" style={{ marginTop: 8 }}>
+                              <div className="hd-secondary-bar-fill" style={{ width: `${pct}%`, background: barColor }} />
                             </div>
                           </div>
                         );

@@ -1561,9 +1561,31 @@ router.get('/dev/route-calc', authMiddleware, async (req, res) => {
     const bizRateHr = bizPx > 0 ? baseDemand * 0.15 * bizAttr * svcBiz * condFactor : 0;
     const firRateHr = firPx > 0 ? baseDemand * 0.05 * firAttr * svcFir * condFactor : 0;
 
-    const eco72 = Math.min(ecoCap, Math.round(ecoRateHr * 72));
-    const biz72 = Math.min(bizCap, Math.round(bizRateHr * 72));
-    const fir72 = Math.min(firCap, Math.round(firRateHr * 72));
+    // Mirror processBookings(): each hour applies a uniform [0.85, 1.15] jitter
+    // and Math.round()s the result, so fractional rates below 0.5/1.15 ≈ 0.435
+    // never produce a booking. Compute the true expected pax per hour after
+    // rounding by integrating over the jitter distribution.
+    const expectedRoundedHourly = (rate) => {
+      if (rate <= 0) return 0;
+      const uMin = 0.85, uMax = 1.15, uRange = uMax - uMin;
+      const kMax = Math.ceil(rate * uMax + 0.5);
+      let exp = 0;
+      for (let k = 1; k <= kMax; k++) {
+        const lo = (k - 0.5) / rate;
+        const hi = (k + 0.5) / rate;
+        const overlap = Math.max(0, Math.min(uMax, hi) - Math.max(uMin, lo));
+        exp += k * overlap / uRange;
+      }
+      return exp;
+    };
+
+    const ecoPerHr = expectedRoundedHourly(ecoRateHr);
+    const bizPerHr = expectedRoundedHourly(bizRateHr);
+    const firPerHr = expectedRoundedHourly(firRateHr);
+
+    const eco72 = Math.min(ecoCap, Math.round(ecoPerHr * 72));
+    const biz72 = Math.min(bizCap, Math.round(bizPerHr * 72));
+    const fir72 = Math.min(firCap, Math.round(firPerHr * 72));
 
     const totalCap = ecoCap + bizCap + firCap;
     const totalPax = eco72 + biz72 + fir72;
@@ -1580,6 +1602,11 @@ router.get('/dev/route-calc', authMiddleware, async (req, res) => {
                  cond_factor: condFactor },
       attractiveness: { eco: ecoAttr, biz: bizAttr, fir: firAttr },
       bookings_per_hr: {
+        eco: Math.round(ecoPerHr * 100) / 100,
+        biz: Math.round(bizPerHr * 100) / 100,
+        fir: Math.round(firPerHr * 100) / 100,
+      },
+      raw_rate_per_hr: {
         eco: Math.round(ecoRateHr * 100) / 100,
         biz: Math.round(bizRateHr * 100) / 100,
         fir: Math.round(firRateHr * 100) / 100,

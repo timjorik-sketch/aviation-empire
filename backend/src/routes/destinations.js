@@ -224,11 +224,23 @@ async function getDissolvePreview(airlineId) {
   const { home_airport_code: homeCode, primary_hub_airport_code: primaryHub, balance, level } = airlineRes.rows[0];
   if (!primaryHub) return { primary_hub: null };
 
+  // A route blocks dissolution only if its arrival is "non-privileged" — i.e.
+  // not Homebase and not itself a Secondary Hub. Routes whose arrival has its
+  // own expansion stay valid after dissolution (the Secondary Hub at the other
+  // end satisfies the route validity rule), so they shouldn't be flagged.
   const blocking = await pool.query(`
-    SELECT flight_number, arrival_airport
-    FROM routes
-    WHERE airline_id = $1 AND departure_airport = $2 AND arrival_airport != $3
-    ORDER BY flight_number
+    SELECT r.flight_number, r.arrival_airport
+    FROM routes r
+    WHERE r.airline_id = $1
+      AND r.departure_airport = $2
+      AND r.arrival_airport != $3
+      AND NOT EXISTS (
+        SELECT 1 FROM airport_expansions ae
+        WHERE ae.airline_id = r.airline_id
+          AND ae.airport_code = r.arrival_airport
+          AND ae.expansion_level > 0
+      )
+    ORDER BY r.flight_number
   `, [airlineId, primaryHub, homeCode || '']);
 
   // Active flights from primary hub that would consume Secondary Hub slots after conversion

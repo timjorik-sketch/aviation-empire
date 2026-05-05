@@ -100,7 +100,7 @@ function getDepartureStatus(flight, now) {
   if (diffMin > 30)  return { label: 'On Time',   cls: 'ap-st-ontime-b' };
   if (diffMin > 3)   return { label: 'Boarding',  cls: 'ap-st-boarding' };
   if (diffMin >= 0)  return { label: 'Taxiing',   cls: 'ap-st-boarding' };
-  return { label: 'Delayed', cls: 'ap-st-boarding' };
+  return { label: 'Departed', cls: 'ap-st-boarding' };
 }
 
 // Time-based arrival status

@@ -842,7 +842,17 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
                               </div>
                               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
                                 <button
-                                  className="hd-btn-sm"
+                                  style={{
+                                    background: 'transparent',
+                                    border: '1px solid #D0D0D0',
+                                    color: '#666',
+                                    padding: '0.22rem 0.65rem',
+                                    borderRadius: '4px',
+                                    fontSize: '0.7rem',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    letterSpacing: '0.03em'
+                                  }}
                                   onClick={() => { setManageHub(e); setManageAction(null); setManageError(''); }}
                                 >
                                   Manage

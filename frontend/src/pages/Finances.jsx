@@ -242,43 +242,9 @@ export default function Finances({ airline, onBack, onNavigateToAirport, onNavig
   const cb = data?.cost_breakdown || {};
   const rb = data?.revenue_breakdown || {};
   const ops = data?.ops_stats || {};
-  const txs = data?.transactions || [];
-
-  // Group consecutive "Flight Costs - …" entries into one expandable summary row.
-  // The flight processor lands many flights per tick, each writing its own
-  // transaction — without grouping, a busy tick floods out other entries.
-  const groupedTxs = (() => {
-    const out = [];
-    let i = 0;
-    while (i < txs.length) {
-      const cur = txs[i];
-      if (cur.description?.startsWith('Flight Costs - ')) {
-        let j = i;
-        while (j < txs.length && txs[j].description?.startsWith('Flight Costs - ')) j++;
-        const children = txs.slice(i, j);
-        if (children.length === 1) {
-          out.push({ kind: 'single', tx: cur });
-        } else {
-          const groupId = `fc-${cur.id}`;
-          const sumAmount = children.reduce((s, c) => s + c.amount, 0);
-          out.push({
-            kind: 'group',
-            id: groupId,
-            count: children.length,
-            amount: sumAmount,
-            created_at: cur.created_at,
-            balance_after: cur.balance_after,
-            children,
-          });
-        }
-        i = j;
-      } else {
-        out.push({ kind: 'single', tx: cur });
-        i++;
-      }
-    }
-    return out;
-  })();
+  // Backend groups consecutive "Flight Costs - …" entries server-side and
+  // returns a mix of single/group items so each group counts as one of the 50.
+  const groupedTxs = data?.transactions || [];
 
   const toggleGroup = (id) => {
     setExpandedGroups(prev => {
@@ -563,7 +529,7 @@ export default function Finances({ airline, onBack, onNavigateToAirport, onNavig
             <span className="card-header-bar-title">Recent Transactions</span>
             <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.55)' }}>Last 50</span>
           </div>
-          {txs.length === 0 ? (
+          {groupedTxs.length === 0 ? (
             <p style={{ color: '#999', fontSize: '0.85rem' }}>No transactions yet.</p>
           ) : (
             <div style={{ overflowX: 'auto' }}>

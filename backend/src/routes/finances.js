@@ -497,9 +497,11 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     const activeRoutes   = parseInt(activeRoutesRow.val);
     const destinations   = parseInt(destinationsRow.val);
 
-    // ── Recent transactions (last 50) ────────────────────────────────────────
+    // ── Recent transactions (last 50, with Flight Costs grouped) ─────────────
+    // Pull a wide raw window so consecutive "Flight Costs - …" bursts collapse
+    // into a single group, and the user still sees ~50 distinct entries.
     const txResult = await pool.query(
-      `SELECT id, type, amount, description, created_at FROM transactions WHERE airline_id=$1 ORDER BY created_at DESC LIMIT 50`,
+      `SELECT id, type, amount, description, created_at FROM transactions WHERE airline_id=$1 ORDER BY created_at DESC LIMIT 500`,
       [airlineId]
     );
     const txRows = txResult.rows.map(r => ({
@@ -508,11 +510,40 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     }));
 
     let runningBalance = balance;
-    const transactions = txRows.map(tx => {
+    const txsWithBalance = txRows.map(tx => {
       const balAfter = Math.round(runningBalance);
       runningBalance -= tx.amount;
       return { ...tx, balance_after: balAfter };
     });
+
+    const grouped = [];
+    let i = 0;
+    while (i < txsWithBalance.length) {
+      const cur = txsWithBalance[i];
+      if (cur.description && cur.description.startsWith('Flight Costs - ')) {
+        let j = i;
+        while (j < txsWithBalance.length && txsWithBalance[j].description && txsWithBalance[j].description.startsWith('Flight Costs - ')) j++;
+        const children = txsWithBalance.slice(i, j);
+        if (children.length === 1) {
+          grouped.push({ kind: 'single', tx: cur });
+        } else {
+          grouped.push({
+            kind: 'group',
+            id: `fc-${cur.id}`,
+            count: children.length,
+            amount: children.reduce((s, c) => s + c.amount, 0),
+            created_at: cur.created_at,
+            balance_after: cur.balance_after,
+            children,
+          });
+        }
+        i = j;
+      } else {
+        grouped.push({ kind: 'single', tx: cur });
+        i++;
+      }
+    }
+    const transactions = grouped.slice(0, 50);
 
     res.json({
       balance: Math.round(balance),

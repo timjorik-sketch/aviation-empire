@@ -892,27 +892,33 @@ async function processBookings() {
 
       let newEco = 0, newBiz = 0, newFir = 0, addedRev = 0;
 
+      // Stochastic rounding: floor + Bernoulli(frac). Preserves expected value
+      // across hours, so a 0.15-pax/hr rate accumulates to ~11 pax over 72 h
+      // instead of being rounded to 0 every hour.
+      const sampleBookings = (rate) => {
+        const jittered = rate * (0.85 + Math.random() * 0.30);
+        const floor = Math.floor(jittered);
+        return floor + (Math.random() < (jittered - floor) ? 1 : 0);
+      };
+
       if (f.eco_price > 0 && ecoCap > f.booked_eco) {
         const attr = calcPriceAttractiveness(f.eco_price, f.mp_eco || f.eco_price);
         const rate = baseDemand * attr * svcEco * condFactor * satMult;
-        newEco = Math.max(0, Math.min(ecoCap - f.booked_eco,
-          Math.round(rate * (0.85 + Math.random() * 0.30))));
+        newEco = Math.max(0, Math.min(ecoCap - f.booked_eco, sampleBookings(rate)));
         addedRev += newEco * f.eco_price;
       }
 
       if (f.biz_price > 0 && bizCap > f.booked_biz) {
         const attr = calcPriceAttractiveness(f.biz_price, f.mp_biz || f.biz_price);
         const rate = baseDemand * 0.15 * attr * svcBiz * condFactor * satMult;
-        newBiz = Math.max(0, Math.min(bizCap - f.booked_biz,
-          Math.round(rate * (0.85 + Math.random() * 0.30))));
+        newBiz = Math.max(0, Math.min(bizCap - f.booked_biz, sampleBookings(rate)));
         addedRev += newBiz * f.biz_price;
       }
 
       if (f.fir_price > 0 && firCap > f.booked_fir) {
         const attr = calcPriceAttractiveness(f.fir_price, f.mp_fir || f.fir_price);
         const rate = baseDemand * 0.05 * attr * svcFir * condFactor * satMult;
-        newFir = Math.max(0, Math.min(firCap - f.booked_fir,
-          Math.round(rate * (0.85 + Math.random() * 0.30))));
+        newFir = Math.max(0, Math.min(firCap - f.booked_fir, sampleBookings(rate)));
         addedRev += newFir * f.fir_price;
       }
 
@@ -1561,31 +1567,11 @@ router.get('/dev/route-calc', authMiddleware, async (req, res) => {
     const bizRateHr = bizPx > 0 ? baseDemand * 0.15 * bizAttr * svcBiz * condFactor : 0;
     const firRateHr = firPx > 0 ? baseDemand * 0.05 * firAttr * svcFir * condFactor : 0;
 
-    // Mirror processBookings(): each hour applies a uniform [0.85, 1.15] jitter
-    // and Math.round()s the result, so fractional rates below 0.5/1.15 ≈ 0.435
-    // never produce a booking. Compute the true expected pax per hour after
-    // rounding by integrating over the jitter distribution.
-    const expectedRoundedHourly = (rate) => {
-      if (rate <= 0) return 0;
-      const uMin = 0.85, uMax = 1.15, uRange = uMax - uMin;
-      const kMax = Math.ceil(rate * uMax + 0.5);
-      let exp = 0;
-      for (let k = 1; k <= kMax; k++) {
-        const lo = (k - 0.5) / rate;
-        const hi = (k + 0.5) / rate;
-        const overlap = Math.max(0, Math.min(uMax, hi) - Math.max(uMin, lo));
-        exp += k * overlap / uRange;
-      }
-      return exp;
-    };
-
-    const ecoPerHr = expectedRoundedHourly(ecoRateHr);
-    const bizPerHr = expectedRoundedHourly(bizRateHr);
-    const firPerHr = expectedRoundedHourly(firRateHr);
-
-    const eco72 = Math.min(ecoCap, Math.round(ecoPerHr * 72));
-    const biz72 = Math.min(bizCap, Math.round(bizPerHr * 72));
-    const fir72 = Math.min(firCap, Math.round(firPerHr * 72));
+    // processBookings now uses stochastic rounding (floor + Bernoulli(frac)),
+    // so expected pax per hour = rate exactly. Plain rate × 72 is honest again.
+    const eco72 = Math.min(ecoCap, Math.round(ecoRateHr * 72));
+    const biz72 = Math.min(bizCap, Math.round(bizRateHr * 72));
+    const fir72 = Math.min(firCap, Math.round(firRateHr * 72));
 
     const totalCap = ecoCap + bizCap + firCap;
     const totalPax = eco72 + biz72 + fir72;
@@ -1602,11 +1588,6 @@ router.get('/dev/route-calc', authMiddleware, async (req, res) => {
                  cond_factor: condFactor },
       attractiveness: { eco: ecoAttr, biz: bizAttr, fir: firAttr },
       bookings_per_hr: {
-        eco: Math.round(ecoPerHr * 100) / 100,
-        biz: Math.round(bizPerHr * 100) / 100,
-        fir: Math.round(firPerHr * 100) / 100,
-      },
-      raw_rate_per_hr: {
         eco: Math.round(ecoRateHr * 100) / 100,
         biz: Math.round(bizRateHr * 100) / 100,
         fir: Math.round(firRateHr * 100) / 100,

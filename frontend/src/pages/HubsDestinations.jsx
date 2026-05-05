@@ -707,12 +707,12 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
           display: flex; justify-content: center;
         }
 
-        /* ── Hub tiles ── */
-        .hub-tiles-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-          gap: 10px; padding: 14px;
+        /* ── Secondary Hub rows (same look as Primary Hub rows) ── */
+        .hd-secondary-bar-bg {
+          height: 5px; background: #E0E0E0; border-radius: 3px;
+          overflow: hidden; margin-top: 4px;
         }
+        .hd-secondary-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
 
         .hub-tile {
           border: 1px solid #E0E0E0; border-radius: 6px;
@@ -825,30 +825,37 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
                   ) : visibleExpansions.length === 0 ? (
                     <div className="hd-empty-sm">No Secondary Hubs purchased yet. Use "+ New Secondary Hub" to add expansion levels at a destination.</div>
                   ) : (
-                    <div className="hub-tiles-grid">
+                    <div className="hd-primary-list">
                       {visibleExpansions.map(e => {
                         const pct = e.capacity > 0 ? Math.min(100, Math.round((e.week_usage / e.capacity) * 100)) : 0;
                         const barColor = pct >= 90 ? '#dc2626' : pct >= 70 ? '#d97706' : '#16a34a';
                         const textColor = pct >= 90 ? '#991b1b' : pct >= 70 ? '#92400e' : '#166534';
                         return (
-                          <div key={e.id} className="hub-tile">
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                              <span className="hub-tile-iata">{e.airport_code}</span>
+                          <div key={e.id} className="hd-primary-row">
+                            <div className="hd-primary-row-head">
+                              <div className="hd-primary-iata">{e.airport_code}</div>
                               <span className="hub-tile-level-badge">Level {e.expansion_level}</span>
                             </div>
-                            <div className="hub-tile-name">{e.airport_name || '—'}</div>
-                            <div className="hub-tile-bar-bg">
-                              <div className="hub-tile-bar-fill" style={{ width: `${pct}%`, background: barColor }} />
+                            <div className="hd-primary-name">{e.airport_name || '—'}</div>
+                            <div style={{ marginTop: 6 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                                <span style={{ color: '#666' }}>Capacity</span>
+                                <span style={{ color: textColor, fontWeight: 600 }}>
+                                  {e.week_usage.toLocaleString()}/{e.capacity.toLocaleString()} ({pct}%){pct >= 90 ? ' ⚠' : ''}
+                                </span>
+                              </div>
+                              <div className="hd-secondary-bar-bg">
+                                <div className="hd-secondary-bar-fill" style={{ width: `${pct}%`, background: barColor }} />
+                              </div>
                             </div>
-                            <div className="hub-tile-capacity" style={{ color: textColor }}>
-                              Capacity: {e.week_usage.toLocaleString()}/{e.capacity.toLocaleString()} ({pct}%){pct >= 90 ? ' ⚠' : ''}
+                            <div style={{ marginTop: 10 }}>
+                              <button
+                                className="hd-btn-sm"
+                                onClick={() => { setManageHub(e); setManageAction(null); setManageError(''); }}
+                              >
+                                Manage
+                              </button>
                             </div>
-                            <button
-                              className="hub-tile-manage-btn"
-                              onClick={() => { setManageHub(e); setManageAction(null); setManageError(''); }}
-                            >
-                              Manage
-                            </button>
                           </div>
                         );
                       })}

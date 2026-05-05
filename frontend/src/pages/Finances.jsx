@@ -388,18 +388,27 @@ export default function Finances({ airline, onBack, onNavigateToAirport, onNavig
               ? Math.min(100, Math.max(0, ((tp - cur) / (nxt - cur)) * 100))
               : 100;
             const fmtNum = (n) => Number(n).toLocaleString();
+            // ETA: prefer yesterday (full day) as the daily rate; fall back to today if no data yet.
+            const dailyRate = (xp.yesterday ?? 0) > 0 ? xp.yesterday : (xp.today ?? 0);
+            const remaining = nxt != null ? Math.max(0, nxt - tp) : 0;
+            const etaDays = nxt != null && dailyRate > 0 ? Math.ceil(remaining / dailyRate) : null;
             return (
               <div style={{ background: '#fff', borderRadius: '8px', padding: '20px 24px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', flex: '1 1 0', minWidth: '160px' }}>
                 <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', marginBottom: '6px' }}>Total Points</div>
                 <div style={{ fontSize: '1.55rem', fontWeight: 700, color: '#2C2C2C', lineHeight: 1.1 }}>{fmtNum(tp)}</div>
                 <div style={{ marginTop: '6px', fontSize: '0.75rem', color: '#888', display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#2C2C2C', background: 'rgba(0,0,0,0.06)', borderRadius: '4px', padding: '2px 6px' }}>Level {lvl}</span>
-                  {nxt != null && <span>{fmtNum(nxt - tp)} to next</span>}
+                  {nxt != null && <span>{fmtNum(remaining)} to next</span>}
                   {nxt == null && <span>max level</span>}
                 </div>
                 <div style={{ marginTop: '6px', height: '4px', background: 'rgba(0,0,0,0.06)', borderRadius: '2px', overflow: 'hidden' }}>
                   <div style={{ width: `${progressPct}%`, height: '100%', background: '#2C2C2C' }} />
                 </div>
+                {nxt != null && (
+                  <div style={{ marginTop: '6px', fontSize: '0.72rem', color: '#888' }}>
+                    {etaDays != null ? `≈ ${etaDays} day${etaDays === 1 ? '' : 's'} to next level` : 'No flights yet — keep flying'}
+                  </div>
+                )}
               </div>
             );
           })()}

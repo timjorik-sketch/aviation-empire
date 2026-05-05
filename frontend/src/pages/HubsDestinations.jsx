@@ -13,6 +13,8 @@ const TYPE_META = {
 };
 
 const OPEN_COST = 10_000;
+const PRIMARY_HUB_LEVEL = 8;
+const SECONDARY_HUB_LEVEL = 12;
 
 
 function fmtCost(n) {
@@ -46,7 +48,8 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
   const [primaryActionLoading, setPrimaryActionLoading] = useState(false);
   const [primaryError, setPrimaryError] = useState('');
   const [showDissolvePrimaryModal, setShowDissolvePrimaryModal] = useState(false);
-  const [dissolveBlockingRoutes, setDissolveBlockingRoutes] = useState([]);
+  const [dissolvePreview, setDissolvePreview] = useState(null);
+  const [dissolvePreviewLoading, setDissolvePreviewLoading] = useState(false);
 
   const [sortCol, setSortCol] = useState('destination_type');
   const [sortDir, setSortDir] = useState('asc');
@@ -117,9 +120,24 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
     finally { setPrimaryActionLoading(false); }
   };
 
-  const handleDissolvePrimaryHub = async () => {
+  const openDissolvePrimaryModal = async () => {
+    setPrimaryError(''); setDissolvePreview(null);
+    setShowDissolvePrimaryModal(true);
+    setDissolvePreviewLoading(true);
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch(`${API_URL}/api/destinations/primary-hub/dissolve-preview`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load dissolve preview');
+      setDissolvePreview(data);
+    } catch (err) { setPrimaryError(err.message); }
+    finally { setDissolvePreviewLoading(false); }
+  };
+
+  const handleSimpleDissolve = async () => {
     setPrimaryActionLoading(true); setPrimaryError('');
-    setDissolveBlockingRoutes([]);
     const token = localStorage.getItem('token');
     try {
       const res = await fetch(`${API_URL}/api/destinations/primary-hub`, {
@@ -128,11 +146,30 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
       });
       const data = await res.json();
       if (!res.ok) {
-        if (Array.isArray(data.blocking_routes)) setDissolveBlockingRoutes(data.blocking_routes);
+        // Routes appeared between preview and confirm — refresh preview state
+        if (data.blocking_routes) setDissolvePreview(data);
         throw new Error(data.error || 'Failed');
       }
       setShowDissolvePrimaryModal(false);
       await fetchDestinations();
+    } catch (err) { setPrimaryError(err.message); }
+    finally { setPrimaryActionLoading(false); }
+  };
+
+  const handleConvertToSecondary = async () => {
+    setPrimaryActionLoading(true); setPrimaryError('');
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch(`${API_URL}/api/destinations/primary-hub/convert-to-secondary`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      if (data.new_balance != null) onBalanceUpdate?.(data.new_balance);
+      setShowDissolvePrimaryModal(false);
+      await fetchDestinations();
+      await fetchExpansions();
     } catch (err) { setPrimaryError(err.message); }
     finally { setPrimaryActionLoading(false); }
   };
@@ -329,6 +366,13 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
 
   const hubCount = destinations.filter(d => d.display_type === 'hub' || d.display_type === 'hub_restricted').length;
   const baseCount = destinations.filter(d => d.effective_type === 'base').length;
+
+  // Once an airport is the Primary Hub it should disappear from the Secondary Hubs grid.
+  // The expansion record stays in the DB so dissolving Primary Hub later restores it.
+  const visibleExpansions = useMemo(
+    () => expansions.filter(e => e.airport_code !== primaryHubCode),
+    [expansions, primaryHubCode]
+  );
 
   // Expansion cost preview for selected airport
   const MULTIPLIERS = [1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0];
@@ -634,13 +678,41 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
           .add-filter-count { margin-left: 0; }
         }
 
+        /* ── Hubs row layout ── */
+        .hd-hubs-grid {
+          display: grid; grid-template-columns: minmax(280px, 1fr) 2fr;
+          gap: 20px; margin-bottom: 20px;
+        }
+        @media (max-width: 900px) { .hd-hubs-grid { grid-template-columns: 1fr; } }
+
+        /* ── Primary Hubs list ── */
+        .hd-primary-list { display: flex; flex-direction: column; }
+        .hd-primary-row {
+          padding: 14px 20px;
+          border-bottom: 1px solid #F0F0F0;
+        }
+        .hd-primary-row:last-child { border-bottom: none; }
+        .hd-primary-row-head {
+          display: flex; align-items: center; gap: 10px;
+          margin-bottom: 4px;
+        }
+        .hd-primary-iata {
+          font-family: monospace; font-weight: 800; font-size: 22px;
+          color: #2C2C2C; line-height: 1;
+        }
+        .hd-primary-name { font-size: 13px; color: #2C2C2C; font-weight: 500; }
+        .hd-primary-meta { font-size: 12px; color: #666; margin-top: 4px; }
+        .hd-primary-cta {
+          padding: 12px 20px; border-top: 1px solid #F0F0F0;
+          display: flex; justify-content: center;
+        }
+
         /* ── Hub tiles ── */
         .hub-tiles-grid {
-          display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; padding: 14px;
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+          gap: 10px; padding: 14px;
         }
-        @media (max-width: 1100px) { .hub-tiles-grid { grid-template-columns: repeat(4, 1fr); } }
-        @media (max-width: 720px)  { .hub-tiles-grid { grid-template-columns: repeat(3, 1fr); } }
-        @media (max-width: 420px)  { .hub-tiles-grid { grid-template-columns: repeat(2, 1fr); } }
 
         .hub-tile {
           border: 1px solid #E0E0E0; border-radius: 6px;
@@ -704,63 +776,85 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
 
           {view === 'list' ? (
             <>
-              {/* ── Primary Hub ─────────────────────────────────────── */}
-              <PrimaryHubCard
-                primaryHubCode={primaryHubCode}
-                homeAirportCode={homeAirportCode}
-                destinations={destinations}
-                onOpenSetModal={() => { setPrimaryError(''); setPrimaryAirport(''); setShowSetPrimaryModal(true); }}
-                onOpenDissolveModal={() => { setPrimaryError(''); setDissolveBlockingRoutes([]); setShowDissolvePrimaryModal(true); }}
-              />
+              {/* ── Hubs row: Primary Hubs (left) + Secondary Hubs (right) ── */}
+              <div className="hd-hubs-grid">
+                <PrimaryHubCard
+                  primaryHubCode={primaryHubCode}
+                  destinations={destinations}
+                  airlineLevel={airline?.level ?? 1}
+                  onOpenSetModal={() => { setPrimaryError(''); setPrimaryAirport(''); setShowSetPrimaryModal(true); }}
+                  onOpenDissolveModal={openDissolvePrimaryModal}
+                />
 
-              {/* ── Secondary Hubs (Expansions) ─────────────────────── */}
-              <div className="hd-card" style={{ marginBottom: 20 }}>
-                <div className="hd-card-header">
-                  <div>
-                    <p className="hd-card-title">Secondary Hubs ({expansions.length})</p>
-                    <p className="hd-card-sub">100 departures/week per level · progressive pricing</p>
+                {/* ── Secondary Hubs (Expansions) ─────────────────── */}
+                <div className="hd-card">
+                  <div className="hd-card-header">
+                    <div>
+                      <p className="hd-card-title">Secondary Hubs ({visibleExpansions.length})</p>
+                      <p className="hd-card-sub">
+                        {(airline?.level ?? 1) < SECONDARY_HUB_LEVEL
+                          ? `Unlocks at level ${SECONDARY_HUB_LEVEL}`
+                          : '100 departures/week per level · progressive pricing'}
+                      </p>
+                    </div>
+                    <button
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid rgba(255,255,255,0.3)',
+                        color: (airline?.level ?? 1) < SECONDARY_HUB_LEVEL ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.7)',
+                        padding: '0.22rem 0.65rem',
+                        borderRadius: '4px',
+                        fontSize: '0.7rem',
+                        fontWeight: 600,
+                        cursor: (airline?.level ?? 1) < SECONDARY_HUB_LEVEL ? 'not-allowed' : 'pointer',
+                        letterSpacing: '0.03em'
+                      }}
+                      disabled={(airline?.level ?? 1) < SECONDARY_HUB_LEVEL}
+                      title={(airline?.level ?? 1) < SECONDARY_HUB_LEVEL ? `Unlocks at level ${SECONDARY_HUB_LEVEL}` : ''}
+                      onClick={() => { setShowExpModal(true); setExpError(''); setExpAirport(''); }}
+                    >
+                      + New Secondary Hub
+                    </button>
                   </div>
-                  <button
-                    style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.3)', color: 'rgba(255,255,255,0.7)', padding: '0.22rem 0.65rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', letterSpacing: '0.03em' }}
-                    onClick={() => { setShowExpModal(true); setExpError(''); setExpAirport(''); }}
-                  >
-                    + New Secondary Hub
-                  </button>
+                  {expansionsLoading ? (
+                    <div className="hd-empty-sm">Loading…</div>
+                  ) : (airline?.level ?? 1) < SECONDARY_HUB_LEVEL && visibleExpansions.length === 0 ? (
+                    <div className="hd-empty-sm">
+                      🔒 Secondary Hubs unlock at level {SECONDARY_HUB_LEVEL}. You're level {airline?.level ?? 1}.
+                    </div>
+                  ) : visibleExpansions.length === 0 ? (
+                    <div className="hd-empty-sm">No Secondary Hubs purchased yet. Use "+ New Secondary Hub" to add expansion levels at a destination.</div>
+                  ) : (
+                    <div className="hub-tiles-grid">
+                      {visibleExpansions.map(e => {
+                        const pct = e.capacity > 0 ? Math.min(100, Math.round((e.week_usage / e.capacity) * 100)) : 0;
+                        const barColor = pct >= 90 ? '#dc2626' : pct >= 70 ? '#d97706' : '#16a34a';
+                        const textColor = pct >= 90 ? '#991b1b' : pct >= 70 ? '#92400e' : '#166534';
+                        return (
+                          <div key={e.id} className="hub-tile">
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                              <span className="hub-tile-iata">{e.airport_code}</span>
+                              <span className="hub-tile-level-badge">Level {e.expansion_level}</span>
+                            </div>
+                            <div className="hub-tile-name">{e.airport_name || '—'}</div>
+                            <div className="hub-tile-bar-bg">
+                              <div className="hub-tile-bar-fill" style={{ width: `${pct}%`, background: barColor }} />
+                            </div>
+                            <div className="hub-tile-capacity" style={{ color: textColor }}>
+                              Capacity: {e.week_usage.toLocaleString()}/{e.capacity.toLocaleString()} ({pct}%){pct >= 90 ? ' ⚠' : ''}
+                            </div>
+                            <button
+                              className="hub-tile-manage-btn"
+                              onClick={() => { setManageHub(e); setManageAction(null); setManageError(''); }}
+                            >
+                              Manage
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-                {expansionsLoading ? (
-                  <div className="hd-empty-sm">Loading…</div>
-                ) : expansions.length === 0 ? (
-                  <div className="hd-empty-sm">No Secondary Hubs purchased yet. Use "+ New Secondary Hub" to add expansion levels at a destination.</div>
-                ) : (
-                  <div className="hub-tiles-grid">
-                    {expansions.map(e => {
-                      const pct = e.capacity > 0 ? Math.min(100, Math.round((e.week_usage / e.capacity) * 100)) : 0;
-                      const barColor = pct >= 90 ? '#dc2626' : pct >= 70 ? '#d97706' : '#16a34a';
-                      const textColor = pct >= 90 ? '#991b1b' : pct >= 70 ? '#92400e' : '#166534';
-                      return (
-                        <div key={e.id} className="hub-tile">
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                            <span className="hub-tile-iata">{e.airport_code}</span>
-                            <span className="hub-tile-level-badge">Level {e.expansion_level}</span>
-                          </div>
-                          <div className="hub-tile-name">{e.airport_name || '—'}</div>
-                          <div className="hub-tile-bar-bg">
-                            <div className="hub-tile-bar-fill" style={{ width: `${pct}%`, background: barColor }} />
-                          </div>
-                          <div className="hub-tile-capacity" style={{ color: textColor }}>
-                            Capacity: {e.week_usage.toLocaleString()}/{e.capacity.toLocaleString()} ({pct}%){pct >= 90 ? ' ⚠' : ''}
-                          </div>
-                          <button
-                            className="hub-tile-manage-btn"
-                            onClick={() => { setManageHub(e); setManageAction(null); setManageError(''); }}
-                          >
-                            Manage
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
 
               <DestinationsList
@@ -900,93 +994,203 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
 
       {/* ── Dissolve Primary Hub Modal ──────────────────────────── */}
       {showDissolvePrimaryModal && (
-        <div className="hd-modal-backdrop" onClick={() => setShowDissolvePrimaryModal(false)}>
-          <div className="hd-modal" onClick={e => e.stopPropagation()}>
-            <h3>Dissolve Primary Hub at {primaryHubCode}</h3>
-            <p style={{ fontSize: 13, color: '#666', marginTop: -12, marginBottom: 16 }}>
-              The airport becomes a normal destination again. To dissolve, no routes may depart from it (routes to your Homebase may remain).
-            </p>
-            {dissolveBlockingRoutes.length > 0 && (
-              <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 6, padding: 12, marginBottom: 12 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#991b1b', marginBottom: 6 }}>
-                  Delete these routes first:
-                </div>
-                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: '#991b1b' }}>
-                  {dissolveBlockingRoutes.map(r => (
-                    <li key={r.flight_number}>{r.flight_number} ({primaryHubCode}→{r.arrival_airport})</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {primaryError && dissolveBlockingRoutes.length === 0 && (
-              <p style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{primaryError}</p>
-            )}
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button className="hd-btn-secondary" onClick={() => setShowDissolvePrimaryModal(false)} disabled={primaryActionLoading}>Cancel</button>
-              <button
-                style={{ padding: '8px 16px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}
-                onClick={handleDissolvePrimaryHub}
-                disabled={primaryActionLoading}
-              >
-                {primaryActionLoading ? 'Dissolving…' : 'Dissolve Primary Hub'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <DissolvePrimaryHubModal
+          primaryHubCode={primaryHubCode}
+          preview={dissolvePreview}
+          loading={dissolvePreviewLoading}
+          actionLoading={primaryActionLoading}
+          error={primaryError}
+          onClose={() => setShowDissolvePrimaryModal(false)}
+          onSimpleDissolve={handleSimpleDissolve}
+          onConvert={handleConvertToSecondary}
+        />
       )}
     </>
   );
 }
 
-// ── Primary Hub Card ───────────────────────────────────────────────────────────
-function PrimaryHubCard({ primaryHubCode, homeAirportCode, destinations, onOpenSetModal, onOpenDissolveModal }) {
-  const eligibleCount = destinations.filter(d => d.destination_type !== 'home_base').length;
-  const primary = primaryHubCode ? destinations.find(d => d.airport_code === primaryHubCode) : null;
+// ── Dissolve Primary Hub Modal ─────────────────────────────────────────────────
+function DissolvePrimaryHubModal({
+  primaryHubCode, preview, loading, actionLoading, error,
+  onClose, onSimpleDissolve, onConvert,
+}) {
+  const blocking = preview?.blocking_routes ?? [];
+  const conv = preview?.conversion;
+  const hasBlocking = blocking.length > 0;
+  const upgradeCost = conv?.upgrade_cost ?? 0;
+  const targetLevel = conv?.target_level ?? 0;
+  const departures = conv?.departures_count ?? 0;
+  const departuresPerLevel = conv?.departures_per_level ?? 100;
+  const affordable = conv?.affordable ?? true;
+  const conversionUnlocked = conv?.unlocked ?? true;
+  const requiredAirlineLevel = conv?.required_airline_level ?? 12;
+  const airlineLevel = conv?.airline_level ?? 1;
 
   return (
-    <div className="hd-card" style={{ marginBottom: 20 }}>
-      <div className="hd-card-header">
-        <div>
-          <p className="hd-card-title">Primary Hub</p>
-          <p className="hd-card-sub">Unlimited departures · Free · One per airline</p>
-        </div>
-        {!primaryHubCode ? (
-          <button
-            style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.3)', color: 'rgba(255,255,255,0.7)', padding: '0.22rem 0.65rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', letterSpacing: '0.03em' }}
-            onClick={onOpenSetModal}
-            disabled={eligibleCount === 0}
-            title={eligibleCount === 0 ? 'Open at least one destination first' : ''}
-          >
-            + Set Primary Hub
-          </button>
-        ) : (
-          <button
-            style={{ background: 'transparent', border: '1px solid rgba(252,165,165,0.5)', color: '#fca5a5', padding: '0.22rem 0.65rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', letterSpacing: '0.03em' }}
-            onClick={onOpenDissolveModal}
-          >
-            Dissolve
-          </button>
+    <div className="hd-modal-backdrop" onClick={onClose}>
+      <div className="hd-modal" style={{ width: 520 }} onClick={e => e.stopPropagation()}>
+        <h3>Dissolve Primary Hub at {primaryHubCode}</h3>
+
+        {loading && (
+          <p style={{ fontSize: 13, color: '#888', margin: '0 0 12px' }}>Loading…</p>
+        )}
+
+        {!loading && preview && (
+          <>
+            {!hasBlocking ? (
+              <>
+                <p style={{ fontSize: 13, color: '#666', marginTop: -8, marginBottom: 16 }}>
+                  No routes depart from {primaryHubCode} that would block dissolution. The airport will become a normal destination.
+                </p>
+                {error && <p style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</p>}
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                  <button className="hd-btn-secondary" onClick={onClose} disabled={actionLoading}>Cancel</button>
+                  <button
+                    style={{ padding: '8px 16px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}
+                    onClick={onSimpleDissolve}
+                    disabled={actionLoading}
+                  >
+                    {actionLoading ? 'Dissolving…' : 'Dissolve Primary Hub'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p style={{ fontSize: 13, color: '#666', marginTop: -8, marginBottom: 12 }}>
+                  {blocking.length} route{blocking.length !== 1 ? 's' : ''} still depart from {primaryHubCode} (routes to your Homebase may remain). Choose how to proceed:
+                </p>
+
+                {/* Option A: delete routes manually */}
+                <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 6, padding: 14, marginBottom: 12 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#991b1b', marginBottom: 6 }}>
+                    Option A · Delete these routes
+                  </div>
+                  <p style={{ fontSize: 12, color: '#991b1b', margin: '0 0 8px' }}>
+                    Remove them in Route Planner, then return here to dissolve for free.
+                  </p>
+                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: '#991b1b', maxHeight: 100, overflowY: 'auto' }}>
+                    {blocking.map(r => (
+                      <li key={r.flight_number}>{r.flight_number} ({primaryHubCode}→{r.arrival_airport})</li>
+                    ))}
+                  </ul>
+                </div>
+
+                {/* Option B: convert to secondary hub */}
+                <div style={{ background: '#F5F5F5', border: '1px solid #E0E0E0', borderRadius: 6, padding: 14, marginBottom: 12 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#2C2C2C', marginBottom: 6 }}>
+                    Option B · Convert to Secondary Hub
+                  </div>
+                  <p style={{ fontSize: 12, color: '#666', margin: '0 0 10px' }}>
+                    Buy enough Secondary Hub levels to cover the {departures} active departure{departures !== 1 ? 's' : ''}/week. Routes can stay in place.
+                  </p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 13, marginBottom: 10 }}>
+                    <div><span style={{ color: '#888' }}>Required level:</span> <strong>L{targetLevel}</strong> ({targetLevel * departuresPerLevel} dep/wk capacity)</div>
+                    <div><span style={{ color: '#888' }}>Current level:</span> <strong>L{conv?.current_level ?? 0}</strong></div>
+                  </div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: '#2C2C2C', marginBottom: 12 }}>
+                    {upgradeCost > 0 ? `$${upgradeCost.toLocaleString()}` : 'Free (capacity already covered)'}
+                  </div>
+                  <button
+                    className="hd-btn-primary"
+                    style={{ width: '100%' }}
+                    onClick={onConvert}
+                    disabled={actionLoading || !affordable || !conversionUnlocked}
+                    title={
+                      !conversionUnlocked
+                        ? `Secondary Hubs unlock at level ${requiredAirlineLevel} (you are level ${airlineLevel})`
+                        : (!affordable ? 'Insufficient balance' : '')
+                    }
+                  >
+                    {!conversionUnlocked
+                      ? `🔒 Secondary Hubs unlock at level ${requiredAirlineLevel}`
+                      : actionLoading
+                        ? 'Converting…'
+                        : !affordable
+                          ? `Insufficient balance for $${upgradeCost.toLocaleString()}`
+                          : upgradeCost > 0
+                            ? `Convert for $${upgradeCost.toLocaleString()}`
+                            : 'Convert to Secondary Hub'}
+                  </button>
+                </div>
+
+                {error && <p style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</p>}
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                  <button className="hd-btn-secondary" onClick={onClose} disabled={actionLoading}>Cancel</button>
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        {!loading && !preview && error && (
+          <>
+            <p style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button className="hd-btn-secondary" onClick={onClose}>Close</button>
+            </div>
+          </>
         )}
       </div>
-      {!primaryHubCode ? (
-        <div className="hd-empty-sm">
-          No Primary Hub set. Designate one of your destinations as Primary Hub for unlimited free departures.
-          {homeAirportCode && <> Your Homebase {homeAirportCode} already provides unlimited departures.</>}
+    </div>
+  );
+}
+
+// ── Primary Hub Card ───────────────────────────────────────────────────────────
+function PrimaryHubCard({ primaryHubCode, destinations, airlineLevel, onOpenSetModal, onOpenDissolveModal }) {
+  const home = destinations.find(d => d.destination_type === 'home_base');
+  const primary = primaryHubCode ? destinations.find(d => d.airport_code === primaryHubCode) : null;
+  const eligibleCount = destinations.filter(d => d.destination_type !== 'home_base' && !d.is_primary_hub).length;
+  const unlocked = (airlineLevel ?? 1) >= PRIMARY_HUB_LEVEL;
+  const setDisabled = !unlocked || eligibleCount === 0;
+  const setTooltip = !unlocked
+    ? `Primary Hub unlocks at level ${PRIMARY_HUB_LEVEL}`
+    : (eligibleCount === 0 ? 'Open at least one destination first' : '');
+
+  const renderRow = (entry, badgeLabel, dissolveBtn) => (
+    <div className="hd-primary-row">
+      <div className="hd-primary-row-head">
+        <div className="hd-primary-iata">{entry.airport_code}</div>
+        <span className="hd-type-badge">{badgeLabel}</span>
+      </div>
+      <div className="hd-primary-name">{entry.airport_name || entry.airport_code}</div>
+      <div className="hd-primary-meta">
+        Unlimited departures · {entry.weekly_flights ?? 0} weekly flights
+      </div>
+      {dissolveBtn && (
+        <div style={{ marginTop: 10 }}>
+          <button className="hd-btn-sm-danger" onClick={onOpenDissolveModal}>
+            Dissolve Primary Hub
+          </button>
         </div>
-      ) : (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 20px' }}>
-          <div style={{ fontFamily: 'monospace', fontSize: 32, fontWeight: 800, color: '#2C2C2C', lineHeight: 1 }}>
-            {primaryHubCode}
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 14, color: '#2C2C2C', fontWeight: 500 }}>
-              {primary?.airport_name || primaryHubCode}
-            </div>
-            <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>
-              Unlimited departures · {primary?.weekly_flights ?? 0} weekly flights
-            </div>
-          </div>
-          <span className="hd-type-badge">Primary Hub</span>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="hd-card">
+      <div className="hd-card-header">
+        <div>
+          <p className="hd-card-title">Primary Hubs</p>
+          <p className="hd-card-sub">
+            {!unlocked && !primary ? `Primary Hub unlocks at level ${PRIMARY_HUB_LEVEL}` : 'Unlimited departures · Free'}
+          </p>
+        </div>
+      </div>
+      <div className="hd-primary-list">
+        {home && renderRow(home, 'Homebase', false)}
+        {primary && renderRow(primary, 'Primary Hub', true)}
+      </div>
+      {!primary && (
+        <div className="hd-primary-cta">
+          <button
+            className="hd-btn-secondary"
+            onClick={onOpenSetModal}
+            disabled={setDisabled}
+            title={setTooltip}
+            style={{ width: '100%' }}
+          >
+            {!unlocked ? `🔒 Unlocks at Level ${PRIMARY_HUB_LEVEL}` : '+ Set Primary Hub'}
+          </button>
         </div>
       )}
     </div>

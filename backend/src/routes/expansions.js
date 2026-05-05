@@ -6,6 +6,7 @@ import { addGroundStaff } from './personnel.js';
 const router = express.Router();
 
 export const DEPARTURES_PER_LEVEL = 100;
+export const SECONDARY_HUB_LEVEL = 12;
 const MULTIPLIERS = [1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0];
 
 export function getCostForNextLevel(category, currentLevel) {
@@ -13,7 +14,7 @@ export function getCostForNextLevel(category, currentLevel) {
   return Math.round(category * multiplier * 1_000_000);
 }
 
-function getTotalCostForLevel(category, level) {
+export function getTotalCostForLevel(category, level) {
   let total = 0;
   for (let i = 0; i < level; i++) {
     const mult = i >= 9 ? 8.0 : MULTIPLIERS[i];
@@ -112,9 +113,13 @@ router.post('/purchase', authMiddleware, async (req, res) => {
     const category = apResult.rows[0].category || 4;
 
     // Not home base or primary hub (both already have unlimited departures)
-    const airlineResult = await pool.query('SELECT home_airport_code, primary_hub_airport_code FROM airlines WHERE id = $1', [req.airlineId]);
+    const airlineResult = await pool.query('SELECT home_airport_code, primary_hub_airport_code, level FROM airlines WHERE id = $1', [req.airlineId]);
     const homeCode = airlineResult.rows[0].home_airport_code;
     const primaryHub = airlineResult.rows[0].primary_hub_airport_code;
+    const airlineLevel = airlineResult.rows[0].level ?? 1;
+    if (airlineLevel < SECONDARY_HUB_LEVEL) {
+      return res.status(400).json({ error: `Secondary Hubs unlock at level ${SECONDARY_HUB_LEVEL}. Your airline is level ${airlineLevel}.` });
+    }
     if (code === homeCode) return res.status(400).json({ error: 'Home Base already has unlimited departures.' });
     if (code === primaryHub) return res.status(400).json({ error: 'Primary Hub already has unlimited departures.' });
 

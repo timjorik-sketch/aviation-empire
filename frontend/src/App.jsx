@@ -200,6 +200,13 @@ function App() {
   const [nextLevelAircraft, setNextLevelAircraft] = useState([]);
   const [levelUpCelebration, setLevelUpCelebration] = useState(null); // { newLevel, unlocked: [...] }
 
+  // Non-aircraft feature unlocks per level. Keep in sync with backend
+  // PRIMARY_HUB_LEVEL (destinations.js) and SECONDARY_HUB_LEVEL (expansions.js).
+  const FEATURE_UNLOCKS_BY_LEVEL = {
+    8:  [{ key: 'primary_hub',   name: 'Primary Hub',   description: 'Free, unlimited departures · 1 per airline' }],
+    12: [{ key: 'secondary_hub', name: 'Secondary Hub', description: 'Buy expansion levels · 100 dep/wk per level' }],
+  };
+
   useEffect(() => {
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
@@ -681,30 +688,53 @@ function App() {
                 style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#999', lineHeight: 1, marginLeft: 8 }}>×</button>
             </div>
 
-            {levelUpCelebration.unlocked.length > 0 ? (
-              <div>
-                <div style={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', marginBottom: 8 }}>
-                  Newly unlocked aircraft
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
-                  {levelUpCelebration.unlocked.map(ac => (
-                    <div key={ac.id} style={{ background: '#F5F5F5', borderRadius: 8, overflow: 'hidden', border: '1px solid #E8E8E8' }}>
-                      <img src={`/aircraft-images/${ac.image_filename}`} alt=""
-                        style={{ width: '100%', aspectRatio: '1000/333', objectFit: 'cover', display: 'block', background: '#E8E8E8' }}
-                        onError={e => { e.target.style.background='#E0E0E0'; e.target.style.display='block'; e.target.src=''; }} />
-                      <div style={{ padding: '6px 8px' }}>
-                        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#2C2C2C', lineHeight: 1.2 }}>{ac.full_name}</div>
-                        <div style={{ fontSize: '0.7rem', color: '#888', marginTop: 2 }}>{ac.max_passengers} pax · {ac.range_km.toLocaleString()} km</div>
+            {(() => {
+              const features = FEATURE_UNLOCKS_BY_LEVEL[levelUpCelebration.newLevel] || [];
+              const aircraft = levelUpCelebration.unlocked;
+              return (
+                <>
+                  {features.length > 0 && (
+                    <div style={{ marginBottom: aircraft.length > 0 ? '1.25rem' : 0 }}>
+                      <div style={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', marginBottom: 8 }}>
+                        New features
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8 }}>
+                        {features.map(f => (
+                          <div key={f.key} style={{ background: '#F5F5F5', borderRadius: 8, padding: '10px 12px', border: '1px solid #E8E8E8' }}>
+                            <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#2C2C2C' }}>🔓 {f.name}</div>
+                            <div style={{ fontSize: '0.75rem', color: '#666', marginTop: 2 }}>{f.description}</div>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div style={{ fontSize: '0.85rem', color: '#666', padding: '0.5rem 0' }}>
-                No new aircraft at this level — but your progress is recognized.
-              </div>
-            )}
+                  )}
+                  {aircraft.length > 0 ? (
+                    <div>
+                      <div style={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', marginBottom: 8 }}>
+                        Newly unlocked aircraft
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
+                        {aircraft.map(ac => (
+                          <div key={ac.id} style={{ background: '#F5F5F5', borderRadius: 8, overflow: 'hidden', border: '1px solid #E8E8E8' }}>
+                            <img src={`/aircraft-images/${ac.image_filename}`} alt=""
+                              style={{ width: '100%', aspectRatio: '1000/333', objectFit: 'cover', display: 'block', background: '#E8E8E8' }}
+                              onError={e => { e.target.style.background='#E0E0E0'; e.target.style.display='block'; e.target.src=''; }} />
+                            <div style={{ padding: '6px 8px' }}>
+                              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#2C2C2C', lineHeight: 1.2 }}>{ac.full_name}</div>
+                              <div style={{ fontSize: '0.7rem', color: '#888', marginTop: 2 }}>{ac.max_passengers} pax · {ac.range_km.toLocaleString()} km</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : features.length === 0 ? (
+                    <div style={{ fontSize: '0.85rem', color: '#666', padding: '0.5rem 0' }}>
+                      No new aircraft at this level — but your progress is recognized.
+                    </div>
+                  ) : null}
+                </>
+              );
+            })()}
 
             <button onClick={dismissLevelCelebration}
               style={{ marginTop: '1.5rem', width: '100%', background: '#2C2C2C', color: '#fff', border: 'none', borderRadius: 6, padding: '10px 16px', fontWeight: 700, fontSize: '0.9rem', cursor: 'pointer' }}>
@@ -756,29 +786,45 @@ function App() {
               </div>
 
               {/* Next unlocks */}
-              {!isMax && nextLevelAircraft.length > 0 && (
-                <div>
-                  <div style={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', marginBottom: 8 }}>
-                    Unlocks at Level {nextLvl}
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 8 }}>
-                    {nextLevelAircraft.map(ac => (
-                      <div key={ac.id} style={{ background: '#F5F5F5', borderRadius: 8, overflow: 'hidden', border: '1px solid #E8E8E8' }}>
-                        <img src={`/aircraft-images/${ac.image_filename}`} alt=""
-                          style={{ width: '100%', aspectRatio: '1000/333', objectFit: 'cover', display: 'block', background: '#E8E8E8' }}
-                          onError={e => { e.target.style.background='#E0E0E0'; e.target.style.display='block'; e.target.src=''; }} />
-                        <div style={{ padding: '6px 8px' }}>
-                          <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#2C2C2C', lineHeight: 1.2 }}>{ac.full_name}</div>
-                          <div style={{ fontSize: '0.68rem', color: '#888', marginTop: 2 }}>{ac.max_passengers} pax · {ac.range_km.toLocaleString()} km</div>
-                        </div>
+              {!isMax && (() => {
+                const nextFeatures = FEATURE_UNLOCKS_BY_LEVEL[nextLvl] || [];
+                const hasAny = nextLevelAircraft.length > 0 || nextFeatures.length > 0;
+                if (!hasAny) {
+                  return <div style={{ fontSize: '0.8rem', color: '#AAA', textAlign: 'center', padding: '1rem 0' }}>No new unlocks at next level.</div>;
+                }
+                return (
+                  <div>
+                    <div style={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', marginBottom: 8 }}>
+                      Unlocks at Level {nextLvl}
+                    </div>
+                    {nextFeatures.length > 0 && (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8, marginBottom: nextLevelAircraft.length > 0 ? 12 : 0 }}>
+                        {nextFeatures.map(f => (
+                          <div key={f.key} style={{ background: '#F5F5F5', borderRadius: 8, padding: '10px 12px', border: '1px solid #E8E8E8' }}>
+                            <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#2C2C2C' }}>🔓 {f.name}</div>
+                            <div style={{ fontSize: '0.72rem', color: '#666', marginTop: 2 }}>{f.description}</div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
+                    {nextLevelAircraft.length > 0 && (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 8 }}>
+                        {nextLevelAircraft.map(ac => (
+                          <div key={ac.id} style={{ background: '#F5F5F5', borderRadius: 8, overflow: 'hidden', border: '1px solid #E8E8E8' }}>
+                            <img src={`/aircraft-images/${ac.image_filename}`} alt=""
+                              style={{ width: '100%', aspectRatio: '1000/333', objectFit: 'cover', display: 'block', background: '#E8E8E8' }}
+                              onError={e => { e.target.style.background='#E0E0E0'; e.target.style.display='block'; e.target.src=''; }} />
+                            <div style={{ padding: '6px 8px' }}>
+                              <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#2C2C2C', lineHeight: 1.2 }}>{ac.full_name}</div>
+                              <div style={{ fontSize: '0.68rem', color: '#888', marginTop: 2 }}>{ac.max_passengers} pax · {ac.range_km.toLocaleString()} km</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                </div>
-              )}
-              {!isMax && nextLevelAircraft.length === 0 && (
-                <div style={{ fontSize: '0.8rem', color: '#AAA', textAlign: 'center', padding: '1rem 0' }}>No new aircraft at next level.</div>
-              )}
+                );
+              })()}
             </div>
           </div>
         );

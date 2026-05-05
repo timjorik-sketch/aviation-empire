@@ -40,12 +40,14 @@ async function calculateDistance(dep, arr) {
 
 // Determine the hub tier of an airport for an airline
 async function getAirportTier(airlineId, airportCode) {
-  const homeResult = await pool.query(
-    'SELECT home_airport_code FROM airlines WHERE id = $1',
+  const airlineResult = await pool.query(
+    'SELECT home_airport_code, primary_hub_airport_code FROM airlines WHERE id = $1',
     [airlineId]
   );
-  const homeCode = homeResult.rows[0] ? homeResult.rows[0].home_airport_code : null;
-  if (homeCode === airportCode) return 'home_base';
+  if (airlineResult.rows[0]) {
+    if (airlineResult.rows[0].home_airport_code === airportCode) return 'home_base';
+    if (airlineResult.rows[0].primary_hub_airport_code === airportCode) return 'primary_hub';
+  }
 
   const destResult = await pool.query(
     'SELECT destination_type FROM airline_destinations WHERE airline_id = $1 AND airport_code = $2',
@@ -208,21 +210,21 @@ router.post('/create',
         return res.status(400).json({ error: `${arrival_airport} has not been opened as a destination. Open it first in Network.` });
       }
 
-      const depIsHomeBase = tierDep === 'home_base';
-      const arrIsHomeBase = tierArr === 'home_base';
+      const depUnlimited = tierDep === 'home_base' || tierDep === 'primary_hub';
+      const arrUnlimited = tierArr === 'home_base' || tierArr === 'primary_hub';
 
-      // Rule 1: Home base involved → always allowed
-      if (!depIsHomeBase && !arrIsHomeBase) {
+      // Rule 1: Home Base or Primary Hub involved → always allowed
+      if (!depUnlimited && !arrUnlimited) {
         const depExpLevel = await getExpansionLevel(airlineId, departure_airport);
         const arrExpLevel = await getExpansionLevel(airlineId, arrival_airport);
 
-        // Rule 5: Neither has expansion → block
+        // Rule 5: Neither has a Secondary Hub (expansion) → block
         if (depExpLevel === 0 && arrExpLevel === 0) {
           return res.status(400).json({
-            error: `Cannot create route ${departure_airport}→${arrival_airport}: neither airport has an expansion. Purchase expansion at one of them in the Network page.`
+            error: `Cannot create route ${departure_airport}→${arrival_airport}: neither airport is a Hub. Purchase a Secondary Hub at one of them, or set one as Primary Hub, in the Network page.`
           });
         }
-        // Rule 2 (both have expansion), Rule 3 (only origin), Rule 4 (only dest): all allowed
+        // Otherwise (at least one has a Secondary Hub): allowed
       }
       // ── End expansion validation ───────────────────────────────────────────
 

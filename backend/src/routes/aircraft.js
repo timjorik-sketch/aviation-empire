@@ -1191,14 +1191,17 @@ function getCurrentWeekStart() {
 }
 
 async function getExpansionDepartures(airlineId, aircraftId) {
-  const homeResult = await pool.query('SELECT home_airport_code FROM airlines WHERE id = $1', [airlineId]);
-  const homeCode = homeResult.rows[0]?.home_airport_code ?? null;
+  const airlineResult = await pool.query('SELECT home_airport_code, primary_hub_airport_code FROM airlines WHERE id = $1', [airlineId]);
+  const homeCode = airlineResult.rows[0]?.home_airport_code ?? '';
+  const primaryHub = airlineResult.rows[0]?.primary_hub_airport_code ?? '';
 
   const schedResult = await pool.query(`
     SELECT ws.departure_airport, COUNT(*) as cnt
     FROM weekly_schedule ws
     WHERE ws.aircraft_id = $1
       AND ws.departure_airport != $2
+      AND ws.departure_airport != $3
+      AND ws.arrival_airport != $2
       AND ws.arrival_airport != $3
       AND NOT EXISTS (
         SELECT 1 FROM airport_expansions ae
@@ -1207,7 +1210,7 @@ async function getExpansionDepartures(airlineId, aircraftId) {
           AND ae.expansion_level > 0
       )
     GROUP BY ws.departure_airport
-  `, [aircraftId, homeCode || '', homeCode || '', airlineId]);
+  `, [aircraftId, homeCode, primaryHub, airlineId]);
 
   const result = {};
   for (const r of schedResult.rows) {
@@ -1264,8 +1267,9 @@ router.patch('/:id/active', authMiddleware, async (req, res) => {
           continue;
         }
 
-        const homeResult = await pool.query('SELECT home_airport_code FROM airlines WHERE id = $1', [airlineId]);
-        const homeCodeForCheck = homeResult.rows[0]?.home_airport_code ?? '';
+        const airlineForCheck = await pool.query('SELECT home_airport_code, primary_hub_airport_code FROM airlines WHERE id = $1', [airlineId]);
+        const homeCodeForCheck = airlineForCheck.rows[0]?.home_airport_code ?? '';
+        const primaryHubForCheck = airlineForCheck.rows[0]?.primary_hub_airport_code ?? '';
 
         const currentResult = await pool.query(`
           SELECT COUNT(*) as cnt FROM weekly_schedule ws
@@ -1273,6 +1277,7 @@ router.patch('/:id/active', authMiddleware, async (req, res) => {
           WHERE ac.airline_id = $1 AND ac.is_active = 1
             AND ws.departure_airport = $2
             AND ws.arrival_airport != $3
+            AND ws.arrival_airport != $5
             AND ac.id != $4
             AND NOT EXISTS (
               SELECT 1 FROM airport_expansions ae
@@ -1280,7 +1285,7 @@ router.patch('/:id/active', authMiddleware, async (req, res) => {
                 AND ae.airport_code = ws.arrival_airport
                 AND ae.expansion_level > 0
             )
-        `, [airlineId, airport, homeCodeForCheck, aircraftId]);
+        `, [airlineId, airport, homeCodeForCheck, aircraftId, primaryHubForCheck]);
         const current = parseInt(currentResult.rows[0].cnt);
 
         if (current + adding > capacity) {

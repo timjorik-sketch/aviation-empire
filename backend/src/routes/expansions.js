@@ -38,9 +38,10 @@ router.get('/', authMiddleware, async (req, res) => {
   try {
     const weekStart = getCurrentWeekStart();
 
-    // Get home base
-    const homeResult = await pool.query('SELECT home_airport_code FROM airlines WHERE id = $1', [req.airlineId]);
-    const homeCode = homeResult.rows[0] ? homeResult.rows[0].home_airport_code : null;
+    // Get home base + primary hub (both bypass secondary-hub capacity)
+    const airlineResult = await pool.query('SELECT home_airport_code, primary_hub_airport_code FROM airlines WHERE id = $1', [req.airlineId]);
+    const homeCode = airlineResult.rows[0]?.home_airport_code ?? '';
+    const primaryHub = airlineResult.rows[0]?.primary_hub_airport_code ?? '';
 
     // Real-time usage
     const usageResult = await pool.query(`
@@ -49,7 +50,9 @@ router.get('/', authMiddleware, async (req, res) => {
       JOIN aircraft ac ON ac.id = ws.aircraft_id
       WHERE ac.airline_id = $1 AND ac.is_active = 1
         AND ws.departure_airport != $2
+        AND ws.departure_airport != $3
         AND ws.arrival_airport != $2
+        AND ws.arrival_airport != $3
         AND NOT EXISTS (
           SELECT 1 FROM airport_expansions ae
           WHERE ae.airline_id = ac.airline_id
@@ -57,7 +60,7 @@ router.get('/', authMiddleware, async (req, res) => {
             AND ae.expansion_level > 0
         )
       GROUP BY ws.departure_airport
-    `, [req.airlineId, homeCode || '']);
+    `, [req.airlineId, homeCode, primaryHub]);
 
     const usageMap = {};
     for (const r of usageResult.rows) {
@@ -108,10 +111,12 @@ router.post('/purchase', authMiddleware, async (req, res) => {
     if (!apResult.rows[0]) return res.status(404).json({ error: 'Airport not found.' });
     const category = apResult.rows[0].category || 4;
 
-    // Not home base
-    const homeResult = await pool.query('SELECT home_airport_code FROM airlines WHERE id = $1', [req.airlineId]);
-    const homeCode = homeResult.rows[0].home_airport_code;
+    // Not home base or primary hub (both already have unlimited departures)
+    const airlineResult = await pool.query('SELECT home_airport_code, primary_hub_airport_code FROM airlines WHERE id = $1', [req.airlineId]);
+    const homeCode = airlineResult.rows[0].home_airport_code;
+    const primaryHub = airlineResult.rows[0].primary_hub_airport_code;
     if (code === homeCode) return res.status(400).json({ error: 'Home Base already has unlimited departures.' });
+    if (code === primaryHub) return res.status(400).json({ error: 'Primary Hub already has unlimited departures.' });
 
     // Destination opened
     const destResult = await pool.query(
@@ -202,9 +207,10 @@ router.delete('/:airport_code', authMiddleware, async (req, res) => {
     const level = expRow.expansion_level;
     const category = expRow.category || 4;
 
-    // Get home base for exclusion check
-    const homeResult = await pool.query('SELECT home_airport_code FROM airlines WHERE id = $1', [req.airlineId]);
-    const homeCode2 = homeResult.rows[0] ? homeResult.rows[0].home_airport_code : '';
+    // Get home base + primary hub for exclusion check
+    const sellAirline = await pool.query('SELECT home_airport_code, primary_hub_airport_code FROM airlines WHERE id = $1', [req.airlineId]);
+    const homeCode2 = sellAirline.rows[0]?.home_airport_code ?? '';
+    const primaryHub2 = sellAirline.rows[0]?.primary_hub_airport_code ?? '';
 
     // Check: no active flights FROM this airport that REQUIRE this expansion
     const activeFlightsResult = await pool.query(`
@@ -213,13 +219,14 @@ router.delete('/:airport_code', authMiddleware, async (req, res) => {
       WHERE ac.airline_id = $1 AND ac.is_active = 1
         AND ws.departure_airport = $2
         AND ws.arrival_airport != $3
+        AND ws.arrival_airport != $4
         AND NOT EXISTS (
           SELECT 1 FROM airport_expansions ae
           WHERE ae.airline_id = ac.airline_id
             AND ae.airport_code = ws.arrival_airport
             AND ae.expansion_level > 0
         )
-    `, [req.airlineId, code, homeCode2]);
+    `, [req.airlineId, code, homeCode2, primaryHub2]);
     const activeCount = parseInt(activeFlightsResult.rows[0].count);
 
     if (activeCount > 0) {

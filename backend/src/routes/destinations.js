@@ -35,6 +35,10 @@ router.get('/', authMiddleware, async (req, res) => {
   try {
     await ensureHomeBase(req.airlineId);
 
+    const airlineRes = await pool.query('SELECT home_airport_code, primary_hub_airport_code FROM airlines WHERE id = $1', [req.airlineId]);
+    const homeCode = airlineRes.rows[0]?.home_airport_code ?? null;
+    const primaryHubCode = airlineRes.rows[0]?.primary_hub_airport_code ?? null;
+
     const result = await pool.query(`
       SELECT d.id, d.airport_code, d.destination_type, d.opened_at,
              ap.name, ap.country, ap.continent, ap.category,
@@ -50,21 +54,24 @@ router.get('/', authMiddleware, async (req, res) => {
       JOIN airports ap ON d.airport_code = ap.iata_code
       WHERE d.airline_id = $1
       ORDER BY
-        CASE d.destination_type
-          WHEN 'home_base'      THEN 0
-          WHEN 'hub'            THEN 1
-          WHEN 'hub_restricted' THEN 2
-          ELSE 3
+        CASE
+          WHEN d.destination_type = 'home_base' THEN 0
+          WHEN d.airport_code = $2 THEN 1
+          WHEN d.destination_type = 'hub' THEN 2
+          WHEN d.destination_type = 'hub_restricted' THEN 3
+          ELSE 4
         END, ap.name ASC
-    `, [req.airlineId]);
+    `, [req.airlineId, primaryHubCode || '']);
 
     const destinations = result.rows.map(r => {
       const wf = parseInt(r.weekly_flights) || 0;
       const dtype = r.destination_type;
       const expansionLevel = parseInt(r.expansion_level) || 0;
       const hasExpansion = expansionLevel > 0;
+      const isPrimaryHub = primaryHubCode && r.airport_code === primaryHubCode;
       const groundStaff = calcGroundStaff(r.category, dtype, wf, expansionLevel);
       const displayType = dtype === 'home_base' ? 'home_base'
+        : isPrimaryHub ? 'primary_hub'
         : hasExpansion ? 'hub_restricted'
         : dtype;
       return {
@@ -73,14 +80,19 @@ router.get('/', authMiddleware, async (req, res) => {
         effective_type: effectiveType(displayType),
         opened_at: r.opened_at, airport_name: r.name, country: r.country,
         continent: r.continent, category: r.category, weekly_flights: wf,
-        ground_staff: groundStaff, has_expansion: hasExpansion, expansion_level: expansionLevel
+        ground_staff: groundStaff, has_expansion: hasExpansion, expansion_level: expansionLevel,
+        is_primary_hub: !!isPrimaryHub
       };
     });
     // Sync personnel table so payroll reflects the current calculated counts
     for (const d of destinations) {
       addGroundStaff(req.airlineId, d.airport_code, d.category, d.destination_type, d.weekly_flights, d.expansion_level).catch(() => {});
     }
-    res.json({ destinations });
+    res.json({
+      destinations,
+      home_airport_code: homeCode,
+      primary_hub_airport_code: primaryHubCode
+    });
   } catch (error) {
     console.error('Get destinations error:', error);
     res.status(500).json({ error: 'Server error' });
@@ -199,6 +211,88 @@ router.post('/open', authMiddleware, async (req, res) => {
 });
 
 
+// POST /api/destinations/primary-hub — set the airline's Primary Hub
+router.post('/primary-hub', authMiddleware, async (req, res) => {
+  if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
+  try {
+    const { airport_code } = req.body;
+    if (!airport_code) return res.status(400).json({ error: 'airport_code required' });
+    const code = airport_code.toUpperCase();
+
+    const airlineRes = await pool.query(
+      'SELECT home_airport_code, primary_hub_airport_code FROM airlines WHERE id = $1',
+      [req.airlineId]
+    );
+    if (!airlineRes.rows[0]) return res.status(400).json({ error: 'No airline found' });
+    const { home_airport_code: homeCode, primary_hub_airport_code: currentPrimary } = airlineRes.rows[0];
+
+    if (currentPrimary) {
+      return res.status(400).json({
+        error: `You already have a Primary Hub at ${currentPrimary}. Dissolve it first to choose a new one.`
+      });
+    }
+    if (code === homeCode) {
+      return res.status(400).json({ error: 'Home Base already provides unlimited departures. Choose a different airport for your Primary Hub.' });
+    }
+
+    const dest = await pool.query(
+      'SELECT id FROM airline_destinations WHERE airline_id = $1 AND airport_code = $2',
+      [req.airlineId, code]
+    );
+    if (!dest.rows[0]) return res.status(400).json({ error: 'Open this airport as a destination first.' });
+
+    await pool.query('UPDATE airlines SET primary_hub_airport_code = $1 WHERE id = $2', [code, req.airlineId]);
+
+    res.json({ message: `${code} set as Primary Hub`, primary_hub_airport_code: code });
+  } catch (error) {
+    console.error('Set primary hub error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// DELETE /api/destinations/primary-hub — dissolve the airline's Primary Hub
+router.delete('/primary-hub', authMiddleware, async (req, res) => {
+  if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
+  try {
+    const airlineRes = await pool.query(
+      'SELECT home_airport_code, primary_hub_airport_code FROM airlines WHERE id = $1',
+      [req.airlineId]
+    );
+    if (!airlineRes.rows[0]) return res.status(400).json({ error: 'No airline found' });
+    const { home_airport_code: homeCode, primary_hub_airport_code: currentPrimary } = airlineRes.rows[0];
+
+    if (!currentPrimary) {
+      return res.status(400).json({ error: 'No Primary Hub set.' });
+    }
+
+    // All routes departing from primary hub must be deleted, except those going to Home Base
+    const blocking = await pool.query(`
+      SELECT flight_number, arrival_airport
+      FROM routes
+      WHERE airline_id = $1
+        AND departure_airport = $2
+        AND arrival_airport != $3
+      ORDER BY flight_number
+    `, [req.airlineId, currentPrimary, homeCode || '']);
+
+    if (blocking.rows.length > 0) {
+      const list = blocking.rows.map(r => `${r.flight_number} (${currentPrimary}→${r.arrival_airport})`).join(', ');
+      return res.status(400).json({
+        error: `Cannot dissolve Primary Hub at ${currentPrimary}: ${blocking.rows.length} route${blocking.rows.length !== 1 ? 's' : ''} still depart from it. Delete these routes first (routes to your Home Base may remain): ${list}`,
+        blocking_routes: blocking.rows.map(r => ({ flight_number: r.flight_number, arrival_airport: r.arrival_airport }))
+      });
+    }
+
+    await pool.query('UPDATE airlines SET primary_hub_airport_code = NULL WHERE id = $1', [req.airlineId]);
+
+    res.json({ message: `Primary Hub at ${currentPrimary} dissolved`, dissolved_airport_code: currentPrimary });
+  } catch (error) {
+    console.error('Dissolve primary hub error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
 // DELETE /api/destinations/:code — close/remove a destination
 router.delete('/:code', authMiddleware, async (req, res) => {
   if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
@@ -218,6 +312,12 @@ router.delete('/:code', authMiddleware, async (req, res) => {
 
     if (destType === 'home_base') {
       return res.status(400).json({ error: 'Cannot close your Home Base.' });
+    }
+
+    // Block close of the airport currently set as Primary Hub
+    const airlineCheck = await pool.query('SELECT primary_hub_airport_code FROM airlines WHERE id = $1', [req.airlineId]);
+    if (airlineCheck.rows[0]?.primary_hub_airport_code === code) {
+      return res.status(400).json({ error: `Cannot close ${code}: it is your Primary Hub. Dissolve the Primary Hub first.` });
     }
 
     // Block deletion if any routes use this airport

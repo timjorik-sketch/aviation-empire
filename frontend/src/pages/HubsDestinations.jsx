@@ -4,9 +4,10 @@ import TopBar from '../components/TopBar.jsx';
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 const TYPE_META = {
-  home_base:      { label: 'Home Base',       dark: true },
-  hub:            { label: 'Hub',             dark: true },
-  hub_restricted: { label: 'Hub', dark: true },
+  home_base:      { label: 'Homebase',        dark: true },
+  primary_hub:    { label: 'Primary Hub',     dark: true },
+  hub:            { label: 'Secondary Hub',   dark: true },
+  hub_restricted: { label: 'Secondary Hub',   dark: true },
   base:           { label: 'Base',            dark: true },
   destination:    { label: 'Destination',     dark: false },
 };
@@ -36,6 +37,16 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
   const [destinations, setDestinations] = useState([]);
   const [destLoading, setDestLoading] = useState(true);
   const [destError, setDestError] = useState('');
+  const [homeAirportCode, setHomeAirportCode] = useState(null);
+  const [primaryHubCode, setPrimaryHubCode] = useState(null);
+
+  // ── Primary Hub modals ────────────────────────────────────────────────────
+  const [showSetPrimaryModal, setShowSetPrimaryModal] = useState(false);
+  const [primaryAirport, setPrimaryAirport] = useState('');
+  const [primaryActionLoading, setPrimaryActionLoading] = useState(false);
+  const [primaryError, setPrimaryError] = useState('');
+  const [showDissolvePrimaryModal, setShowDissolvePrimaryModal] = useState(false);
+  const [dissolveBlockingRoutes, setDissolveBlockingRoutes] = useState([]);
 
   const [sortCol, setSortCol] = useState('destination_type');
   const [sortDir, setSortDir] = useState('asc');
@@ -77,12 +88,54 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
       });
       const data = await res.json();
       setDestinations(data.destinations || []);
+      setHomeAirportCode(data.home_airport_code ?? null);
+      setPrimaryHubCode(data.primary_hub_airport_code ?? null);
     } catch {
       setDestError('Failed to load destinations');
     } finally {
       setDestLoading(false);
     }
   }, []);
+
+  // ── Primary Hub handlers ────────────────────────────────────────────────
+  const handleSetPrimaryHub = async () => {
+    if (!primaryAirport) return;
+    setPrimaryActionLoading(true); setPrimaryError('');
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch(`${API_URL}/api/destinations/primary-hub`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ airport_code: primaryAirport }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      setShowSetPrimaryModal(false);
+      setPrimaryAirport('');
+      await fetchDestinations();
+    } catch (err) { setPrimaryError(err.message); }
+    finally { setPrimaryActionLoading(false); }
+  };
+
+  const handleDissolvePrimaryHub = async () => {
+    setPrimaryActionLoading(true); setPrimaryError('');
+    setDissolveBlockingRoutes([]);
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch(`${API_URL}/api/destinations/primary-hub`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (Array.isArray(data.blocking_routes)) setDissolveBlockingRoutes(data.blocking_routes);
+        throw new Error(data.error || 'Failed');
+      }
+      setShowDissolvePrimaryModal(false);
+      await fetchDestinations();
+    } catch (err) { setPrimaryError(err.message); }
+    finally { setPrimaryActionLoading(false); }
+  };
 
   const fetchAllAirports = useCallback(async () => {
     setAirportsLoading(true);
@@ -246,8 +299,8 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
     list.sort((a, b) => {
       let av, bv;
       if (sortCol === 'destination_type') {
-        const o = { home_base: 0, hub: 1, hub_restricted: 2, base: 3, destination: 4 };
-        av = o[a.display_type || a.destination_type] ?? 5; bv = o[b.display_type || b.destination_type] ?? 5;
+        const o = { home_base: 0, primary_hub: 1, hub: 2, hub_restricted: 3, base: 4, destination: 5 };
+        av = o[a.display_type || a.destination_type] ?? 6; bv = o[b.display_type || b.destination_type] ?? 6;
       } else if (sortCol === 'airport') {
         av = a.airport_name; bv = b.airport_name;
       } else if (sortCol === 'continent') {
@@ -651,24 +704,33 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
 
           {view === 'list' ? (
             <>
-              {/* ── Hubs (Expansions) ───────────────────────────────── */}
+              {/* ── Primary Hub ─────────────────────────────────────── */}
+              <PrimaryHubCard
+                primaryHubCode={primaryHubCode}
+                homeAirportCode={homeAirportCode}
+                destinations={destinations}
+                onOpenSetModal={() => { setPrimaryError(''); setPrimaryAirport(''); setShowSetPrimaryModal(true); }}
+                onOpenDissolveModal={() => { setPrimaryError(''); setDissolveBlockingRoutes([]); setShowDissolvePrimaryModal(true); }}
+              />
+
+              {/* ── Secondary Hubs (Expansions) ─────────────────────── */}
               <div className="hd-card" style={{ marginBottom: 20 }}>
                 <div className="hd-card-header">
                   <div>
-                    <p className="hd-card-title">Hubs ({expansions.length})</p>
+                    <p className="hd-card-title">Secondary Hubs ({expansions.length})</p>
                     <p className="hd-card-sub">100 departures/week per level · progressive pricing</p>
                   </div>
                   <button
                     style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.3)', color: 'rgba(255,255,255,0.7)', padding: '0.22rem 0.65rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', letterSpacing: '0.03em' }}
                     onClick={() => { setShowExpModal(true); setExpError(''); setExpAirport(''); }}
                   >
-                    + New Hub
+                    + New Secondary Hub
                   </button>
                 </div>
                 {expansionsLoading ? (
                   <div className="hd-empty-sm">Loading…</div>
                 ) : expansions.length === 0 ? (
-                  <div className="hd-empty-sm">No hubs purchased yet. Use "+ New Hub" to add expansion levels at a destination.</div>
+                  <div className="hd-empty-sm">No Secondary Hubs purchased yet. Use "+ New Secondary Hub" to add expansion levels at a destination.</div>
                 ) : (
                   <div className="hub-tiles-grid">
                     {expansions.map(e => {
@@ -744,11 +806,11 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
         <EditDestinationModal destination={editDest} onClose={() => setEditDest(null)} onUpgrade={null} />
       )}
 
-      {/* ── New Hub Modal ───────────────────────────────────────── */}
+      {/* ── New Secondary Hub Modal ─────────────────────────────── */}
       {showExpModal && (
         <div className="hd-modal-backdrop" onClick={() => setShowExpModal(false)}>
           <div className="hd-modal" onClick={e => e.stopPropagation()}>
-            <h3>New Hub</h3>
+            <h3>New Secondary Hub</h3>
             <p style={{ fontSize: 13, color: '#666', marginTop: -12, marginBottom: 16 }}>
               Purchase Level 1 at a destination to enable departures · +100 dep/week
             </p>
@@ -756,7 +818,7 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
               <label>Select Airport</label>
               <select value={expAirport} onChange={e => setExpAirport(e.target.value)}>
                 <option value="">— choose destination —</option>
-                {destinations.filter(d => d.destination_type !== 'home_base' && !expansions.find(ex => ex.airport_code === d.airport_code)).map(d => (
+                {destinations.filter(d => d.destination_type !== 'home_base' && !d.is_primary_hub && !expansions.find(ex => ex.airport_code === d.airport_code)).map(d => (
                   <option key={d.airport_code} value={d.airport_code}>
                     {d.airport_code} — {d.airport_name} (Cat {d.category})
                   </option>
@@ -799,7 +861,135 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
           onClose={() => { setManageHub(null); setManageAction(null); setManageError(''); }}
         />
       )}
+
+      {/* ── Set Primary Hub Modal ───────────────────────────────── */}
+      {showSetPrimaryModal && (
+        <div className="hd-modal-backdrop" onClick={() => setShowSetPrimaryModal(false)}>
+          <div className="hd-modal" onClick={e => e.stopPropagation()}>
+            <h3>Set Primary Hub</h3>
+            <p style={{ fontSize: 13, color: '#666', marginTop: -12, marginBottom: 16 }}>
+              Choose one opened destination to become your Primary Hub. It gets unlimited departures (free) and can be dissolved later, provided no routes still depart from it (routes to your Homebase may remain).
+            </p>
+            <div className="hd-purchase-row">
+              <label>Select Airport</label>
+              <select value={primaryAirport} onChange={e => setPrimaryAirport(e.target.value)}>
+                <option value="">— choose destination —</option>
+                {destinations
+                  .filter(d => d.destination_type !== 'home_base')
+                  .map(d => (
+                    <option key={d.airport_code} value={d.airport_code}>
+                      {d.airport_code} — {d.airport_name} (Cat {d.category})
+                    </option>
+                  ))}
+              </select>
+            </div>
+            {primaryError && <p style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{primaryError}</p>}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button className="hd-btn-secondary" onClick={() => setShowSetPrimaryModal(false)} disabled={primaryActionLoading}>Cancel</button>
+              <button
+                className="hd-btn-primary"
+                disabled={!primaryAirport || primaryActionLoading}
+                onClick={handleSetPrimaryHub}
+              >
+                {primaryActionLoading ? 'Setting…' : 'Set as Primary Hub'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Dissolve Primary Hub Modal ──────────────────────────── */}
+      {showDissolvePrimaryModal && (
+        <div className="hd-modal-backdrop" onClick={() => setShowDissolvePrimaryModal(false)}>
+          <div className="hd-modal" onClick={e => e.stopPropagation()}>
+            <h3>Dissolve Primary Hub at {primaryHubCode}</h3>
+            <p style={{ fontSize: 13, color: '#666', marginTop: -12, marginBottom: 16 }}>
+              The airport becomes a normal destination again. To dissolve, no routes may depart from it (routes to your Homebase may remain).
+            </p>
+            {dissolveBlockingRoutes.length > 0 && (
+              <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 6, padding: 12, marginBottom: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#991b1b', marginBottom: 6 }}>
+                  Delete these routes first:
+                </div>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: '#991b1b' }}>
+                  {dissolveBlockingRoutes.map(r => (
+                    <li key={r.flight_number}>{r.flight_number} ({primaryHubCode}→{r.arrival_airport})</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {primaryError && dissolveBlockingRoutes.length === 0 && (
+              <p style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{primaryError}</p>
+            )}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button className="hd-btn-secondary" onClick={() => setShowDissolvePrimaryModal(false)} disabled={primaryActionLoading}>Cancel</button>
+              <button
+                style={{ padding: '8px 16px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, cursor: 'pointer', fontWeight: 500 }}
+                onClick={handleDissolvePrimaryHub}
+                disabled={primaryActionLoading}
+              >
+                {primaryActionLoading ? 'Dissolving…' : 'Dissolve Primary Hub'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
+  );
+}
+
+// ── Primary Hub Card ───────────────────────────────────────────────────────────
+function PrimaryHubCard({ primaryHubCode, homeAirportCode, destinations, onOpenSetModal, onOpenDissolveModal }) {
+  const eligibleCount = destinations.filter(d => d.destination_type !== 'home_base').length;
+  const primary = primaryHubCode ? destinations.find(d => d.airport_code === primaryHubCode) : null;
+
+  return (
+    <div className="hd-card" style={{ marginBottom: 20 }}>
+      <div className="hd-card-header">
+        <div>
+          <p className="hd-card-title">Primary Hub</p>
+          <p className="hd-card-sub">Unlimited departures · Free · One per airline</p>
+        </div>
+        {!primaryHubCode ? (
+          <button
+            style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.3)', color: 'rgba(255,255,255,0.7)', padding: '0.22rem 0.65rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', letterSpacing: '0.03em' }}
+            onClick={onOpenSetModal}
+            disabled={eligibleCount === 0}
+            title={eligibleCount === 0 ? 'Open at least one destination first' : ''}
+          >
+            + Set Primary Hub
+          </button>
+        ) : (
+          <button
+            style={{ background: 'transparent', border: '1px solid rgba(252,165,165,0.5)', color: '#fca5a5', padding: '0.22rem 0.65rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', letterSpacing: '0.03em' }}
+            onClick={onOpenDissolveModal}
+          >
+            Dissolve
+          </button>
+        )}
+      </div>
+      {!primaryHubCode ? (
+        <div className="hd-empty-sm">
+          No Primary Hub set. Designate one of your destinations as Primary Hub for unlimited free departures.
+          {homeAirportCode && <> Your Homebase {homeAirportCode} already provides unlimited departures.</>}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 20px' }}>
+          <div style={{ fontFamily: 'monospace', fontSize: 32, fontWeight: 800, color: '#2C2C2C', lineHeight: 1 }}>
+            {primaryHubCode}
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 14, color: '#2C2C2C', fontWeight: 500 }}>
+              {primary?.airport_name || primaryHubCode}
+            </div>
+            <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>
+              Unlimited departures · {primary?.weekly_flights ?? 0} weekly flights
+            </div>
+          </div>
+          <span className="hd-type-badge">Primary Hub</span>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -896,7 +1086,7 @@ function DestinationsList({
                     <td style={{ textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                         <button className="hd-btn-sm" onClick={() => onEditDestination(d)}>Edit</button>
-                        {d.destination_type !== 'home_base' && (
+                        {d.destination_type !== 'home_base' && !d.is_primary_hub && (
                           <button
                             className="hd-btn-sm-danger"
                             disabled={deleting === d.airport_code}
@@ -1248,7 +1438,12 @@ function EditDestinationModal({ destination: d, onClose }) {
         </div>
         {d.destination_type === 'home_base' && (
           <p style={{ fontSize: 13, color: '#888', marginTop: 12, marginBottom: 0 }}>
-            Home Base has unlimited departures by default.
+            Homebase has unlimited departures by default.
+          </p>
+        )}
+        {d.is_primary_hub && d.destination_type !== 'home_base' && (
+          <p style={{ fontSize: 13, color: '#888', marginTop: 12, marginBottom: 0 }}>
+            Primary Hub has unlimited free departures. Dissolve it from the Primary Hub card to revert to a normal destination.
           </p>
         )}
         <div className="hd-modal-actions">

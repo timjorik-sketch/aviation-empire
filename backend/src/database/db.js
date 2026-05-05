@@ -355,6 +355,7 @@ async function initDatabase() {
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS total_revenue_lifetime NUMERIC DEFAULT 0`,
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS lifetime_backfilled_at TIMESTAMPTZ`,
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS acknowledged_level INTEGER`,
+    `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS primary_hub_airport_code TEXT REFERENCES airports(iata_code)`,
     // users table
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS active_airline_id INTEGER REFERENCES airlines(id)`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE`,

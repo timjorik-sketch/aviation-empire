@@ -376,6 +376,57 @@ export default function Finances({ airline, onBack, onNavigateToAirport, onNavig
               </div>
             );
           })}
+
+          {/* Total Points / Level */}
+          {(() => {
+            const xp = data?.xp || {};
+            const lvl = xp.level ?? 1;
+            const tp  = xp.total_points ?? 0;
+            const cur = xp.threshold_curr ?? 0;
+            const nxt = xp.threshold_next;
+            const progressPct = nxt != null && nxt > cur
+              ? Math.min(100, Math.max(0, ((tp - cur) / (nxt - cur)) * 100))
+              : 100;
+            const fmtNum = (n) => Number(n).toLocaleString();
+            return (
+              <div style={{ background: '#fff', borderRadius: '8px', padding: '20px 24px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', flex: '1 1 0', minWidth: '160px' }}>
+                <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', marginBottom: '6px' }}>Total Points</div>
+                <div style={{ fontSize: '1.55rem', fontWeight: 700, color: '#2C2C2C', lineHeight: 1.1 }}>{fmtNum(tp)}</div>
+                <div style={{ marginTop: '6px', fontSize: '0.75rem', color: '#888', display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#2C2C2C', background: 'rgba(0,0,0,0.06)', borderRadius: '4px', padding: '2px 6px' }}>Level {lvl}</span>
+                  {nxt != null && <span>{fmtNum(nxt - tp)} to next</span>}
+                  {nxt == null && <span>max level</span>}
+                </div>
+                <div style={{ marginTop: '6px', height: '4px', background: 'rgba(0,0,0,0.06)', borderRadius: '2px', overflow: 'hidden' }}>
+                  <div style={{ width: `${progressPct}%`, height: '100%', background: '#2C2C2C' }} />
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Daily XP */}
+          {(() => {
+            const xp = data?.xp || {};
+            const today = xp.today ?? 0;
+            const yest  = xp.yesterday ?? 0;
+            const pct = pctChange(today, yest);
+            const positive = pct != null && pct > 0;
+            const fmtNum = (n) => Number(n).toLocaleString();
+            return (
+              <div style={{ background: '#fff', borderRadius: '8px', padding: '20px 24px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', flex: '1 1 0', minWidth: '160px' }}>
+                <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', marginBottom: '6px' }}>Points Today</div>
+                <div style={{ fontSize: '1.55rem', fontWeight: 700, color: '#2C2C2C', lineHeight: 1.1 }}>{fmtNum(today)}</div>
+                <div style={{ marginTop: '6px', fontSize: '0.75rem', color: '#888', display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                  <span>Yesterday: {fmtNum(yest)}</span>
+                  {pct != null && (() => {
+                    const color = pct === 0 ? '#888' : positive ? '#16a34a' : '#dc2626';
+                    const bg    = pct === 0 ? 'rgba(0,0,0,0.06)' : positive ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)';
+                    return <span style={{ fontSize: '0.72rem', fontWeight: 700, color, background: bg, borderRadius: '4px', padding: '2px 6px' }}>{pct > 0 ? '+' : ''}{pct.toFixed(1)}%</span>;
+                  })()}
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* ── P&L Chart + Fuel Price ── */}

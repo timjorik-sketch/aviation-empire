@@ -1,8 +1,28 @@
 import express from 'express';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
+import { XP_THRESHOLDS } from './flights.js';
 
 const router = express.Router();
+
+// Same load-factor curve as calcFlightXP in flights.js — kept duplicated to
+// reconstruct daily XP from completed flights without re-running the live calc.
+function calcXP(distanceKm, loadFactor) {
+  const lm = loadFactor >= 1.0 ? 1.0
+    : loadFactor >= 0.95 ? 0.95
+    : loadFactor >= 0.90 ? 0.9
+    : loadFactor >= 0.85 ? 0.85
+    : loadFactor >= 0.80 ? 0.8
+    : loadFactor >= 0.75 ? 0.75
+    : loadFactor >= 0.70 ? 0.7
+    : loadFactor >= 0.60 ? 0.6
+    : loadFactor >= 0.50 ? 0.5
+    : loadFactor >= 0.40 ? 0.3
+    : loadFactor >= 0.30 ? 0.15
+    : loadFactor >= 0.20 ? 0.05
+    : 0.0;
+  return Math.floor(distanceKm / 20 * lm);
+}
 
 // Get financial overview
 router.get('/overview', authMiddleware, async (req, res) => {
@@ -331,9 +351,13 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
-    const balResult = await pool.query('SELECT balance FROM airlines WHERE id = $1', [airlineId]);
+    const balResult = await pool.query('SELECT balance, level, total_points FROM airlines WHERE id = $1', [airlineId]);
     if (!balResult.rows[0]) return res.status(400).json({ error: 'No airline found' });
     const balance = parseFloat(balResult.rows[0].balance);
+    const level = parseInt(balResult.rows[0].level) || 1;
+    const totalPoints = parseInt(balResult.rows[0].total_points) || 0;
+    const xpThresholdCurr = XP_THRESHOLDS[level - 1] ?? 0;
+    const xpThresholdNext = level < XP_THRESHOLDS.length ? XP_THRESHOLDS[level] : null;
 
     // Helper: single-row query returning first row
     const q = async (sql, params) => {
@@ -429,6 +453,41 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     if (fuelResult.rows[0]) currentFuelPriceL = parseFloat(fuelResult.rows[0].price_per_liter);
     if (fuelResult.rows[1]) prevFuelPriceL = parseFloat(fuelResult.rows[1].price_per_liter);
 
+    // ── XP earned today / yesterday (Berlin local days) ──────────────────────
+    const xpFlightsResult = await pool.query(
+      `SELECT (f.arrival_time AT TIME ZONE 'Europe/Berlin')::date as d,
+              COALESCE(NULLIF(f.total_seats, 0), at.max_passengers, 100) as capacity,
+              COALESCE(f.booked_economy, 0) + COALESCE(f.booked_business, 0) + COALESCE(f.booked_first, 0) as booked,
+              COALESCE(r.distance_km, ws_r.distance_km, 0) as distance_km
+       FROM flights f
+       LEFT JOIN routes r           ON f.route_id = r.id
+       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
+       LEFT JOIN routes ws_r        ON ws.route_id = ws_r.id
+       LEFT JOIN aircraft ac        ON f.aircraft_id = ac.id
+       LEFT JOIN aircraft_types at  ON ac.aircraft_type_id = at.id
+       WHERE f.airline_id = $1 AND f.status = 'completed'
+         AND f.arrival_time >= (NOW() AT TIME ZONE 'Europe/Berlin')::date - INTERVAL '1 day'`,
+      [airlineId]
+    );
+    const todayBerlinRow = await q(`SELECT (NOW() AT TIME ZONE 'Europe/Berlin')::date as d`, []);
+    const todayKey = todayBerlinRow.d.toISOString ? todayBerlinRow.d.toISOString().slice(0, 10) : String(todayBerlinRow.d).slice(0, 10);
+    const yKey = (() => {
+      const d = new Date(`${todayKey}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() - 1);
+      return d.toISOString().slice(0, 10);
+    })();
+
+    let xpToday = 0, xpYesterday = 0;
+    for (const row of xpFlightsResult.rows) {
+      const dKey = row.d.toISOString ? row.d.toISOString().slice(0, 10) : String(row.d).slice(0, 10);
+      const cap = parseFloat(row.capacity) || 0;
+      const bk  = parseFloat(row.booked) || 0;
+      const lf  = cap > 0 ? bk / cap : 0.7;
+      const xp  = calcXP(parseFloat(row.distance_km) || 0, lf);
+      if (dKey === todayKey) xpToday += xp;
+      else if (dKey === yKey) xpYesterday += xp;
+    }
+
     // ── Ops stats ────────────────────────────────────────────────────────────
     const activeAircraftRow = await q(`SELECT COUNT(*) as val FROM aircraft WHERE airline_id=$1 AND is_active=1`, [airlineId]);
     const activeRoutesRow   = await q(`SELECT COUNT(DISTINCT ws.route_id) as val FROM weekly_schedule ws JOIN aircraft a ON a.id = ws.aircraft_id WHERE a.airline_id=$1 AND a.is_active=1 AND ws.route_id IS NOT NULL`, [airlineId]);
@@ -458,6 +517,14 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     res.json({
       balance: Math.round(balance),
       balance_prev_week: Math.round(balancePrevWeek),
+      xp: {
+        level,
+        total_points: totalPoints,
+        threshold_curr: xpThresholdCurr,
+        threshold_next: xpThresholdNext,
+        today: xpToday,
+        yesterday: xpYesterday,
+      },
       weekly: {
         revenue: Math.round(weeklyRevenue), revenue_prev: Math.round(prevWeeklyRevenue),
         costs: Math.round(weeklyCosts),     costs_prev: Math.round(prevWeeklyCosts),

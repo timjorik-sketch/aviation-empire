@@ -729,6 +729,19 @@ async function generateFlights() {
           );
           if (dupResult.rows[0]) continue;
 
+          // Skip if the aircraft already has a live flight (incl. orphaned ones from a
+          // cleared schedule) overlapping this window — same plane can't fly twice at once.
+          const conflictResult = await pool.query(
+            `SELECT 1 FROM flights
+             WHERE aircraft_id = $1
+               AND status IN ('scheduled', 'boarding', 'in_flight')
+               AND departure_time < $2
+               AND arrival_time > $3
+             LIMIT 1`,
+            [ac.id, arrDT.toISOString(), depDT.toISOString()]
+          );
+          if (conflictResult.rows[0]) continue;
+
           const ecoPrice   = entry.eco_price   ?? 0;
           const bizPrice   = entry.biz_price   ?? ecoPrice;
           const firstPrice = entry.first_price ?? ecoPrice;

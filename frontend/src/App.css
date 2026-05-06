@@ -160,7 +160,7 @@
   filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.5));
 }
 .page-hero-logo--large {
-  height: 90px;
+  height: 72px;
 }
 
 /* Dark glass variant — used on the dashboard hero so the white logo sits in a
@@ -231,7 +231,7 @@
     font-size: 0.65rem !important;
   }
   .page-hero-logo { height: 44px; }
-  .page-hero-logo--large { height: 56px; }
+  .page-hero-logo--large { height: 45px; }
   .brand-logo { height: 44px; }
 }
 

@@ -93,10 +93,12 @@
   background-position: center;
 }
 
-/* Bare modifier — keeps the default bottom-left placement of .page-hero-overlay
-   but strips the glass card chrome (background/border/shadow/padding). Used
-   when a logo should sit at that anchor without a card behind it. */
+/* Bare modifier — anchors content top-left of the hero and strips the glass
+   card chrome (background/border/shadow/padding). Used when a logo should sit
+   at that anchor without a card behind it. */
 .page-hero-overlay--bare {
+  top: 28px !important;
+  bottom: auto !important;
   background: transparent !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;

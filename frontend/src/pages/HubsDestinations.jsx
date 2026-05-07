@@ -61,6 +61,8 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
   const [airportsLoading, setAirportsLoading] = useState(false);
   const [filterContinent, setFilterContinent] = useState('');
   const [filterCountry, setFilterCountry] = useState('');
+  const [filterMinRunway, setFilterMinRunway] = useState(0);
+  const [filterMaxRunway, setFilterMaxRunway] = useState(null);
   const [addSearch, setAddSearch] = useState('');
   const [opening, setOpening] = useState(null);
 
@@ -298,6 +300,8 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
     setAddSearch('');
     setFilterContinent('');
     setFilterCountry('');
+    setFilterMinRunway(0);
+    setFilterMaxRunway(null);
     if (allAirports.length === 0) fetchAllAirports();
   };
 
@@ -398,11 +402,25 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
     setFilterCountry('');
   };
 
+  // ── Add view: max runway in available data (for slider bounds) ────────────
+  const maxRunwayInData = useMemo(() => {
+    const lens = allAirports.map(a => a.runway_length_m).filter(v => v != null);
+    if (!lens.length) return 5000;
+    return Math.max(...lens);
+  }, [allAirports]);
+
   // ── Add view: filtered + grouped airports ─────────────────────────────────
   const filteredAirports = useMemo(() => {
     let list = allAirports;
     if (filterContinent) list = list.filter(a => a.continent === filterContinent);
     if (filterCountry)   list = list.filter(a => a.country === filterCountry);
+    const maxRwy = filterMaxRunway ?? maxRunwayInData;
+    if (filterMinRunway > 0 || filterMaxRunway !== null) {
+      list = list.filter(a => {
+        if (a.runway_length_m == null) return false;
+        return a.runway_length_m >= filterMinRunway && a.runway_length_m <= maxRwy;
+      });
+    }
     if (addSearch.trim()) {
       const q = addSearch.toLowerCase();
       list = list.filter(a =>
@@ -412,7 +430,7 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
       );
     }
     return list;
-  }, [allAirports, filterContinent, filterCountry, addSearch]);
+  }, [allAirports, filterContinent, filterCountry, filterMinRunway, filterMaxRunway, maxRunwayInData, addSearch]);
 
   const groupedAirports = useMemo(() => {
     const groups = {};
@@ -524,6 +542,32 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
         .add-filter-bar select:focus { border-color: #2C2C2C; }
         .add-filter-count {
           margin-left: auto; font-size: 13px; color: #666; white-space: nowrap;
+        }
+
+        /* Runway range slider */
+        .add-range {
+          display: flex; flex-direction: column; gap: 4px;
+          padding: 6px 12px; background: #fff;
+          border: 1px solid #E0E0E0; border-radius: 6px;
+          min-width: 220px;
+        }
+        .add-range-head {
+          display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+        }
+        .add-range-label {
+          font-size: 12px; font-weight: 600; color: #666; text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        .add-range-value {
+          font-size: 12px; font-weight: 700; color: #2C2C2C;
+        }
+        .add-range-row {
+          display: flex; align-items: center; gap: 6px;
+        }
+        .add-range-sublabel {
+          font-size: 11px; color: #999; width: 24px; flex-shrink: 0;
+        }
+        .add-range-slider {
+          flex: 1; accent-color: #2C2C2C; cursor: pointer; min-width: 140px;
         }
 
         /* ── Add view: groups + grid ── */
@@ -903,6 +947,11 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
               filterCountry={filterCountry}
               onCountryChange={setFilterCountry}
               countries={countriesInContinent}
+              filterMinRunway={filterMinRunway}
+              filterMaxRunway={filterMaxRunway}
+              maxRunwayInData={maxRunwayInData}
+              onMinRunwayChange={setFilterMinRunway}
+              onMaxRunwayChange={setFilterMaxRunway}
               opening={opening}
               onOpen={handleOpenDestination}
               onBack={() => setView('list')}
@@ -1335,8 +1384,11 @@ function AddDestinationsView({
   search, onSearchChange,
   filterContinent, onContinentChange,
   filterCountry, onCountryChange, countries,
+  filterMinRunway, filterMaxRunway, maxRunwayInData,
+  onMinRunwayChange, onMaxRunwayChange,
   opening, onOpen, onBack, onNavigateToAirport
 }) {
+  const effectiveMaxRunway = filterMaxRunway ?? maxRunwayInData;
   return (
     <div className="hd-card">
       <div className="hd-card-header">
@@ -1367,6 +1419,48 @@ function AddDestinationsView({
           <option value="">All Countries</option>
           {countries.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
+
+        <div className="add-range">
+          <div className="add-range-head">
+            <span className="add-range-label">Runway</span>
+            <span className="add-range-value">
+              {filterMinRunway.toLocaleString()} – {effectiveMaxRunway.toLocaleString()} m
+            </span>
+          </div>
+          <div className="add-range-row">
+            <span className="add-range-sublabel">Min</span>
+            <input
+              type="range"
+              min={0}
+              max={maxRunwayInData}
+              step={100}
+              value={filterMinRunway}
+              onChange={e => {
+                const v = Number(e.target.value);
+                onMinRunwayChange(v);
+                if ((filterMaxRunway ?? maxRunwayInData) < v) onMaxRunwayChange(v);
+              }}
+              className="add-range-slider"
+            />
+          </div>
+          <div className="add-range-row">
+            <span className="add-range-sublabel">Max</span>
+            <input
+              type="range"
+              min={0}
+              max={maxRunwayInData}
+              step={100}
+              value={effectiveMaxRunway}
+              onChange={e => {
+                const v = Number(e.target.value);
+                onMaxRunwayChange(v >= maxRunwayInData ? null : v);
+                if (v < filterMinRunway) onMinRunwayChange(v);
+              }}
+              className="add-range-slider"
+            />
+          </div>
+        </div>
+
         <span className="add-filter-count">
           Showing {totalShown} airport{totalShown !== 1 ? 's' : ''}
         </span>

@@ -11,7 +11,7 @@ router.get('/available', authMiddleware, async (req, res) => {
     const airlineId = req.airlineId;
 
     const result = await pool.query(`
-      SELECT ap.iata_code, ap.name, ap.country, ap.continent, ap.category,
+      SELECT ap.iata_code, ap.name, ap.country, ap.continent, ap.category, ap.runway_length_m,
              CASE WHEN d.id IS NOT NULL THEN 1 ELSE 0 END AS is_opened
       FROM airports ap
       LEFT JOIN airline_destinations d
@@ -25,6 +25,7 @@ router.get('/available', authMiddleware, async (req, res) => {
       country: r.country,
       continent: r.continent,
       category: r.category,
+      runway_length_m: r.runway_length_m,
       is_opened: r.is_opened === 1 || r.is_opened === true
     }));
     res.json({ airports });

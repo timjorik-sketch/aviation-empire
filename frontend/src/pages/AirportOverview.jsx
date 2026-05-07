@@ -36,9 +36,12 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
   const [filterContinent, setFilterContinent] = useState(saved?.filterContinent || null);
   const [filterCountry, setFilterCountry]     = useState(saved?.filterCountry || null);
   const [filterCategory, setFilterCategory]   = useState(saved?.filterCategory ?? null);
+  const [filterMinRunway, setFilterMinRunway] = useState(saved?.filterMinRunway ?? 0);
+  const [filterMaxRunway, setFilterMaxRunway] = useState(saved?.filterMaxRunway ?? null);
   const [continentOpen, setContinentOpen]     = useState(saved?.continentOpen || false);
   const [countryOpen, setCountryOpen]         = useState(saved?.countryOpen || false);
   const [categoryOpen, setCategoryOpen]       = useState(saved?.categoryOpen || false);
+  const [runwayOpen, setRunwayOpen]           = useState(saved?.runwayOpen || false);
   const scrollRef = useRef(saved?.scrollY || 0);
 
   // Restore scroll position after mount
@@ -54,7 +57,8 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
       if (savedState) {
         savedState.current = {
           airports, search, filterContinent, filterCountry, filterCategory,
-          continentOpen, countryOpen, categoryOpen,
+          filterMinRunway, filterMaxRunway,
+          continentOpen, countryOpen, categoryOpen, runwayOpen,
           scrollY: window.scrollY,
         };
       }
@@ -102,11 +106,24 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
       .map(([cat, count]) => [Number(cat), count]);
   }, [airports]);
 
+  const maxRunwayInData = useMemo(() => {
+    const lens = airports.map(a => a.runway_length_m).filter(v => v != null);
+    if (!lens.length) return 5000;
+    return Math.max(...lens);
+  }, [airports]);
+
   const filtered = useMemo(() => {
     let list = airports;
     if (filterContinent) list = list.filter(a => a.continent === filterContinent);
     if (filterCountry)   list = list.filter(a => a.country === filterCountry);
     if (filterCategory !== null) list = list.filter(a => a.category === filterCategory);
+    const maxRwy = filterMaxRunway ?? maxRunwayInData;
+    if (filterMinRunway > 0 || filterMaxRunway !== null) {
+      list = list.filter(a => {
+        if (a.runway_length_m == null) return false;
+        return a.runway_length_m >= filterMinRunway && a.runway_length_m <= maxRwy;
+      });
+    }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter(a =>
@@ -116,7 +133,7 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
       );
     }
     return list;
-  }, [airports, search, filterContinent, filterCountry, filterCategory]);
+  }, [airports, search, filterContinent, filterCountry, filterCategory, filterMinRunway, filterMaxRunway, maxRunwayInData]);
 
   // Group key depends on active filters:
   // - no continent filter → group by continent
@@ -156,16 +173,19 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
     }
   };
 
-  const hasFilters = filterContinent || filterCountry || filterCategory !== null || search;
+  const hasFilters = filterContinent || filterCountry || filterCategory !== null || filterMinRunway > 0 || filterMaxRunway !== null || search;
 
   const resetFilters = () => {
     setFilterContinent(null);
     setFilterCountry(null);
     setFilterCategory(null);
+    setFilterMinRunway(0);
+    setFilterMaxRunway(null);
     setSearch('');
     setContinentOpen(false);
     setCountryOpen(false);
     setCategoryOpen(false);
+    setRunwayOpen(false);
   };
 
   if (loading) return (
@@ -299,6 +319,57 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
               )}
             </div>
 
+            {/* Runway length — collapsible */}
+            <div className="am-sb-section">
+              <button className="ao-sb-toggle" onClick={() => setRunwayOpen(o => !o)}>
+                <span className="am-sb-label" style={{ margin: 0 }}>Runway Length</span>
+                <span className="ao-sb-arrow">{runwayOpen ? '▲' : '▼'}</span>
+              </button>
+              {(runwayOpen || filterMinRunway > 0 || filterMaxRunway !== null) && (
+                <div className="ao-runway-box">
+                  <div className="ao-runway-value">
+                    {filterMinRunway.toLocaleString()} – {(filterMaxRunway ?? maxRunwayInData).toLocaleString()} m
+                  </div>
+                  <div className="ao-runway-row">
+                    <span className="ao-runway-sublabel">Min</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={maxRunwayInData}
+                      step={100}
+                      value={filterMinRunway}
+                      onChange={e => {
+                        const v = Number(e.target.value);
+                        setFilterMinRunway(v);
+                        if ((filterMaxRunway ?? maxRunwayInData) < v) setFilterMaxRunway(v);
+                      }}
+                      className="ao-runway-slider"
+                    />
+                  </div>
+                  <div className="ao-runway-row">
+                    <span className="ao-runway-sublabel">Max</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={maxRunwayInData}
+                      step={100}
+                      value={filterMaxRunway ?? maxRunwayInData}
+                      onChange={e => {
+                        const v = Number(e.target.value);
+                        setFilterMaxRunway(v >= maxRunwayInData ? null : v);
+                        if (v < filterMinRunway) setFilterMinRunway(v);
+                      }}
+                      className="ao-runway-slider"
+                    />
+                  </div>
+                  <div className="ao-runway-labels">
+                    <span>0</span>
+                    <span>{maxRunwayInData.toLocaleString()} m</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Reset */}
             {hasFilters && (
               <div className="am-sb-section">
@@ -412,6 +483,26 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
         }
         .ao-sb-toggle:hover .am-sb-label { color: #666; }
         .ao-sb-arrow { font-size: 0.55rem; color: #bbb; }
+
+        /* Runway range slider */
+        .ao-runway-box { padding: 0.3rem 0.1rem 0; }
+        .ao-runway-value {
+          font-size: 0.78rem; font-weight: 700; color: #2C2C2C;
+          text-align: center; margin-bottom: 0.4rem;
+        }
+        .ao-runway-row {
+          display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.25rem;
+        }
+        .ao-runway-sublabel {
+          font-size: 0.65rem; color: #999; width: 22px; flex-shrink: 0;
+        }
+        .ao-runway-slider {
+          flex: 1; accent-color: #2C2C2C; cursor: pointer; min-width: 0;
+        }
+        .ao-runway-labels {
+          display: flex; justify-content: space-between;
+          font-size: 0.65rem; color: #BBB; margin-top: 0.1rem;
+        }
 
         .am-mfr-section { margin-bottom: 1.25rem; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
         .am-mfr-header {

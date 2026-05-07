@@ -1086,7 +1086,7 @@ async function processFlights() {
     const maintAcMap = new Map();
     const dueAcIds = [...new Set(
       pendingMaint
-        .filter(m => currentWeekMin >= m.day_of_week * 1440 + m.start_minutes + m.duration_minutes)
+        .filter(m => currentWeekMin >= m.day_of_week * 1440 + m.start_minutes)
         .map(m => m.aircraft_id)
         .filter(Boolean)
     )];
@@ -1108,7 +1108,7 @@ async function processFlights() {
     }
 
     for (const m of pendingMaint) {
-      const maintWeekMin = m.day_of_week * 1440 + m.start_minutes + m.duration_minutes;
+      const maintWeekMin = m.day_of_week * 1440 + m.start_minutes;
       if (currentWeekMin >= maintWeekMin) {
         const info = maintAcMap.get(m.aircraft_id) || {};
         const condition    = info.condition    ?? 100;

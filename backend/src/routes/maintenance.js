@@ -96,8 +96,8 @@ router.post('/', authMiddleware, async (req, res) => {
     const jsDay = now.getDay();
     const currentDow = jsDay === 0 ? 6 : jsDay - 1; // Mon=0 … Sun=6
     const currentWeekMin = currentDow * 1440 + now.getHours() * 60 + now.getMinutes();
-    const maintEndWeekMin = dow * 1440 + endMinutes;
-    const alreadyPassed = currentWeekMin >= maintEndWeekMin;
+    const maintTriggerWeekMin = dow * 1440 + startMinutes;
+    const alreadyPassed = currentWeekMin >= maintTriggerWeekMin;
 
     const insertResult = await pool.query(`
       INSERT INTO maintenance_schedule

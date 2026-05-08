@@ -427,6 +427,9 @@ async function initDatabase() {
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS last_occ_billing_at TIMESTAMPTZ`,
     // Legacy per-aircraft column kept (not used after airline-level migration)
     `ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS maintenance_program TEXT DEFAULT 'basic'`,
+    // Aircraft is in repair / out of service until this timestamp (set by
+    // Technical (Air) events). Cleared implicitly when the timestamp is in the past.
+    `ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS unavailable_until TIMESTAMPTZ`,
     // Flight delay columns
     `ALTER TABLE flights ADD COLUMN IF NOT EXISTS delay_minutes INTEGER DEFAULT 0`,
     `ALTER TABLE flights ADD COLUMN IF NOT EXISTS delay_reason TEXT`,

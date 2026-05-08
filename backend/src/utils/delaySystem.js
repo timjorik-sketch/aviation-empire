@@ -11,10 +11,14 @@ export const BASE_RATES = {
   technical_ground: 0.012, // 1.2%
   ground_ops:       0.010, // 1.0%
   // ATC rate depends on dep airport category; resolved in rollDelays().
-  weather:          0.005, // 0.5%
   technical_air:    0.003, // 0.3%
   medical:          0.001, // 0.1%
 };
+
+// Aircraft repair time after a Technical (Air) event. Constant 1h regardless
+// of wake category — keeps short-haul rotations from cascading into multiple
+// missed flights.
+export const REPAIR_TIME_MINUTES = 60;
 
 const ATC_RATES_BY_CATEGORY = {
   8: 0.015,
@@ -217,29 +221,18 @@ export async function rollDelaysForFlight(ctx) {
   const rateTechGround = clampRate(BASE_RATES.technical_ground - technicalReduction);
   const rateGroundOps  = clampRate(BASE_RATES.ground_ops - ghCfg.groundOpsReduction);
   const rateAtc        = ATC_RATES_BY_CATEGORY[departureAirport.category] ?? ATC_RATE_DEFAULT;
-  const rateWeather    = BASE_RATES.weather;
   const rateTechAir    = clampRate(BASE_RATES.technical_air - technicalReduction);
   const rateMedical    = BASE_RATES.medical;
 
   // ── Cancel-events (priority order) ───────────────────────────────────────
-  if (rollChance(rateWeather)) {
-    const hasContract = (airline.wet_lease_contract && airline.wet_lease_contract !== 'none');
-    return {
-      type: 'cancel',
-      subtype: 'weather',
-      wetLeased: !!hasContract,
-      satisfactionMalus: hasContract ? 10 : 20,
-    };
-  }
-
   if (rollChance(rateTechAir)) {
-    const turnbackFraction = rand(0.10, 0.50);
+    // Aircraft turns back to its starting point (dep_airport). The CURRENT
+    // flight is scrubbed; passenger handling and the auto-ferry decision
+    // happen in the caller (which knows hub topology).
     return {
       type: 'cancel',
       subtype: 'technical_air',
-      turnbackFraction,
-      // The CURRENT flight aborts mid-air and returns to homebase.
-      // The NEXT scheduled leg (cancel or wet-lease) is decided at landing time.
+      repairMinutes: REPAIR_TIME_MINUTES,
       satisfactionMalus: 10,
     };
   }
@@ -301,11 +294,14 @@ export async function rollDelaysForFlight(ctx) {
 
 // ── Cancel cost calculator ─────────────────────────────────────────────────
 // Used when a flight is cancelled WITHOUT wet-lease coverage.
+// Hotel cost only applies when passengers are stranded at a non-hub
+// (`includeHotel = true`); returning passengers to a hub city doesn't
+// require accommodation.
 // Returns { rebookingCost, hotelCost, totalCost, hotelPerPax }.
-export function calcCancelCosts(seatsSold, hotelPartnership) {
+export function calcCancelCosts(seatsSold, hotelPartnership, includeHotel = true) {
   const hp = HOTEL_PARTNERSHIPS[hotelPartnership] || HOTEL_PARTNERSHIPS.none;
   const rebookingCost = seatsSold * REBOOKING_COST_PER_PAX;
-  const hotelCost = seatsSold * hp.hotelCostPerPax;
+  const hotelCost = includeHotel ? seatsSold * hp.hotelCostPerPax : 0;
   return {
     rebookingCost,
     hotelCost,

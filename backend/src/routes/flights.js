@@ -1524,7 +1524,7 @@ async function processFlights() {
         COALESCE(f.first_price,     0) AS fir_price,
         COALESCE(f.booking_revenue_collected, 0) AS rev_collected,
         f.seats_sold, f.ticket_price,
-        ac.current_location, ac.home_airport, ac.condition,
+        ac.current_location, ac.home_airport, ac.condition, ac.unavailable_until,
         al.wet_lease_contract, al.hotel_partnership,
         al.maintenance_program, al.ground_handling_level,
         at.wake_turbulence_category AS wake_cat,
@@ -1554,9 +1554,15 @@ async function processFlights() {
     }
 
     for (const f of boardingCandidates) {
-      // ── Aircraft-not-at-dep cascade cancel (existing behavior, possibly
-      //    triggered by a prior technical_air event teleporting to homebase) ──
-      if (f.current_location !== null && f.current_location !== f.dep_airport) {
+      // Hub topology used by cascade-cancel (hotel decision) and Tech Air handler.
+      const hubCodes = f.airline_id ? await hubsFor(f.airline_id) : new Set();
+      const depIsHub = hubCodes.has(f.dep_airport);
+      const arrIsHub = hubCodes.has(f.arr_airport);
+
+      // ── Aircraft can't operate this flight: wrong location OR in repair ──
+      const inRepair      = f.unavailable_until && new Date(f.unavailable_until) > now;
+      const wrongLocation = f.current_location !== null && f.current_location !== f.dep_airport;
+      if (wrongLocation || inRepair) {
         const wetLeaseAvailable = f.wet_lease_contract && f.wet_lease_contract !== 'none';
         const totalBooked = (f.booked_eco || 0) + (f.booked_biz || 0) + (f.booked_fir || 0);
         const seats = totalBooked > 0 ? totalBooked : (f.seats_sold || 0);
@@ -1565,7 +1571,7 @@ async function processFlights() {
         let isWetLeased = false;
 
         if (wetLeaseAvailable) {
-          // Wet lease saves the leg: airline pays % of expected revenue
+          // Wet lease covers the leg: airline pays % of expected revenue
           const revenueExpected = f.rev_collected
             ? (f.booked_eco * (f.eco_price || 0)
               + f.booked_biz * (f.biz_price || f.eco_price || 0)
@@ -1574,17 +1580,10 @@ async function processFlights() {
           const share = getWetLeaseShare(f.wet_lease_contract) || 0;
           cost = Math.round(revenueExpected * share);
           isWetLeased = true;
-        } else if (f.rev_collected) {
-          // Refund-style penalty (legacy: 1.2x ticket price). Kept for backwards
-          // compatibility with airlines that haven't subscribed to wet lease.
-          let penalty = 0;
-          penalty += (f.booked_eco || 0) * (f.eco_price || 0) * 1.2;
-          penalty += (f.booked_biz || 0) * (f.biz_price || f.eco_price || 0) * 1.2;
-          penalty += (f.booked_fir || 0) * (f.fir_price || f.eco_price || 0) * 1.2;
-          cost = Math.round(penalty);
         } else {
-          // No revenue collected yet → just charge rebooking + hotel
-          const cancel = calcCancelCosts(seats, f.hotel_partnership);
+          // No wet lease: rebooking always; hotel only when pax are stranded
+          // at a non-hub city (dep_airport not in hubs).
+          const cancel = calcCancelCosts(seats, f.hotel_partnership, !depIsHub);
           cost = cancel.totalCost;
         }
 
@@ -1595,9 +1594,10 @@ async function processFlights() {
 
         if (cost > 0) {
           await pool.query('UPDATE airlines SET balance = balance - $1 WHERE id = $2', [cost, f.airline_id]);
+          const reasonNote = inRepair ? 'aircraft in repair' : `aircraft at ${f.current_location} not ${f.dep_airport}`;
           const desc = isWetLeased
             ? `Wet Lease - ${f.flight_number} (cascade)`
-            : `Cancellation - ${f.flight_number} (aircraft at ${f.current_location} not ${f.dep_airport})`;
+            : `Cancellation - ${f.flight_number} (${reasonNote})`;
           await pool.query(
             "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
             [f.airline_id, -cost, desc]
@@ -1610,7 +1610,7 @@ async function processFlights() {
           cost, satisfactionMalus: isWetLeased ? 10 : 20, wetLeased: isWetLeased,
         });
 
-        console.log(`[FlightProc] ${f.flight_number} cascade-${isWetLeased ? 'WET-LEASED' : 'CANCELLED'} - not at ${f.dep_airport}, at ${f.current_location}, cost $${cost}`);
+        console.log(`[FlightProc] ${f.flight_number} cascade-${isWetLeased ? 'WET-LEASED' : 'CANCELLED'} (${inRepair ? 'in repair' : `at ${f.current_location}`}), cost $${cost}`);
         continue;
       }
 
@@ -1620,9 +1620,6 @@ async function processFlights() {
         await pool.query("UPDATE flights SET status = 'boarding' WHERE id = $1", [f.id]);
         continue;
       }
-
-      const hubCodes = await hubsFor(f.airline_id);
-      const isInboundToHub = hubCodes.has(f.arr_airport);
 
       const decision = await rollDelaysForFlight({
         airline: {
@@ -1642,7 +1639,7 @@ async function processFlights() {
         departureAirport: { iata_code: f.dep_airport, category: f.dep_category || 4 },
         arrivalAirport:   { iata_code: f.arr_airport },
         distanceKm: f.distance_km || 0,
-        isInboundToHub,
+        isInboundToHub: arrIsHub,
       });
 
       // ── Outcome dispatch ────────────────────────────────────────────────
@@ -1685,9 +1682,8 @@ async function processFlights() {
       }
 
       if (decision.type === 'cancel' && decision.subtype === 'medical') {
-        // Diversion: keep flight on path but extend arrival_time and tag with
-        // diversion airport. status moves to 'boarding' (will go in-flight at
-        // dep_time normally). UI/reports surface 'diverted' via delay_reason.
+        // Diversion: flight stays on path but arrival is pushed back, and
+        // diversion_airport_code is recorded for UI/report.
         const dm = decision.diversionDelayMinutes;
         await pool.query(
           `UPDATE flights SET status = 'boarding',
@@ -1697,16 +1693,16 @@ async function processFlights() {
           [dm, decision.diversionAirport, f.id]
         );
 
-        // If medical delay > turnaround at destination → cancel/wet-lease the
-        // very next leg (eagerly, so player sees the impact).
         if (decision.willCancelAtDest) {
           await cancelOrWetLeaseNextLeg({
             aircraftId: f.aircraft_id,
             airlineId: f.airline_id,
-            afterTime: f.arrival_time, // original arrival time; next leg sits after this
+            afterTime: f.arrival_time,
             wetLeaseContract: f.wet_lease_contract || 'none',
             hotelPartnership: f.hotel_partnership || 'none',
             reason: 'medical_cascade',
+            // hotel only if next leg's dep is not a hub — best-effort: we don't
+            // know that here, so let cancelOrWetLeaseNextLeg figure it out.
           });
         }
 
@@ -1721,55 +1717,67 @@ async function processFlights() {
         continue;
       }
 
-      // weather or technical_air: cancel current flight
-      const subtype = decision.subtype;
-      const isWetLeased = !!decision.wetLeased;
-      const totalBooked = (f.booked_eco || 0) + (f.booked_biz || 0) + (f.booked_fir || 0);
-      const seats = totalBooked > 0 ? totalBooked : (f.seats_sold || 0);
+      // ── Technical (Air) ─────────────────────────────────────────────────
+      // Aircraft turns back to its starting point (dep_airport).
+      //   Outbound (dep is hub):  pax rebooked, no hotel (at hub city).
+      //   Inbound  (dep not hub): pax rebooked + hotel (stranded).
+      // Aircraft is unavailable for REPAIR_TIME_MINUTES. For inbound, schedule
+      // an empty ferry from dep to arr after repair so the aircraft eventually
+      // gets back to its hub. The next rotation(s) are handled by the
+      // cascade-cancel hook above (which detects unavailable_until / location).
+      if (decision.type === 'cancel' && decision.subtype === 'technical_air') {
+        const totalBooked = (f.booked_eco || 0) + (f.booked_biz || 0) + (f.booked_fir || 0);
+        const seats = totalBooked > 0 ? totalBooked : (f.seats_sold || 0);
+        const isInbound = !depIsHub; // pax stranded if dep not a hub
 
-      let cost = 0;
-      if (isWetLeased) {
-        const revenue = f.rev_collected
-          ? (f.booked_eco * (f.eco_price || 0)
-            + f.booked_biz * (f.biz_price || f.eco_price || 0)
-            + f.booked_fir * (f.fir_price || f.eco_price || 0))
-          : (f.seats_sold || 0) * (f.ticket_price || 0);
-        const share = getWetLeaseShare(f.wet_lease_contract) || 0;
-        cost = Math.round(revenue * share);
-      } else {
-        const cancel = calcCancelCosts(seats, f.hotel_partnership);
-        cost = cancel.totalCost;
-      }
+        const cancel = calcCancelCosts(seats, f.hotel_partnership, isInbound);
+        const cost = cancel.totalCost;
 
-      await pool.query(
-        "UPDATE flights SET status = 'cancelled', delay_reason = $1, is_wet_leased = $2 WHERE id = $3",
-        [subtype, isWetLeased, f.id]
-      );
-
-      if (cost > 0) {
-        await pool.query('UPDATE airlines SET balance = balance - $1 WHERE id = $2', [cost, f.airline_id]);
-        const desc = isWetLeased
-          ? `Wet Lease - ${f.flight_number} (${subtype})`
-          : `Cancellation - ${f.flight_number} (${subtype})`;
         await pool.query(
-          "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
-          [f.airline_id, -cost, desc]
+          "UPDATE flights SET status = 'cancelled', delay_reason = 'technical_air', is_wet_leased = false WHERE id = $1",
+          [f.id]
         );
+
+        if (cost > 0) {
+          await pool.query('UPDATE airlines SET balance = balance - $1 WHERE id = $2', [cost, f.airline_id]);
+          await pool.query(
+            "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
+            [f.airline_id, -cost, `Cancellation - ${f.flight_number} (technical_air, ${isInbound ? 'inbound' : 'outbound'})`]
+          );
+        }
+
+        // Mark aircraft unavailable for repair. current_location stays at
+        // dep_airport (aircraft turned back, never reached arr).
+        const repairMin = decision.repairMinutes || 60;
+        await pool.query(
+          `UPDATE aircraft SET unavailable_until = NOW() + ($1::int * INTERVAL '1 minute') WHERE id = $2`,
+          [repairMin, f.aircraft_id]
+        );
+
+        // Inbound: schedule ferry flight back to hub after repair completes.
+        if (isInbound && f.distance_km > 0) {
+          // Cruise speed assumption used elsewhere (~850 km/h); keep simple.
+          const flightMin = Math.max(30, Math.round((f.distance_km / 850) * 60));
+          await pool.query(`
+            INSERT INTO transfer_flights
+              (aircraft_id, airline_id, departure_airport, arrival_airport, departure_time, arrival_time, cost, status)
+            VALUES ($1, $2, $3, $4,
+                    NOW() + ($5::int * INTERVAL '1 minute'),
+                    NOW() + (($5 + $6)::int * INTERVAL '1 minute'),
+                    0, 'scheduled')
+          `, [f.aircraft_id, f.airline_id, f.dep_airport, f.arr_airport, repairMin, flightMin]);
+          console.log(`[Delay] ${f.flight_number} TECH-AIR inbound: ferry ${f.dep_airport}→${f.arr_airport} scheduled in ${repairMin}min (+${flightMin}min flight)`);
+        }
+
+        await logDelayEvent({
+          flightId: f.id, airlineId: f.airline_id, aircraftId: f.aircraft_id,
+          eventType: 'technical_air', outcome: 'cancelled',
+          cost, satisfactionMalus: decision.satisfactionMalus, wetLeased: false,
+        });
+
+        console.log(`[Delay] ${f.flight_number} TECH-AIR ${isInbound ? 'INBOUND' : 'OUTBOUND'}: cancelled, repair ${repairMin}min, cost $${cost}`);
+        continue;
       }
-
-      // For technical_air the aircraft "turns back" to homebase. Teleport
-      // current_location so the next scheduled leg cascades correctly.
-      if (subtype === 'technical_air' && f.aircraft_id && f.home_airport) {
-        await pool.query('UPDATE aircraft SET current_location = $1 WHERE id = $2', [f.home_airport, f.aircraft_id]);
-      }
-
-      await logDelayEvent({
-        flightId: f.id, airlineId: f.airline_id, aircraftId: f.aircraft_id,
-        eventType: subtype, outcome: isWetLeased ? 'wet_leased' : 'cancelled',
-        cost, satisfactionMalus: decision.satisfactionMalus, wetLeased: isWetLeased,
-      });
-
-      console.log(`[Delay] ${f.flight_number} ${subtype.toUpperCase()} ${isWetLeased ? 'WET-LEASED' : 'CANCELLED'}, cost $${cost}`);
     }
   } catch (error) {
     console.error('Process flights error:', error);

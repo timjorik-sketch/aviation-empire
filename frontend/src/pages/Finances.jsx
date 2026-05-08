@@ -300,9 +300,9 @@ export default function Finances({ airline, onBack, onNavigateToAirport, onNavig
         {error && <div className="error-message" style={{ marginBottom: '1rem' }}>{error}</div>}
 
         {/* ── 4 KPI Cards ── */}
-        <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
+        <div className="fn-kpi-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '20px' }}>
           {/* Balance */}
-          <div style={{ background: '#fff', borderRadius: '8px', padding: '20px 24px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', flex: '1 1 0', minWidth: '160px' }}>
+          <div style={{ background: '#fff', borderRadius: '8px', padding: '20px 24px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
             <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', marginBottom: '6px' }}>Current Balance</div>
             <div style={{ fontSize: '1.55rem', fontWeight: 700, color: '#2C2C2C', lineHeight: 1.1 }}>{fmt(data?.balance)}</div>
             {data?.balance_prev_week != null && (() => {
@@ -327,7 +327,7 @@ export default function Finances({ airline, onBack, onNavigateToAirport, onNavig
             const positive = inverse ? (pct < 0) : (pct > 0);
             const valColor = isProfit ? (curr >= 0 ? '#16a34a' : '#dc2626') : '#2C2C2C';
             return (
-              <div key={label} style={{ background: '#fff', borderRadius: '8px', padding: '20px 24px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', flex: '1 1 0', minWidth: '160px' }}>
+              <div key={label} style={{ background: '#fff', borderRadius: '8px', padding: '20px 24px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
                 <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', marginBottom: '6px' }}>{label}</div>
                 <div style={{ fontSize: '1.55rem', fontWeight: 700, color: valColor, lineHeight: 1.1 }}>
                   {isProfit && curr > 0 ? '+' : ''}{fmt(curr)}
@@ -360,7 +360,7 @@ export default function Finances({ airline, onBack, onNavigateToAirport, onNavig
             const remaining = nxt != null ? Math.max(0, nxt - tp) : 0;
             const etaDays = nxt != null && dailyRate > 0 ? Math.ceil(remaining / dailyRate) : null;
             return (
-              <div style={{ background: '#fff', borderRadius: '8px', padding: '20px 24px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', flex: '1 1 0', minWidth: '160px' }}>
+              <div style={{ background: '#fff', borderRadius: '8px', padding: '20px 24px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
                 <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', marginBottom: '6px' }}>Total Points</div>
                 <div style={{ fontSize: '1.55rem', fontWeight: 700, color: '#2C2C2C', lineHeight: 1.1 }}>{fmtNum(tp)}</div>
                 <div style={{ marginTop: '6px', fontSize: '0.75rem', color: '#888', display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
@@ -387,7 +387,7 @@ export default function Finances({ airline, onBack, onNavigateToAirport, onNavig
             const yest  = xp.yesterday ?? 0;
             const fmtNum = (n) => Number(n).toLocaleString();
             return (
-              <div style={{ background: '#fff', borderRadius: '8px', padding: '20px 24px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', flex: '1 1 0', minWidth: '160px' }}>
+              <div style={{ background: '#fff', borderRadius: '8px', padding: '20px 24px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
                 <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', marginBottom: '6px' }}>Points Today</div>
                 <div style={{ fontSize: '1.55rem', fontWeight: 700, color: '#2C2C2C', lineHeight: 1.1 }}>{fmtNum(today)}</div>
                 <div style={{ marginTop: '6px', fontSize: '0.75rem', color: '#888' }}>
@@ -617,8 +617,11 @@ export default function Finances({ airline, onBack, onNavigateToAirport, onNavig
             .fn-prof-grid { grid-template-columns: 1fr !important; }
             .fn-charts-row { grid-template-columns: 1fr !important; }
           }
-          @media (max-width: 700px) {
-            .fn-kpi-row { flex-direction: column !important; }
+          @media (max-width: 900px) {
+            .fn-kpi-row { grid-template-columns: repeat(2, 1fr) !important; }
+          }
+          @media (max-width: 600px) {
+            .fn-kpi-row { grid-template-columns: 1fr !important; }
           }
           @media (max-width: 480px) {
             .fn-3col { gap: 0.5rem !important; }

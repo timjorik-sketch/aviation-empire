@@ -526,7 +526,7 @@ async function initDatabase() {
     (60,'Airbus','A350-900 ULR','Airbus A350-900 ULR',440,18000,903,2850,2200,0.033,0.043,'H',370000000,14,2,'Aircraft_Airbus_350-900.png'),
     (61,'Boeing','777-200LR','Boeing 777-200LR',440,17370,892,3100,2100,0.036,0.046,'H',360000000,13,2,'Aircraft_Boeing_777-200.png'),
     (62,'Airbus','A321 XLR','Airbus A321 XLR',206,8700,840,2500,1980,0.022,0.028,'M',142000000,11,2,'Aircraft_Airbus_321_Neo.png'),
-    (63,'Airbus','A320neo','Airbus A320neo',180,6300,840,2100,1540,0.021,0.027,'M',110000000,9,2,'Aircraft_Airbus_320_Neo.png'),
+    (63,'Airbus','A320neo','Airbus A320neo',180,6300,840,2100,1900,0.021,0.027,'M',110000000,9,2,'Aircraft_Airbus_320_Neo.png'),
     (64,'Boeing','747-8','Boeing 747-8',467,14320,920,3300,2200,0.044,0.055,'H',418000000,15,2,'Aircraft_Boeing_747-800.png')
     ON CONFLICT (id) DO NOTHING
   `, null, 'aircraft_types seed');
@@ -570,6 +570,7 @@ async function initDatabase() {
     ["UPDATE aircraft_types SET min_runway_landing_m=1690, fuel_consumption_per_km=2.8  WHERE full_name='Boeing 737-600'"],
     ["UPDATE aircraft_types SET min_runway_landing_m=1510, fuel_consumption_per_km=1.8  WHERE full_name='Bombardier CRJ-200'"],
     ["UPDATE aircraft_types SET min_runway_landing_m=2090, fuel_consumption_per_km=3.0  WHERE full_name='Airbus A320'"],
+    ["UPDATE aircraft_types SET min_runway_landing_m=1900 WHERE full_name='Airbus A320neo'"],
     ["UPDATE aircraft_types SET min_runway_landing_m=1828, fuel_consumption_per_km=2.7  WHERE full_name='Airbus A318'"],
     ["UPDATE aircraft_types SET min_runway_landing_m=1800, fuel_consumption_per_km=2.6  WHERE full_name='Boeing 737-8 Max'"],
     ["UPDATE aircraft_types SET min_runway_landing_m=1940, fuel_consumption_per_km=3.3  WHERE full_name='Boeing 737-300'"],

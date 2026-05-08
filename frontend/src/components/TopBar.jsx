@@ -57,14 +57,6 @@ export default function TopBar({ onBack, backLabel = 'Back', balance: balancePro
   return (
     <div className="topnav-shell">
       <div className="topnav">
-        <div className="topnav-left">
-          {onBack && (
-            <button className="topnav-back" onClick={onBack} title={backLabel} aria-label={backLabel}>
-              ←
-            </button>
-          )}
-        </div>
-
         {nav && (
           <nav className="topnav-items">
             {NAV_ITEMS.map(item => {
@@ -83,6 +75,11 @@ export default function TopBar({ onBack, backLabel = 'Back', balance: balancePro
         )}
 
         <div className="topnav-right">
+          {onBack && (
+            <button className="topnav-back" onClick={onBack} title={backLabel} aria-label={backLabel}>
+              ←
+            </button>
+          )}
           {balance != null && (
             <div className="topnav-balance">
               <span className="topnav-balance-label">Balance</span>
@@ -123,7 +120,6 @@ export default function TopBar({ onBack, backLabel = 'Back', balance: balancePro
           gap: 1rem;
           padding: 0.6rem 1rem;
         }
-        .topnav-left { flex: 0 0 40px; }
         .topnav-right {
           flex: 0 0 auto;
           display: flex;
@@ -135,7 +131,7 @@ export default function TopBar({ onBack, backLabel = 'Back', balance: balancePro
           display: flex;
           align-items: center;
           gap: 0.15rem;
-          justify-content: center;
+          justify-content: flex-start;
           flex-wrap: wrap;
         }
 

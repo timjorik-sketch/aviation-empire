@@ -49,6 +49,8 @@ import AdminPanel from './pages/AdminPanel';
 import AdminPlayers from './pages/AdminPlayers';
 import AdminInvites from './pages/AdminInvites';
 import SatisfactionRating, { getSatColor, scoreToRating } from './components/SatisfactionRating.jsx';
+import TopBar from './components/TopBar.jsx';
+import { NavContext } from './components/NavContext.jsx';
 import './App.css';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -474,9 +476,19 @@ function App() {
     setCurrentPage('airport');
   };
 
+  const navContextValue = {
+    currentPage,
+    navigate,
+    user,
+    activeAirline,
+    onLogout: handleLogout,
+    onChangeAirline: () => setShowChangeModal(true),
+  };
+  const wrap = (el) => <NavContext.Provider value={navContextValue}>{el}</NavContext.Provider>;
+
   // Sub-pages — all use activeAirline
   if (currentPage === 'airport' && selectedAirportCode) {
-    return (
+    return wrap(
       <AirportPage
         code={selectedAirportCode}
         onBack={() => setCurrentPage(airportReturnPage)}
@@ -487,7 +499,7 @@ function App() {
     );
   }
   if (currentPage === 'aircraft-detail' && selectedAircraftId) {
-    return (
+    return wrap(
       <ErrorBoundary>
         <AircraftDetail
           aircraftId={selectedAircraftId}
@@ -499,7 +511,7 @@ function App() {
     );
   }
   if (currentPage === 'fleet') {
-    return (
+    return wrap(
       <FleetPage
         airline={activeAirline}
         onBack={() => setCurrentPage('dashboard')}
@@ -511,7 +523,7 @@ function App() {
     );
   }
   if (currentPage === 'marketplace') {
-    return (
+    return wrap(
       <AircraftMarketplace
         airline={activeAirline}
         onBalanceUpdate={handleBalanceUpdate}
@@ -520,7 +532,7 @@ function App() {
     );
   }
   if (currentPage === 'routes') {
-    return (
+    return wrap(
       <RoutePlanner
         airline={activeAirline}
         onBack={() => setCurrentPage(previousPage)}
@@ -531,7 +543,7 @@ function App() {
     );
   }
   if (currentPage === 'flights') {
-    return (
+    return wrap(
       <FlightOperations
         airline={activeAirline}
         onBalanceUpdate={handleBalanceUpdate}
@@ -543,7 +555,7 @@ function App() {
     );
   }
   if (currentPage === 'flight-schedule') {
-    return (
+    return wrap(
       <FlightSchedule
         airline={activeAirline}
         onBack={() => setCurrentPage(previousPage || 'dashboard')}
@@ -553,28 +565,28 @@ function App() {
     );
   }
   if (currentPage === 'finances') {
-    return <Finances airline={activeAirline} onBack={() => setCurrentPage('dashboard')} onNavigateToAirport={(code) => navigateToAirport(code, 'finances')} onNavigateToAircraft={(id) => { setPreviousPage('finances'); setSelectedAircraftId(id); setCurrentPage('aircraft-detail'); }} />;
+    return wrap(<Finances airline={activeAirline} onBack={() => setCurrentPage('dashboard')} onNavigateToAirport={(code) => navigateToAirport(code, 'finances')} onNavigateToAircraft={(id) => { setPreviousPage('finances'); setSelectedAircraftId(id); setCurrentPage('aircraft-detail'); }} />);
   }
   if (currentPage === 'service-profiles') {
-    return <ServiceProfiles airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Dashboard'} />;
+    return wrap(<ServiceProfiles airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Dashboard'} />);
   }
   if (currentPage === 'cabin-profiles') {
-    return <CabinProfiles airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Dashboard'} />;
+    return wrap(<CabinProfiles airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Dashboard'} />);
   }
   if (currentPage === 'ops-control') {
-    return <OperationsControlCenter airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Flight Operations'} />;
+    return wrap(<OperationsControlCenter airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Flight Operations'} />);
   }
   if (currentPage === 'hubs') {
-    return <HubsDestinations airline={activeAirline} onBack={() => setCurrentPage(hubsBackPage)} backLabel={PAGE_LABELS[hubsBackPage] || 'Dashboard'} onNavigateToAirport={(code) => navigateToAirport(code, 'hubs')} onBalanceUpdate={handleBalanceUpdate} onNavigate={(page) => navigate(page)} />;
+    return wrap(<HubsDestinations airline={activeAirline} onBack={() => setCurrentPage(hubsBackPage)} backLabel={PAGE_LABELS[hubsBackPage] || 'Dashboard'} onNavigateToAirport={(code) => navigateToAirport(code, 'hubs')} onBalanceUpdate={handleBalanceUpdate} onNavigate={(page) => navigate(page)} />);
   }
   if (currentPage === 'airport-overview') {
-    return <AirportOverview airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Flight Operations'} onNavigateToAirport={(code) => navigateToAirport(code, 'airport-overview')} onBalanceUpdate={handleBalanceUpdate} savedState={airportOverviewState} />;
+    return wrap(<AirportOverview airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Flight Operations'} onNavigateToAirport={(code) => navigateToAirport(code, 'airport-overview')} onBalanceUpdate={handleBalanceUpdate} savedState={airportOverviewState} />);
   }
   if (currentPage === 'personnel') {
-    return <Personnel airline={activeAirline} onBack={() => setCurrentPage('dashboard')} />;
+    return wrap(<Personnel airline={activeAirline} onBack={() => setCurrentPage('dashboard')} />);
   }
   if (currentPage === 'edit-profile') {
-    return (
+    return wrap(
       <EditProfile
         user={user}
         onBack={() => setCurrentPage('dashboard')}
@@ -584,7 +596,7 @@ function App() {
     );
   }
   if (currentPage === 'route-map') {
-    return (
+    return wrap(
       <RouteMap
         airline={activeAirline}
         onBack={() => setCurrentPage('dashboard')}
@@ -592,16 +604,16 @@ function App() {
     );
   }
   if (currentPage === 'leaderboards') {
-    return <Leaderboards airline={activeAirline} onBack={() => setCurrentPage('dashboard')} />;
+    return wrap(<Leaderboards airline={activeAirline} onBack={() => setCurrentPage('dashboard')} />);
   }
   if (currentPage === 'admin') {
-    return <AdminPanel airline={activeAirline} onBack={() => setCurrentPage('dashboard')} onNavigate={setCurrentPage} />;
+    return wrap(<AdminPanel airline={activeAirline} onBack={() => setCurrentPage('dashboard')} onNavigate={setCurrentPage} />);
   }
   if (currentPage === 'admin-players') {
-    return <AdminPlayers airline={activeAirline} onBack={() => setCurrentPage('admin')} />;
+    return wrap(<AdminPlayers airline={activeAirline} onBack={() => setCurrentPage('admin')} />);
   }
   if (currentPage === 'admin-invites') {
-    return <AdminInvites airline={activeAirline} onBack={() => setCurrentPage('admin')} />;
+    return wrap(<AdminInvites airline={activeAirline} onBack={() => setCurrentPage('admin')} />);
   }
 
   const closeChangeModal = () => { setShowChangeModal(false); setShowCreateForm(false); };
@@ -674,7 +686,7 @@ function App() {
     return null;
   }
 
-  return (
+  return wrap(
     <div className="app">
 
       {/* ── Level-up celebration popup ── */}
@@ -848,7 +860,9 @@ function App() {
 
       <div className="hp-container">
 
-        {/* ── Info strip ── */}
+        {activeAirline && <TopBar />}
+
+        {/* ── Info strip (identity only — actions live in TopBar profile menu) ── */}
         <div className="hp-info-strip">
           <div className="hp-identity">
             {activeAirline ? (
@@ -869,16 +883,13 @@ function App() {
               </>
             )}
           </div>
-          <div className="hp-strip-actions">
-            <button className="hp-btn-change" onClick={() => setShowChangeModal(true)}>
-              {airlines.length === 0 ? '+ Create Airline' : 'Change Airline'}
-            </button>
-            <button className="hp-btn-logout-strip" onClick={() => setCurrentPage('edit-profile')}>Edit Profile</button>
-            {user?.is_admin && (
-              <button className="hp-btn-logout-strip" onClick={() => setCurrentPage('admin')}>Admin</button>
-            )}
-            <button className="hp-btn-logout-strip" onClick={handleLogout}>Logout</button>
-          </div>
+          {!activeAirline && (
+            <div className="hp-strip-actions">
+              <button className="hp-btn-change" onClick={() => setShowChangeModal(true)}>
+                {airlines.length === 0 ? '+ Create Airline' : 'Change Airline'}
+              </button>
+            </div>
+          )}
         </div>
 
         <VerifyEmailBanner user={user} />
@@ -1109,25 +1120,6 @@ function App() {
                       </tbody>
                     </table>
                   )}
-                </div>
-
-                {/* Manage navigation */}
-                <div className="hp-sidebar-card">
-                  <div className="hp-sidebar-title">Manage {activeAirline.name}</div>
-                  <div className="fo-nav-list">
-                    {[
-                      { label: 'Fleet Management', page: 'fleet'      },
-                      { label: 'Flight Operations', page: 'flights'   },
-                      { label: 'Finances',          page: 'finances'  },
-                      { label: 'Staff & Crew',      page: 'personnel' },
-                      { label: 'Leaderboards',      page: 'leaderboards' },
-                    ].map(({ label, page }) => (
-                      <button key={page} className="fo-nav-btn" onClick={() => setCurrentPage(page)}>
-                        {label}
-                        <span className="fo-nav-arrow">›</span>
-                      </button>
-                    ))}
-                  </div>
                 </div>
 
               </div>

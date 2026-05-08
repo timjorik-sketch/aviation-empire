@@ -282,27 +282,6 @@ function FlightOperations({ airline, onBalanceUpdate, onBack, onNavigateToAirpor
 
           {/* Right column */}
           <div className="fo-sidebar-col">
-            {/* Manage Operations */}
-            <div className="info-card" style={{ padding: 0, overflow: 'hidden' }}>
-              <div style={{ background: '#2C2C2C', padding: '14px 20px', borderRadius: '8px 8px 0 0' }}>
-                <span className="card-header-bar-title" style={{ color: '#fff' }}>Manage Operations</span>
-              </div>
-              <div className="fo-nav-list">
-                {[
-                  { label: 'Route Planning',             page: 'routes'            },
-                  { label: 'Service Profiles',           page: 'service-profiles'  },
-                  { label: 'Operations Control Center',  page: 'ops-control'       },
-                  { label: 'Network',                    page: 'hubs'              },
-                  { label: 'Airport Overview',           page: 'airport-overview'  },
-                ].map(({ label, page }) => (
-                  <button key={page} className="fo-nav-btn" onClick={() => onNavigate?.(page)}>
-                    {label}
-                    <span className="fo-nav-arrow">›</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {/* Client Feedback */}
             <div className="info-card" style={{ padding: 0, overflow: 'hidden' }}>
               <div style={{ background: '#2C2C2C', padding: '14px 20px', borderRadius: '8px 8px 0 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

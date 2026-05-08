@@ -534,24 +534,6 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
         {/* Right column: Manage Fleet + Aircraft on Order */}
         <div className="fleet-row-side">
 
-          {/* Manage Fleet */}
-          <div style={{ background: 'white', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', overflow: 'hidden' }}>
-            <div style={{ background: '#2C2C2C', padding: '14px 20px' }}>
-              <span className="fleet-section-bar-title">Manage Fleet</span>
-            </div>
-            <div className="fo-nav-list">
-              {[
-                { label: 'Airplane Market', action: () => onOpenMarketplace?.()          },
-                { label: 'Cabin Profiles',  action: () => onNavigate?.('cabin-profiles') },
-              ].map(({ label, action }) => (
-                <button key={label} className="fo-nav-btn" onClick={action}>
-                  {label}
-                  <span className="fo-nav-arrow">›</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
           {/* Aircraft on Order */}
           {orders.length > 0 && (
             <div style={{ background: 'white', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', overflow: 'hidden' }}>

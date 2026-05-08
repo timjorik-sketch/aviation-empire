@@ -1524,8 +1524,9 @@ async function processFlights() {
         COALESCE(f.first_price,     0) AS fir_price,
         COALESCE(f.booking_revenue_collected, 0) AS rev_collected,
         f.seats_sold, f.ticket_price,
-        ac.current_location, ac.home_airport, ac.condition, ac.maintenance_program,
+        ac.current_location, ac.home_airport, ac.condition,
         al.wet_lease_contract, al.hotel_partnership,
+        al.maintenance_program, al.ground_handling_level,
         at.wake_turbulence_category AS wake_cat,
         at.min_runway_landing_m AS min_runway,
         dep_apt.category AS dep_category
@@ -1626,13 +1627,14 @@ async function processFlights() {
       const decision = await rollDelaysForFlight({
         airline: {
           id: f.airline_id,
-          wet_lease_contract: f.wet_lease_contract || 'none',
-          hotel_partnership:  f.hotel_partnership  || 'none',
+          wet_lease_contract:    f.wet_lease_contract    || 'none',
+          hotel_partnership:     f.hotel_partnership     || 'none',
+          maintenance_program:   f.maintenance_program   || 'basic',
+          ground_handling_level: f.ground_handling_level || 'standard',
         },
         aircraft: {
           id: f.aircraft_id,
           condition: f.condition,
-          maintenance_program: f.maintenance_program || 'basic',
           home_airport: f.home_airport,
           wakeCategory: f.wake_cat || 'M',
           minRunwayLanding: f.min_runway || 0,

@@ -126,13 +126,14 @@ export async function getAirlineHubCodes(airlineId) {
   return out;
 }
 
-export async function getGroundHandlingLevel(airlineId, airportCode) {
-  if (!airportCode) return 'standard';
+// Ground handling is now an airline-wide setting (one level applies to all
+// hubs). Kept as a function so existing callers don't break.
+export async function getGroundHandlingLevel(airlineId) {
   const r = await pool.query(
-    'SELECT level FROM airline_ground_handling WHERE airline_id = $1 AND airport_code = $2',
-    [airlineId, airportCode]
+    'SELECT ground_handling_level FROM airlines WHERE id = $1',
+    [airlineId]
   );
-  return r.rows[0]?.level || 'standard';
+  return r.rows[0]?.ground_handling_level || 'standard';
 }
 
 // ── Diversion airport finder ──────────────────────────────────────────────
@@ -205,13 +206,12 @@ export async function rollDelaysForFlight(ctx) {
 
   const wakeCat = aircraft.wakeCategory || 'M';
 
-  // Maintenance program reduces technical_ground & technical_air
-  const maintProg = MAINTENANCE_PROGRAMS[aircraft.maintenance_program] || MAINTENANCE_PROGRAMS.basic;
+  // Airline-level maintenance program reduces technical_ground & technical_air
+  const maintProg = MAINTENANCE_PROGRAMS[airline.maintenance_program] || MAINTENANCE_PROGRAMS.basic;
   const technicalReduction = maintProg.technicalReduction;
 
-  // Ground handling level at departure airport reduces ground_ops
-  const ghLevel = await getGroundHandlingLevel(airline.id, departureAirport.iata_code);
-  const ghCfg = GROUND_HANDLING_LEVELS[ghLevel] || GROUND_HANDLING_LEVELS.standard;
+  // Airline-level ground handling reduces ground_ops at departure airport
+  const ghCfg = GROUND_HANDLING_LEVELS[airline.ground_handling_level] || GROUND_HANDLING_LEVELS.standard;
 
   // Effective rates
   const rateTechGround = clampRate(BASE_RATES.technical_ground - technicalReduction);

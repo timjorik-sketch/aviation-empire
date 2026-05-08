@@ -1,4 +1,8 @@
 // Operations Control Center (OCC) routes — player-facing config + weekly report.
+// All four contracts (wet lease, hotel partnership, maintenance program,
+// ground handling level) are airline-wide single settings. The maintenance
+// cost still scales with fleet size, and ground handling cost still scales
+// with hub count — but the LEVEL is one choice for the whole airline.
 import express from 'express';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
@@ -17,63 +21,34 @@ router.get('/', authMiddleware, async (req, res) => {
   if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
   try {
     const airlineRes = await pool.query(
-      'SELECT id, wet_lease_contract, hotel_partnership FROM airlines WHERE id = $1',
+      `SELECT id, wet_lease_contract, hotel_partnership,
+              maintenance_program, ground_handling_level
+       FROM airlines WHERE id = $1`,
       [req.airlineId]
     );
     const airline = airlineRes.rows[0];
     if (!airline) return res.status(404).json({ error: 'Airline not found' });
 
-    // Aircraft list with maintenance programs
-    const acRes = await pool.query(`
-      SELECT a.id, a.registration, a.name, a.maintenance_program, a.home_airport,
-             t.full_name AS type_name, t.wake_turbulence_category AS wake_cat
-      FROM aircraft a
-      LEFT JOIN aircraft_types t ON a.aircraft_type_id = t.id
-      WHERE a.airline_id = $1
-      ORDER BY a.registration
-    `, [req.airlineId]);
+    const fleetCountRes = await pool.query(
+      'SELECT COUNT(*)::int AS n FROM aircraft WHERE airline_id = $1',
+      [req.airlineId]
+    );
+    const fleetCount = fleetCountRes.rows[0]?.n || 0;
 
-    // Hub list (home_base + primary_hub + secondary hubs)
-    const hubCodes = [...await getAirlineHubCodes(req.airlineId)];
-    let hubs = [];
-    if (hubCodes.length) {
-      const hubRes = await pool.query(`
-        SELECT iata_code, name, country, category
-        FROM airports WHERE iata_code = ANY($1::text[])
-        ORDER BY iata_code
-      `, [hubCodes]);
-      const ghRes = await pool.query(
-        "SELECT airport_code, level FROM airline_ground_handling WHERE airline_id = $1",
-        [req.airlineId]
-      );
-      const ghLevelByCode = new Map(ghRes.rows.map(r => [r.airport_code, r.level]));
-      hubs = hubRes.rows.map(r => ({
-        iata_code: r.iata_code,
-        name: r.name,
-        country: r.country,
-        category: r.category,
-        ground_handling_level: ghLevelByCode.get(r.iata_code) || 'standard',
-      }));
-    }
+    const hubCount = (await getAirlineHubCodes(req.airlineId)).size;
 
     res.json({
-      wet_lease_contract: airline.wet_lease_contract || 'none',
-      hotel_partnership:  airline.hotel_partnership  || 'none',
-      aircraft: acRes.rows.map(a => ({
-        id: a.id,
-        registration: a.registration,
-        name: a.name,
-        type_name: a.type_name,
-        wake_cat: a.wake_cat,
-        home_airport: a.home_airport,
-        maintenance_program: a.maintenance_program || 'basic',
-      })),
-      hubs,
+      wet_lease_contract:    airline.wet_lease_contract    || 'none',
+      hotel_partnership:     airline.hotel_partnership     || 'none',
+      maintenance_program:   airline.maintenance_program   || 'basic',
+      ground_handling_level: airline.ground_handling_level || 'standard',
+      fleet_count: fleetCount,
+      hub_count:   hubCount,
       catalog: {
-        maintenance_programs: MAINTENANCE_PROGRAMS,
+        maintenance_programs:   MAINTENANCE_PROGRAMS,
         ground_handling_levels: GROUND_HANDLING_LEVELS,
-        wet_lease_contracts: WET_LEASE_CONTRACTS,
-        hotel_partnerships: HOTEL_PARTNERSHIPS,
+        wet_lease_contracts:    WET_LEASE_CONTRACTS,
+        hotel_partnerships:     HOTEL_PARTNERSHIPS,
       },
     });
   } catch (err) {
@@ -98,29 +73,19 @@ router.patch('/hotel-partnership', authMiddleware, async (req, res) => {
   res.json({ ok: true, partnership });
 });
 
-// PATCH /api/occ/aircraft/:id/maintenance  { program: 'basic'|'enhanced'|'premium' }
-router.patch('/aircraft/:id/maintenance', authMiddleware, async (req, res) => {
+// PATCH /api/occ/maintenance  { program: 'basic'|'enhanced'|'premium' }
+router.patch('/maintenance', authMiddleware, async (req, res) => {
   const { program } = req.body || {};
   if (!MAINTENANCE_PROGRAMS[program]) return res.status(400).json({ error: 'Invalid program' });
-  // Verify aircraft belongs to this airline
-  const own = await pool.query('SELECT id FROM aircraft WHERE id = $1 AND airline_id = $2', [req.params.id, req.airlineId]);
-  if (!own.rows[0]) return res.status(404).json({ error: 'Aircraft not found' });
-  await pool.query('UPDATE aircraft SET maintenance_program = $1 WHERE id = $2', [program, req.params.id]);
+  await pool.query('UPDATE airlines SET maintenance_program = $1 WHERE id = $2', [program, req.airlineId]);
   res.json({ ok: true, program });
 });
 
-// PATCH /api/occ/hub/:code/ground-handling  { level: 'standard'|'priority'|'premium' }
-router.patch('/hub/:code/ground-handling', authMiddleware, async (req, res) => {
+// PATCH /api/occ/ground-handling  { level: 'standard'|'priority'|'premium' }
+router.patch('/ground-handling', authMiddleware, async (req, res) => {
   const { level } = req.body || {};
   if (!GROUND_HANDLING_LEVELS[level]) return res.status(400).json({ error: 'Invalid level' });
-  // Verify the airport is actually a hub for this airline
-  const hubCodes = await getAirlineHubCodes(req.airlineId);
-  if (!hubCodes.has(req.params.code)) return res.status(403).json({ error: 'Not a hub for this airline' });
-  await pool.query(`
-    INSERT INTO airline_ground_handling (airline_id, airport_code, level)
-    VALUES ($1, $2, $3)
-    ON CONFLICT (airline_id, airport_code) DO UPDATE SET level = EXCLUDED.level
-  `, [req.airlineId, req.params.code, level]);
+  await pool.query('UPDATE airlines SET ground_handling_level = $1 WHERE id = $2', [level, req.airlineId]);
   res.json({ ok: true, level });
 });
 
@@ -130,7 +95,6 @@ router.get('/weekly-report', authMiddleware, async (req, res) => {
   try {
     const sinceClause = "created_at >= NOW() - INTERVAL '7 days'";
 
-    // Total flights this week (all statuses)
     const flightsRes = await pool.query(`
       SELECT
         COUNT(*) FILTER (WHERE status IN ('completed','cancelled')) AS finalized,

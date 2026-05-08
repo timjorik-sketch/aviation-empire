@@ -380,7 +380,8 @@ async function processPayroll() {
 async function processOccBilling() {
   try {
     const dueResult = await pool.query(`
-      SELECT id, name, wet_lease_contract, hotel_partnership
+      SELECT id, name, wet_lease_contract, hotel_partnership,
+             maintenance_program, ground_handling_level
       FROM airlines
       WHERE last_occ_billing_at IS NULL
          OR last_occ_billing_at + INTERVAL '7 days' <= NOW()
@@ -389,30 +390,29 @@ async function processOccBilling() {
 
     let processed = 0;
     for (const airline of dueResult.rows) {
-      // 1. Maintenance program (sum across active aircraft)
-      const acRes = await pool.query(
-        "SELECT COALESCE(maintenance_program, 'basic') AS prog, COUNT(*)::int AS n FROM aircraft WHERE airline_id = $1 GROUP BY prog",
+      // 1. Maintenance: airline-wide program × fleet size
+      const fleetRes = await pool.query(
+        "SELECT COUNT(*)::int AS n FROM aircraft WHERE airline_id = $1",
         [airline.id]
       );
-      let maintCost = 0;
-      let enhancedN = 0, premiumN = 0;
-      for (const row of acRes.rows) {
-        const cfg = MAINTENANCE_PROGRAMS[row.prog] || MAINTENANCE_PROGRAMS.basic;
-        maintCost += cfg.weeklyCost * row.n;
-        if (row.prog === 'enhanced') enhancedN = row.n;
-        if (row.prog === 'premium')  premiumN  = row.n;
-      }
+      const fleetCount = fleetRes.rows[0]?.n || 0;
+      const maintCfg = MAINTENANCE_PROGRAMS[airline.maintenance_program] || MAINTENANCE_PROGRAMS.basic;
+      const maintCost = maintCfg.weeklyCost * fleetCount;
 
-      // 2. Ground handling (sum across configured hubs)
-      const ghRes = await pool.query(
-        "SELECT level, COUNT(*)::int AS n FROM airline_ground_handling WHERE airline_id = $1 GROUP BY level",
-        [airline.id]
-      );
-      let ghCost = 0;
-      for (const row of ghRes.rows) {
-        const cfg = GROUND_HANDLING_LEVELS[row.level] || GROUND_HANDLING_LEVELS.standard;
-        ghCost += cfg.weeklyCost * row.n;
-      }
+      // 2. Ground handling: airline-wide level × hub count
+      //    Hubs = home_base + primary_hub + airline_destinations.destination_type='hub'
+      const hubRes = await pool.query(`
+        SELECT (
+          (CASE WHEN home_airport_code IS NOT NULL THEN 1 ELSE 0 END) +
+          (CASE WHEN primary_hub_airport_code IS NOT NULL THEN 1 ELSE 0 END) +
+          COALESCE((SELECT COUNT(*) FROM airline_destinations
+                    WHERE airline_id = $1 AND destination_type = 'hub'), 0)
+        )::int AS n
+        FROM airlines WHERE id = $1
+      `, [airline.id]);
+      const hubCount = hubRes.rows[0]?.n || 0;
+      const ghCfg = GROUND_HANDLING_LEVELS[airline.ground_handling_level] || GROUND_HANDLING_LEVELS.standard;
+      const ghCost = ghCfg.weeklyCost * hubCount;
 
       // 3. Wet lease
       const wlCfg = WET_LEASE_CONTRACTS[airline.wet_lease_contract] || WET_LEASE_CONTRACTS.none;
@@ -432,13 +432,13 @@ async function processOccBilling() {
       if (maintCost > 0) {
         await pool.query(
           "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
-          [airline.id, -Math.round(maintCost), `Maintenance Program (${enhancedN} Enhanced, ${premiumN} Premium)`]
+          [airline.id, -Math.round(maintCost), `Maintenance Program (${airline.maintenance_program}, ${fleetCount} aircraft)`]
         );
       }
       if (ghCost > 0) {
         await pool.query(
           "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
-          [airline.id, -Math.round(ghCost), `Ground Handling (weekly)`]
+          [airline.id, -Math.round(ghCost), `Ground Handling (${airline.ground_handling_level}, ${hubCount} hub${hubCount === 1 ? '' : 's'})`]
         );
       }
       if (wlCost > 0) {

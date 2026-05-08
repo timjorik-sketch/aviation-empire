@@ -419,11 +419,13 @@ async function initDatabase() {
     // used_aircraft_market
     `ALTER TABLE used_aircraft_market ADD COLUMN IF NOT EXISTS seller_type TEXT DEFAULT 'system'`,
     // ── Operations Control Center (OCC) ────────────────────────────────────
-    // Per-airline contracts (wet lease, hotel partnership)
+    // Per-airline OCC contracts (one setting applies to whole fleet/network)
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS wet_lease_contract TEXT DEFAULT 'none'`,
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS hotel_partnership TEXT DEFAULT 'none'`,
+    `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS maintenance_program TEXT DEFAULT 'basic'`,
+    `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS ground_handling_level TEXT DEFAULT 'standard'`,
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS last_occ_billing_at TIMESTAMPTZ`,
-    // Per-aircraft maintenance program
+    // Legacy per-aircraft column kept (not used after airline-level migration)
     `ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS maintenance_program TEXT DEFAULT 'basic'`,
     // Flight delay columns
     `ALTER TABLE flights ADD COLUMN IF NOT EXISTS delay_minutes INTEGER DEFAULT 0`,

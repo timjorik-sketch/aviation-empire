@@ -59,9 +59,8 @@ export default function TopBar({ onBack, backLabel = 'Back', balance: balancePro
       <div className="topnav">
         <div className="topnav-left">
           {onBack && (
-            <button className="topnav-back" onClick={onBack} title={backLabel}>
-              <span className="topnav-back-arrow">←</span>
-              <span className="topnav-back-label">{backLabel}</span>
+            <button className="topnav-back" onClick={onBack} title={backLabel} aria-label={backLabel}>
+              ←
             </button>
           )}
         </div>
@@ -124,7 +123,7 @@ export default function TopBar({ onBack, backLabel = 'Back', balance: balancePro
           gap: 1rem;
           padding: 0.6rem 1rem;
         }
-        .topnav-left { flex: 0 0 auto; }
+        .topnav-left { flex: 0 0 40px; }
         .topnav-right {
           flex: 0 0 auto;
           display: flex;
@@ -143,20 +142,21 @@ export default function TopBar({ onBack, backLabel = 'Back', balance: balancePro
         .topnav-back {
           display: inline-flex;
           align-items: center;
-          gap: 0.4rem;
-          padding: 0.5rem 0.8rem;
+          justify-content: center;
+          width: 40px;
+          height: 40px;
+          padding: 0;
           background: transparent;
           border: 1px solid #E0E0E0;
           border-radius: 6px;
           color: #2C2C2C;
           cursor: pointer;
           font-weight: 600;
-          font-size: 0.88rem;
+          font-size: 1.05rem;
+          line-height: 1;
           transition: background 0.15s, border-color 0.15s;
         }
         .topnav-back:hover { background: #F5F5F5; border-color: #C8C8C8; }
-        .topnav-back-arrow { font-size: 1rem; line-height: 1; }
-        .topnav-back-label { white-space: nowrap; }
 
         .topnav-item {
           background: transparent;
@@ -217,7 +217,6 @@ export default function TopBar({ onBack, backLabel = 'Back', balance: balancePro
           .topnav { flex-wrap: wrap; gap: 0.5rem; padding: 0.5rem 0.6rem; }
           .topnav-items { gap: 0.1rem; }
           .topnav-item { padding: 0.4rem 0.55rem; font-size: 0.85rem; }
-          .topnav-back-label { display: none; }
           .topnav-balance { padding: 0.3rem 0.55rem; }
           .topnav-balance-label { display: none; }
         }

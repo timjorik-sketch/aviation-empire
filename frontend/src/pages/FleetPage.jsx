@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import AirportLink from '../components/AirportLink.jsx';
 import Toast from '../components/Toast.jsx';
 import Loader from '../components/Loader.jsx';
+import TopBar from '../components/TopBar.jsx';
 import { calculateCurrentValue, formatAircraftValue } from '../utils/aircraftValue.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -466,19 +467,8 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
       </div>
 
       <div className="fleet-container">
+        <TopBar onBack={onBack} balance={airline.balance} backLabel="Dashboard" />
         <Toast success={successMsg} onClearSuccess={() => setSuccessMsg('')} error={errorMsg || error} onClearError={() => { setErrorMsg(''); setError(''); }} />
-        {/* Back Button and Balance */}
-        <div className="fleet-top-bar">
-          <button onClick={onBack} className="btn-back">
-            <span className="back-arrow">&#8592;</span> Dashboard
-          </button>
-          <div className="balance-display">
-            <span className="balance-label">Balance:</span>
-            <span className="balance-amount">${airline.balance.toLocaleString()}</span>
-          </div>
-        </div>
-
-        {/* Messages handled by Toast above */}
 
         {/* Fleet + Manage Fleet sidebar */}
         <div className="fleet-row" style={{ marginBottom: '2rem' }}>

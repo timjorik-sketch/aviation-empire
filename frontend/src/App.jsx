@@ -858,11 +858,9 @@ function App() {
         </div>
       </div>
 
-      <div className="hp-container">
+      <div className="hp-container" style={{ paddingTop: 24 }}>
 
-        {activeAirline && <TopBar />}
-
-        {/* ── Info strip (identity only — actions live in TopBar profile menu) ── */}
+        {/* ── Info strip with profile actions ── */}
         <div className="hp-info-strip">
           <div className="hp-identity">
             {activeAirline ? (
@@ -883,14 +881,19 @@ function App() {
               </>
             )}
           </div>
-          {!activeAirline && (
-            <div className="hp-strip-actions">
-              <button className="hp-btn-change" onClick={() => setShowChangeModal(true)}>
-                {airlines.length === 0 ? '+ Create Airline' : 'Change Airline'}
-              </button>
-            </div>
-          )}
+          <div className="hp-strip-actions">
+            <button className="hp-btn-change" onClick={() => setShowChangeModal(true)}>
+              {airlines.length === 0 ? '+ Create Airline' : 'Change Airline'}
+            </button>
+            <button className="hp-btn-logout-strip" onClick={() => setCurrentPage('edit-profile')}>Edit Profile</button>
+            {user?.is_admin && (
+              <button className="hp-btn-logout-strip" onClick={() => setCurrentPage('admin')}>Admin</button>
+            )}
+            <button className="hp-btn-logout-strip" onClick={handleLogout}>Logout</button>
+          </div>
         </div>
+
+        {activeAirline && <TopBar />}
 
         <VerifyEmailBanner user={user} />
 

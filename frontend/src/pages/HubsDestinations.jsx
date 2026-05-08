@@ -429,7 +429,7 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
     <>
       <style>{`
         .hd-page { background: #F5F5F5; min-height: 100vh; }
-        .hd-container { max-width: 1200px; margin: 0 auto; padding: 24px 24px 48px; }
+        .hd-container { max-width: 1100px; margin: 0 auto; padding: 24px 24px 48px; }
 
         /* ── Card shell ── */
         .hd-card {

@@ -618,7 +618,7 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
           background: url('/header-images/Headerimage_market.png') center 30% / cover no-repeat;
         }
 
-        .am-container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+        .am-container { max-width: 1100px; margin: 0 auto; padding: 2rem; }
 
         /* Messages */
         .am-msg { padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.9rem; }

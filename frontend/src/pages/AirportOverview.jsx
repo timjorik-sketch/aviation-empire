@@ -434,7 +434,7 @@ export default function AirportOverview({ airline, onBack, backLabel = 'Flight O
           background: url('/header-images/Headerimage_airportoverview.png') center 30% / cover no-repeat;
         }
 
-        .am-container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+        .am-container { max-width: 1100px; margin: 0 auto; padding: 2rem; }
 
         .am-msg { padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.9rem; }
         .am-msg--error { background: #FEE2E2; color: #DC2626; border: 1px solid #FCA5A5; }

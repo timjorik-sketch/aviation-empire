@@ -1,4 +1,3 @@
-import { useState, useEffect, useRef } from 'react';
 import { useNav } from './NavContext.jsx';
 
 const NAV_ITEMS = [
@@ -47,23 +46,9 @@ function sectionFor(page) {
 
 export default function TopBar({ onBack, backLabel = 'Back', balance: balanceProp }) {
   const nav = useNav();
-  const [profileOpen, setProfileOpen] = useState(false);
-  const profileRef = useRef(null);
-
-  useEffect(() => {
-    if (!profileOpen) return;
-    const onClickOutside = (e) => {
-      if (profileRef.current && !profileRef.current.contains(e.target)) {
-        setProfileOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onClickOutside);
-    return () => document.removeEventListener('mousedown', onClickOutside);
-  }, [profileOpen]);
 
   const currentPage   = nav?.currentPage;
   const navigate      = nav?.navigate || (() => {});
-  const user          = nav?.user;
   const airline       = nav?.activeAirline;
   const balance       = balanceProp ?? airline?.balance;
   const activeSection = sectionFor(currentPage);
@@ -103,52 +88,6 @@ export default function TopBar({ onBack, backLabel = 'Back', balance: balancePro
             <div className="topnav-balance">
               <span className="topnav-balance-label">Balance</span>
               <span className="topnav-balance-amount">${balance.toLocaleString()}</span>
-            </div>
-          )}
-          {nav && (
-            <div className="topnav-profile-wrap" ref={profileRef}>
-              <button
-                className="topnav-profile-btn"
-                onClick={() => setProfileOpen(o => !o)}
-                aria-haspopup="menu"
-                aria-expanded={profileOpen}
-              >
-                <span className="topnav-profile-name">
-                  {user?.username || 'Account'}
-                </span>
-                <span className="topnav-profile-chev">▾</span>
-              </button>
-              {profileOpen && (
-                <div className="topnav-profile-menu" role="menu">
-                  {airline && (
-                    <div className="topnav-menu-header">
-                      <span className="topnav-menu-code">{airline.airline_code}</span>
-                      <div>
-                        <div className="topnav-menu-name">{airline.name}</div>
-                        <div className="topnav-menu-sub">{user?.username}</div>
-                      </div>
-                    </div>
-                  )}
-                  <button className="topnav-menu-item" onClick={() => { setProfileOpen(false); nav.onChangeAirline?.(); }}>
-                    Change Airline
-                  </button>
-                  <button className="topnav-menu-item" onClick={() => { setProfileOpen(false); navigate('leaderboards'); }}>
-                    Leaderboards
-                  </button>
-                  <button className="topnav-menu-item" onClick={() => { setProfileOpen(false); navigate('edit-profile'); }}>
-                    Edit Profile
-                  </button>
-                  {user?.is_admin && (
-                    <button className="topnav-menu-item" onClick={() => { setProfileOpen(false); navigate('admin'); }}>
-                      Admin Panel
-                    </button>
-                  )}
-                  <div className="topnav-menu-sep" />
-                  <button className="topnav-menu-item topnav-menu-item--danger" onClick={() => { setProfileOpen(false); nav.onLogout?.(); }}>
-                    Logout
-                  </button>
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -247,72 +186,6 @@ export default function TopBar({ onBack, backLabel = 'Back', balance: balancePro
         .topnav-balance-label { color: #888; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
         .topnav-balance-amount { color: #2C2C2C; font-size: 0.92rem; font-weight: 700; }
 
-        .topnav-profile-wrap { position: relative; }
-        .topnav-profile-btn {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.35rem;
-          padding: 0.5rem 0.8rem;
-          background: transparent;
-          border: 1px solid #E0E0E0;
-          border-radius: 6px;
-          color: #2C2C2C;
-          cursor: pointer;
-          font-weight: 600;
-          font-size: 0.88rem;
-          transition: background 0.15s;
-        }
-        .topnav-profile-btn:hover { background: #F5F5F5; }
-        .topnav-profile-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .topnav-profile-chev { font-size: 0.7rem; color: #888; }
-
-        .topnav-profile-menu {
-          position: absolute;
-          top: calc(100% + 6px);
-          right: 0;
-          min-width: 240px;
-          background: #fff;
-          border: 1px solid #E8E8E8;
-          border-radius: 8px;
-          box-shadow: 0 8px 24px rgba(0,0,0,0.12);
-          padding: 0.4rem 0;
-          z-index: 100;
-        }
-        .topnav-menu-header {
-          display: flex;
-          align-items: center;
-          gap: 0.6rem;
-          padding: 0.6rem 0.9rem 0.7rem;
-          border-bottom: 1px solid #F0F0F0;
-        }
-        .topnav-menu-code {
-          font-family: var(--font-mono, monospace);
-          font-size: 1rem;
-          font-weight: 700;
-          color: #2C2C2C;
-          letter-spacing: 0.04em;
-        }
-        .topnav-menu-name { font-size: 0.85rem; font-weight: 700; color: #2C2C2C; }
-        .topnav-menu-sub { font-size: 0.72rem; color: #888; margin-top: 1px; }
-
-        .topnav-menu-item {
-          display: block;
-          width: 100%;
-          padding: 0.55rem 0.9rem;
-          background: transparent;
-          border: none;
-          text-align: left;
-          color: #2C2C2C;
-          font-size: 0.85rem;
-          font-weight: 500;
-          cursor: pointer;
-          transition: background 0.12s;
-        }
-        .topnav-menu-item:hover { background: #F5F5F5; }
-        .topnav-menu-item--danger { color: #dc2626; }
-        .topnav-menu-item--danger:hover { background: rgba(220,38,38,0.06); }
-        .topnav-menu-sep { height: 1px; background: #F0F0F0; margin: 0.3rem 0; }
-
         .topnav-subtabs {
           display: flex;
           gap: 0;
@@ -347,7 +220,6 @@ export default function TopBar({ onBack, backLabel = 'Back', balance: balancePro
           .topnav-back-label { display: none; }
           .topnav-balance { padding: 0.3rem 0.55rem; }
           .topnav-balance-label { display: none; }
-          .topnav-profile-name { max-width: 80px; }
         }
       `}</style>
     </div>

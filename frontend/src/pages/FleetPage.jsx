@@ -450,14 +450,14 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
 
   if (loading) {
     return (
-      <div className="fleet-page">
-        <div className="fleet-hero">
-          <div className="fleet-hero-overlay">
+      <div className="app">
+        <div className="page-hero" style={{ backgroundImage: "url('/header-images/Headerimage_Fleet.png')" }}>
+          <div className="page-hero-overlay">
             <h1>Fleet Management</h1>
             <p>{airline.name} - Build Your Apron Empire</p>
           </div>
         </div>
-        <div className="fleet-container">
+        <div className="container" style={{ paddingTop: 24 }}>
           <TopBar onBack={onBack} balance={airline.balance} backLabel="Dashboard" />
           <Loader />
         </div>
@@ -466,24 +466,21 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
   }
 
   return (
-    <div className="fleet-page">
+    <div className="app">
       {/* Hero Section */}
-      <div className="fleet-hero">
-        <div className="fleet-hero-overlay">
+      <div className="page-hero" style={{ backgroundImage: "url('/header-images/Headerimage_Fleet.png')" }}>
+        <div className="page-hero-overlay">
           <h1>Fleet Management</h1>
           <p>{airline.name} - Build Your Apron Empire</p>
         </div>
       </div>
 
-      <div className="fleet-container">
+      <div className="container" style={{ paddingTop: 24 }}>
         <TopBar onBack={onBack} balance={airline.balance} backLabel="Dashboard" />
         <Toast success={successMsg} onClearSuccess={() => setSuccessMsg('')} error={errorMsg || error} onClearError={() => { setErrorMsg(''); setError(''); }} />
 
-        {/* Fleet + Manage Fleet sidebar */}
-        <div className="fleet-row" style={{ marginBottom: '2rem' }}>
-
         {/* Fleet Section */}
-        <section className="fleet-section fleet-row-main" style={{ marginBottom: 0 }}>
+        <section className="fleet-section" style={{ marginBottom: '2rem' }}>
           <div className="fleet-section-bar">
             <span className="fleet-section-bar-title">Fleet ({totalAircraft})</span>
           </div>
@@ -530,30 +527,23 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
           )}
         </section>
 
-        {/* Right column: Manage Fleet + Aircraft on Order */}
-        <div className="fleet-row-side">
-
-          {/* Aircraft on Order */}
-          {orders.length > 0 && (
-            <div style={{ background: 'white', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', overflow: 'hidden' }}>
-              <div style={{ background: '#2C2C2C', padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="fleet-section-bar-title">Aircraft on Order</span>
-                <span style={{ background: '#F59E0B', color: '#fff', borderRadius: 12, padding: '2px 10px', fontSize: '0.78rem', fontWeight: 700 }}>{orders.length}</span>
-              </div>
-              <div style={{ padding: '14px 16px' }}>
-                <p style={{ margin: '0 0 10px', fontSize: '0.82rem', color: '#666' }}>
-                  {orders.length} aircraft currently in production
-                </p>
-                <button className="fo-nav-btn" onClick={() => setOrdersOpen(true)}>
-                  View Orders <span className="fo-nav-arrow">›</span>
-                </button>
-              </div>
+        {/* Aircraft on Order */}
+        {orders.length > 0 && (
+          <div style={{ background: 'white', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', overflow: 'hidden', marginBottom: '2rem' }}>
+            <div style={{ background: '#2C2C2C', padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span className="fleet-section-bar-title">Aircraft on Order</span>
+              <span style={{ background: '#F59E0B', color: '#fff', borderRadius: 12, padding: '2px 10px', fontSize: '0.78rem', fontWeight: 700 }}>{orders.length}</span>
             </div>
-          )}
-
-        </div>{/* end right column */}
-
-        </div>{/* end flex row */}
+            <div style={{ padding: '14px 16px' }}>
+              <p style={{ margin: '0 0 10px', fontSize: '0.82rem', color: '#666' }}>
+                {orders.length} aircraft currently in production
+              </p>
+              <button className="fo-nav-btn" onClick={() => setOrdersOpen(true)}>
+                View Orders <span className="fo-nav-arrow">›</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Orders popup */}
         {ordersOpen && (
@@ -1058,141 +1048,6 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
       })()}
 
       <style>{`
-        .fleet-page {
-          min-height: 100vh;
-          background: #F5F5F5;
-        }
-
-        .loading-container {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          min-height: 100vh;
-          color: #2C2C2C;
-        }
-
-        .loading-spinner {
-          width: 50px;
-          height: 50px;
-          border: 4px solid #E0E0E0;
-          border-top-color: #2C2C2C;
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-
-        /* Hero Section — Variante C (floating glass card) */
-        .fleet-hero {
-          position: relative;
-          width: 100%;
-          height: 240px;
-          background: url('/header-images/Headerimage_Fleet.png');
-          background-size: cover;
-          background-position: center 30%;
-        }
-
-        .fleet-hero-overlay {
-          position: absolute;
-          bottom: 28px;
-          left: 32px;
-          max-width: calc(100% - 64px);
-          background: rgba(255, 255, 255, 0.55);
-          backdrop-filter: blur(24px) saturate(180%);
-          -webkit-backdrop-filter: blur(24px) saturate(180%);
-          padding: 18px 28px;
-          border-radius: var(--radius-lg);
-          border: 1px solid rgba(255, 255, 255, 0.45);
-          box-shadow:
-            0 1px 0 rgba(255, 255, 255, 0.6) inset,
-            0 12px 32px rgba(0, 0, 0, 0.18),
-            0 2px 6px rgba(0, 0, 0, 0.08);
-          text-align: left;
-        }
-
-        .fleet-hero h1 {
-          font-size: 1.5rem !important;
-          margin: 0 !important;
-          text-shadow: none !important;
-          font-weight: 700 !important;
-          text-transform: uppercase !important;
-          letter-spacing: 0.08em !important;
-          color: var(--color-text-primary) !important;
-          line-height: 1.15 !important;
-        }
-
-        .fleet-hero p {
-          font-size: 0.78rem !important;
-          margin-top: 0.4rem !important;
-          opacity: 1 !important;
-          font-weight: 500 !important;
-          text-transform: uppercase !important;
-          letter-spacing: 0.08em !important;
-          color: var(--color-text-secondary) !important;
-          text-shadow: none !important;
-        }
-
-        /* Container */
-        .fleet-container {
-          max-width: 1100px;
-          margin: 0 auto;
-          padding: 24px;
-        }
-
-        /* Top Bar */
-        .fleet-top-bar {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 1.5rem;
-          flex-wrap: wrap;
-          gap: 1rem;
-        }
-
-        .btn-back {
-          background: #2C2C2C;
-          color: white;
-          border: none;
-          padding: 0.75rem 1.5rem;
-          border-radius: 6px;
-          font-size: 1rem;
-          font-weight: 600;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          transition: opacity 0.2s;
-        }
-
-        .btn-back:hover {
-          opacity: 0.85;
-        }
-
-        .back-arrow {
-          font-size: 1.25rem;
-        }
-
-        .balance-display {
-          background: white;
-          padding: 0.75rem 1.5rem;
-          border-radius: 6px;
-          color: #2C2C2C;
-          border: 1px solid #E0E0E0;
-        }
-
-        .balance-label {
-          margin-right: 0.5rem;
-          color: #666666;
-        }
-
-        .balance-amount {
-          font-weight: 700;
-          font-size: 1.1rem;
-        }
-
         /* Messages */
         .message {
           padding: 1rem;
@@ -1205,20 +1060,6 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
           background: #fee2e2;
           color: #dc2626;
           border: 1px solid #fca5a5;
-        }
-
-        /* Fleet + sidebar row */
-        .fleet-row {
-          display: flex;
-          gap: 1rem;
-          align-items: flex-start;
-        }
-        .fleet-row-main { flex: 7; min-width: 0; }
-        .fleet-row-side {
-          flex: 3;
-          display: flex;
-          flex-direction: column;
-          gap: 1rem;
         }
 
         /* Section Styling */
@@ -1375,26 +1216,6 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
         }
 
         @media (max-width: 768px) {
-          .fleet-hero {
-            height: 180px;
-          }
-
-          .fleet-hero-overlay {
-            bottom: 18px;
-            left: 16px;
-            max-width: calc(100% - 32px);
-            padding: 13px 18px;
-            border-radius: var(--radius-lg);
-          }
-
-          .fleet-hero h1 {
-            font-size: 1.1rem !important;
-          }
-
-          .fleet-hero p {
-            font-size: 0.65rem !important;
-          }
-
           .fleet-section {
             padding: 1.5rem;
           }
@@ -1403,21 +1224,6 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
              so the dark header still butts cleanly against the card edges. */
           .fleet-section .fleet-section-bar {
             margin: -1.5rem -1.5rem 1rem;
-          }
-
-          /* Stack Fleet + Manage Fleet vertically on phones. */
-          .fleet-row {
-            flex-direction: column;
-          }
-          .fleet-row-main,
-          .fleet-row-side {
-            flex: 1 1 auto;
-            width: 100%;
-          }
-
-          .fleet-top-bar {
-            flex-direction: column;
-            align-items: stretch;
           }
 
           .section-header {

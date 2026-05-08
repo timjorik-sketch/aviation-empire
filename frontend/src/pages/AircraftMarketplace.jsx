@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import TopBar from '../components/TopBar.jsx';
 import Toast from '../components/Toast.jsx';
 import AirlineProfilePopup from '../components/AirlineProfilePopup.jsx';
+import Loader from '../components/Loader.jsx';
 // aircraftValue utils used via local fmt() helper below
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -233,9 +234,7 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
 
   if (loading) return (
     <div className="am-page">
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'100vh', color:'#666' }}>
-        Loading...
-      </div>
+      <Loader fullPage />
     </div>
   );
 

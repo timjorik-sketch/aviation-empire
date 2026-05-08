@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import TopBar from '../components/TopBar.jsx';
 import LiveFlightMap from '../components/LiveFlightMap.jsx';
+import Loader from '../components/Loader.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -267,7 +268,7 @@ function FlightOperations({ airline, onBalanceUpdate, onBack, onNavigateToAirpor
               <span className="card-header-bar-title">Active Flights ({activeFlights.length})</span>
             </div>
             {loading ? (
-              <div className="fo-empty">Loading…</div>
+              <Loader />
             ) : activeFlights.length === 0 ? (
               <div className="fo-empty">No flights currently in the air.</div>
             ) : (

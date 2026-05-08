@@ -3,6 +3,7 @@ import AirportMap from '../components/AirportMap.jsx';
 import AirportLink from '../components/AirportLink.jsx';
 import AirlineProfilePopup from '../components/AirlineProfilePopup.jsx';
 import TopBar from '../components/TopBar.jsx';
+import Loader from '../components/Loader.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -417,9 +418,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
 
         <TopBar onBack={onBack} backLabel="Back" balance={airline?.balance} airline={airline} />
 
-        {loading && (
-          <div className="ap-center-msg">Loading airport data…</div>
-        )}
+        {loading && <Loader />}
 
         {!loading && (error || !airport) && (
           <div className="ap-center-msg" style={{ color: '#dc2626' }}>
@@ -617,7 +616,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
               <button className="ap-modal-close" onClick={() => setShowCapableModal(false)}>✕</button>
             </div>
             <div className="ap-modal-body">
-              {capableLoading && <div className="ap-modal-loading">Loading…</div>}
+              {capableLoading && <Loader size={48} />}
               {!capableLoading && capableAircraft.length === 0 && (
                 <div className="ap-modal-empty">No compatible aircraft found</div>
               )}

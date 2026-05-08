@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import TopBar from '../components/TopBar.jsx';
 import Toast from '../components/Toast.jsx';
+import Loader from '../components/Loader.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -259,10 +260,7 @@ function ServiceProfiles({ airline, onBack, backLabel = 'Dashboard' }) {
   if (loading) {
     return (
       <div className="sp-page">
-        <div className="sp-loading">
-          <div className="sp-spinner"></div>
-          <p>Loading service profiles...</p>
-        </div>
+        <Loader fullPage />
       </div>
     );
   }

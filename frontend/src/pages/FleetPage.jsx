@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import AirportLink from '../components/AirportLink.jsx';
 import Toast from '../components/Toast.jsx';
+import Loader from '../components/Loader.jsx';
 import { calculateCurrentValue, formatAircraftValue } from '../utils/aircraftValue.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -449,10 +450,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
   if (loading) {
     return (
       <div className="fleet-page">
-        <div className="loading-container">
-          <div className="loading-spinner"></div>
-          <p>Loading fleet data...</p>
-        </div>
+        <Loader fullPage />
       </div>
     );
   }

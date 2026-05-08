@@ -25,6 +25,7 @@ import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import VerifyEmail from './pages/VerifyEmail';
 import VerifyEmailBanner from './components/VerifyEmailBanner.jsx';
+import Loader from './components/Loader.jsx';
 import FleetPage from './pages/FleetPage';
 import AircraftDetail from './pages/AircraftDetail';
 import AircraftMarketplace from './pages/AircraftMarketplace';
@@ -407,10 +408,7 @@ function App() {
     return (
       <div className="app">
         <div className="container">
-          <div className="header">
-            <img src="/logo/logo_black.png" alt="Apron Empire" className="brand-logo" />
-            <p className="subtitle">Loading...</p>
-          </div>
+          <Loader fullPage />
         </div>
       </div>
     );

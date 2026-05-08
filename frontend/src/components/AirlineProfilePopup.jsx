@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import RoutePreviewMap from './RoutePreviewMap';
+import Loader from './Loader.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -50,9 +51,7 @@ export default function AirlineProfilePopup({ airlineCode, onClose }) {
 
         {/* Body */}
         <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
-          {loading && (
-            <div style={{ padding: '3rem', textAlign: 'center', color: '#999', fontSize: '0.85rem' }}>Loading airline profile...</div>
-          )}
+          {loading && <Loader />}
           {error && (
             <div style={{ padding: '3rem', textAlign: 'center', color: '#dc2626', fontSize: '0.85rem' }}>Could not load airline profile.</div>
           )}

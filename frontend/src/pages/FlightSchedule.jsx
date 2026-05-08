@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import TopBar from '../components/TopBar.jsx';
+import Loader from '../components/Loader.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -220,7 +221,7 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
           </div>
 
           {loading ? (
-            <div className="fs-empty">Loading…</div>
+            <Loader />
           ) : entries.length === 0 ? (
             <div className="fs-empty">No flights scheduled. Assign routes in fleet management.</div>
           ) : (

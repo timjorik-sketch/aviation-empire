@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import TopBar from '../components/TopBar.jsx';
+import Loader from '../components/Loader.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -817,7 +818,7 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
                     </button>
                   </div>
                   {expansionsLoading ? (
-                    <div className="hd-empty-sm">Loading…</div>
+                    <Loader size={40} />
                   ) : (airline?.level ?? 1) < SECONDARY_HUB_LEVEL && visibleExpansions.length === 0 ? (
                     <div className="hd-empty-sm">
                       🔒 Secondary Hubs unlock at level {SECONDARY_HUB_LEVEL}. You're level {airline?.level ?? 1}.
@@ -1466,7 +1467,7 @@ function AirportCard({ airport, opening, onOpen, onNavigateToAirport }) {
           </div>
 
           {!popupData ? (
-            <div style={{ padding: '1rem', textAlign: 'center', color: '#999', fontSize: '0.8rem' }}>Loading...</div>
+            <Loader size={40} />
           ) : (
             <>
               {/* Fees */}

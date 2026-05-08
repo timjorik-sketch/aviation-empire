@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import TopBar from '../components/TopBar.jsx';
 import Toast from '../components/Toast.jsx';
+import Loader from '../components/Loader.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -170,7 +171,7 @@ function CabinProfiles({ airline, onBack, backLabel = 'Dashboard' }) {
 
   if (loading) return (
     <div className="cp-page">
-      <div className="cp-loading"><div className="cp-spinner" /><p>Loading...</p></div>
+      <Loader fullPage />
     </div>
   );
 

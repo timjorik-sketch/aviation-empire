@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import TopBar from '../components/TopBar.jsx';
+import Loader from '../components/Loader.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -66,7 +67,7 @@ export default function Personnel({ airline, onBack }) {
           </div>
 
           {loading ? (
-            <div style={{ padding: '2rem', textAlign: 'center', color: '#999' }}>Loading…</div>
+            <Loader />
           ) : (
             <table className="per-table">
               <thead>

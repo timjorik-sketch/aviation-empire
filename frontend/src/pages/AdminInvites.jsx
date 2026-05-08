@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import TopBar from '../components/TopBar.jsx';
+import Loader from '../components/Loader.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -146,7 +147,7 @@ export default function AdminInvites({ airline, onBack }) {
           <div className="card-header-dark">Invite Codes ({codes.length})</div>
           <div className="card-body">
           {loading ? (
-            <p style={{ color: '#666' }}>Loading…</p>
+            <Loader />
           ) : codes.length === 0 ? (
             <p style={{ color: '#666' }}>No codes generated yet.</p>
           ) : (

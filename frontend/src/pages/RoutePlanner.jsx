@@ -3,6 +3,7 @@ import AirportLink from '../components/AirportLink.jsx';
 import TopBar from '../components/TopBar.jsx';
 import Toast from '../components/Toast.jsx';
 import RoutePreviewMap from '../components/RoutePreviewMap.jsx';
+import Loader from '../components/Loader.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -414,9 +415,7 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
 
   if (loading) {
     return (
-      <div className="app"><div className="container"><div className="header">
-        <img src="/logo/logo_black.png" alt="Apron Empire" className="brand-logo" /><p className="subtitle">Loading routes...</p>
-      </div></div></div>
+      <div className="app"><div className="container"><Loader fullPage /></div></div>
     );
   }
 

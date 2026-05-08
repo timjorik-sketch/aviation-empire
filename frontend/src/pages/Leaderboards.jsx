@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import TopBar from '../components/TopBar.jsx';
+import Loader from '../components/Loader.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -129,7 +130,7 @@ export default function Leaderboards({ airline, onBack }) {
       </div>
       <div className="container" style={{ paddingTop: 24 }}>
         <TopBar onBack={onBack} balance={airline.balance} airline={airline} />
-        <p style={{ color: '#666', marginTop: '2rem' }}>Loading...</p>
+        <Loader />
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import Toast from '../components/Toast.jsx';
+import Loader from '../components/Loader.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -514,7 +515,7 @@ export default function EditProfile({ user, onBack, onLogout, onAirlinesChanged 
         <Toast error={error} onClearError={() => setError('')} success={success} onClearSuccess={() => setSuccess('')} />
 
         {loading ? (
-          <div style={{ textAlign: 'center', color: '#666', padding: '60px 0' }}>Loading...</div>
+          <Loader />
         ) : (
           <div className="ep-cols">
 

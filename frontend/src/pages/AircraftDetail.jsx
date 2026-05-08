@@ -4,6 +4,7 @@ import TopBar from '../components/TopBar.jsx';
 import Toast from '../components/Toast.jsx';
 import { calculateCurrentValue, formatAircraftValue } from '../utils/aircraftValue.js';
 import SatisfactionRating, { getSatColor, scoreToRating } from '../components/SatisfactionRating.jsx';
+import Loader from '../components/Loader.jsx';
 
 
 
@@ -1170,7 +1171,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
   if (loading) return (
     <div className="ad-page">
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'100vh', color:'#666' }}>Loading...</div>
+      <Loader fullPage />
       <style>{styles}</style>
     </div>
   );
@@ -1484,7 +1485,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
             {DAY_SHORT.map((d, i) => <div key={i} className="ad-grid-day-hd">{d}</div>)}
           </div>
           <div className="ad-grid-scroll">
-            {scheduleLoading && <div className="ad-grid-overlay">Loading…</div>}
+            {scheduleLoading && <div className="ad-grid-overlay"><Loader size={48} /></div>}
             <div className="ad-grid-inner">
               <div className="ad-grid-gutter">
                 {Array.from({ length: 24 }, (_, h) => (

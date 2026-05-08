@@ -16,11 +16,12 @@ const EVENT_LABEL = {
   technical_ground: 'Technical (Ground)',
   ground_ops:       'Ground Ops',
   atc:              'ATC',
-  weather:          'Weather',
   technical_air:    'Technical (Air)',
   medical:          'Medical',
   cascade:          'Cascade',
   medical_cascade:  'Medical Cascade',
+  // legacy — kept so old report rows still render a label
+  weather:          'Weather',
 };
 const OUTCOME_LABEL = {
   minor_delay: 'Minor Delay',
@@ -154,7 +155,7 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
             <ConfigCard
               title="Wet Lease Contract"
               image="/occ/occ_wetlease.png"
-              subtitle="Covers cancellations from weather, technical-air, and cascade events. Operator takes a % of ticket revenue when activated."
+              subtitle="Covers the next rotation when a Technical (Air) or Medical event takes an aircraft out of service. Operator takes a % of ticket revenue."
               footnote={`Flat fee — applies airline-wide`}
             >
               <OptionGrid>

@@ -184,18 +184,18 @@ export async function findDiversionAirport(depCode, arrCode, minRunwayM, fractio
 // ── The roll function ──────────────────────────────────────────────────────
 // Inputs: prepared flight context. Returns a decision object with what to do.
 //
-// Priority: cancel-events (weather > technical_air > medical) preempt minor
-// delays. If no cancel-event triggers, minor delays are rolled (technical_ground,
+// Priority: cancel-events (technical_air > medical) preempt minor delays.
+// If no cancel-event triggers, minor delays are rolled (technical_ground,
 // ground_ops, atc) — at most one minor outcome per flight.
 //
 // Returns:
 //   { type: 'none' }
 //   { type: 'minor', subtype: 'technical_ground'|'ground_ops'|'atc',
 //     delayMinutes, technicalCost, satisfactionMalus }
-//   { type: 'cancel', subtype: 'weather'|'technical_air'|'medical',
-//     wetLeased, satisfactionMalus,
+//   { type: 'cancel', subtype: 'technical_air'|'medical',
+//     satisfactionMalus,
 //     // if technical_air:
-//     turnbackFraction
+//     repairMinutes
 //     // if medical:
 //     diversionAirport, diversionDelayMinutes, willCancelAtDest }
 export async function rollDelaysForFlight(ctx) {

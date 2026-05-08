@@ -6,28 +6,10 @@ const API_URL = import.meta.env.VITE_API_URL || '';
 
 const fmtMoney = (n) => '$' + Math.round(n || 0).toLocaleString();
 
-const PROGRAM_LABEL = {
-  basic: 'Basic',
-  enhanced: 'Enhanced',
-  premium: 'Premium',
-};
-const GH_LABEL = {
-  standard: 'Standard',
-  priority: 'Priority',
-  premium: 'Premium',
-};
-const WL_LABEL = {
-  none: 'No Contract',
-  basic: 'Basic',
-  premium: 'Premium',
-  unlimited: 'Unlimited',
-};
-const HP_LABEL = {
-  none: 'No Partnership',
-  basic: 'Basic',
-  premium: 'Premium',
-  exclusive: 'Exclusive',
-};
+const PROGRAM_LABEL = { basic: 'Basic', enhanced: 'Enhanced', premium: 'Premium' };
+const GH_LABEL      = { standard: 'Standard', priority: 'Priority', premium: 'Premium' };
+const WL_LABEL      = { none: 'No Contract', basic: 'Basic', premium: 'Premium', unlimited: 'Unlimited' };
+const HP_LABEL      = { none: 'No Partnership', basic: 'Basic', premium: 'Premium', exclusive: 'Exclusive' };
 
 const EVENT_LABEL = {
   technical_ground: 'Technical (Ground)',
@@ -39,7 +21,6 @@ const EVENT_LABEL = {
   cascade:          'Cascade',
   medical_cascade:  'Medical Cascade',
 };
-
 const OUTCOME_LABEL = {
   minor_delay: 'Minor Delay',
   cancelled:   'Cancelled',
@@ -48,7 +29,7 @@ const OUTCOME_LABEL = {
 };
 
 export default function OperationsControlCenter({ airline, onBack, backLabel = 'Flight Operations' }) {
-  const [tab, setTab] = useState('config'); // 'config' | 'report'
+  const [tab, setTab] = useState('config');
   const [data, setData] = useState(null);
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -96,7 +77,7 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || 'Update failed');
       setSuccess(successMsg);
-      await fetchConfig();
+      await Promise.all([fetchConfig(), fetchReport()]);
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }
   };
@@ -104,14 +85,23 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
   if (loading) {
     return (
       <div className="app">
-        <TopBar onBack={onBack} balance={airline?.balance} backLabel={backLabel} />
-        <div style={{ padding: 24, textAlign: 'center', color: '#666' }}>Loading…</div>
+        <div className="page-hero" style={{ backgroundImage: "url('/header-images/Headerimage_opertaions.png')" }}>
+          <div className="page-hero-overlay">
+            <h1>Operations Control Center</h1>
+            <p>{airline?.name}</p>
+          </div>
+        </div>
+        <div className="container" style={{ paddingTop: 24 }}>
+          <TopBar onBack={onBack} balance={airline?.balance} airline={airline} backLabel={backLabel} />
+          <p style={{ color: '#666', marginTop: '2rem' }}>Loading…</p>
+        </div>
       </div>
     );
   }
 
-  // ── Aggregate weekly cost preview ────────────────────────────────────────
   const cat = data?.catalog || {};
+
+  // Weekly subscription cost preview
   let weeklyMaint = 0;
   for (const ac of (data?.aircraft || [])) {
     weeklyMaint += cat.maintenance_programs?.[ac.maintenance_program]?.weeklyCost || 0;
@@ -124,135 +114,183 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
   const weeklyHp = cat.hotel_partnerships?.[data?.hotel_partnership]?.weeklyCost || 0;
   const weeklyTotal = weeklyMaint + weeklyGh + weeklyWl + weeklyHp;
 
+  // KPI values from report
+  const f = report?.flights || {};
+  const t = report?.totals || {};
+  const otRate = f.on_time_rate;
+  const otPct = otRate != null ? (otRate * 100).toFixed(1) + '%' : '—';
+  const otColor = otRate == null ? '#2C2C2C' : otRate >= 0.95 ? '#16a34a' : otRate >= 0.85 ? '#eab308' : '#dc2626';
+
   return (
     <div className="app">
-      <TopBar onBack={onBack} balance={airline?.balance} backLabel={backLabel} />
-      <Toast error={error} success={success} onClearError={() => setError('')} onClearSuccess={() => setSuccess('')} />
+      <div className="page-hero" style={{ backgroundImage: "url('/header-images/Headerimage_opertaions.png')" }}>
+        <div className="page-hero-overlay">
+          <h1>Operations Control Center</h1>
+          <p>{airline?.name}</p>
+        </div>
+      </div>
 
-      <div className="page-container" style={{ padding: '24px', maxWidth: 1200, margin: '0 auto' }}>
-        <h1 style={{ margin: '0 0 4px', fontSize: '1.6rem' }}>Operations Control Center</h1>
-        <p style={{ margin: '0 0 18px', color: '#666', fontSize: '0.9rem' }}>
-          Configure disruption protection. Settings affect delay rates, cancellation costs, and wet-lease coverage.
-        </p>
+      <div className="container" style={{ paddingTop: 24 }}>
+        <TopBar onBack={onBack} balance={airline?.balance} airline={airline} backLabel={backLabel} />
+        <Toast error={error} success={success} onClearError={() => setError('')} onClearSuccess={() => setSuccess('')} />
 
-        {/* Tab bar */}
-        <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '2px solid #e0e0e0' }}>
+        {/* ── 4 KPI Cards ── */}
+        <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
+          <KPI label="Weekly OCC Cost" value={fmtMoney(weeklyTotal)} sub={`Maint ${fmtMoney(weeklyMaint)} · GH ${fmtMoney(weeklyGh)} · WL ${fmtMoney(weeklyWl)} · HP ${fmtMoney(weeklyHp)}`} />
+          <KPI label="On-Time Rate" value={otPct} valColor={otColor} sub={`${f.finalized || 0} flights finalized`} />
+          <KPI label="Disruption Cost" value={fmtMoney(t.disruption_cost)} sub={`Last 7 days`} />
+          <KPI label="Wet Lease Used" value={`${t.wet_lease_activations || 0}×`} sub={`${fmtMoney(t.wet_lease_cost)} paid`} />
+        </div>
+
+        {/* ── Tab bar ── */}
+        <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '2px solid #E0E0E0' }}>
           <TabBtn active={tab === 'config'} onClick={() => setTab('config')}>Configuration</TabBtn>
-          <TabBtn active={tab === 'report'}  onClick={() => setTab('report')}>Weekly Report</TabBtn>
+          <TabBtn active={tab === 'report'} onClick={() => setTab('report')}>Weekly Report</TabBtn>
         </div>
 
         {tab === 'config' && (
           <>
-            {/* Weekly cost summary */}
-            <div className="info-card" style={{ marginBottom: 20, padding: 18, display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 16 }}>
-              <SummaryCell label="Maintenance"      value={fmtMoney(weeklyMaint)} />
-              <SummaryCell label="Ground Handling"  value={fmtMoney(weeklyGh)} />
-              <SummaryCell label="Wet Lease"        value={fmtMoney(weeklyWl)} />
-              <SummaryCell label="Hotel"            value={fmtMoney(weeklyHp)} />
-              <SummaryCell label="Total / Week"     value={fmtMoney(weeklyTotal)} highlight />
+            {/* Two-column row: Wet Lease + Hotel Partnership */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '20px' }}>
+              <ConfigCard
+                title="Wet Lease Contract"
+                image="/occ/occ_wetlease.png"
+                subtitle="Covers cancellations from weather, technical-air, and cascade events. Operator takes a % of ticket revenue."
+              >
+                <OptionGrid>
+                  {Object.entries(cat.wet_lease_contracts || {}).map(([k, cfg]) => (
+                    <OptionCard
+                      key={k}
+                      selected={data.wet_lease_contract === k}
+                      label={WL_LABEL[k] || k}
+                      cost={cfg.weeklyCost}
+                      detail={cfg.revenueShare != null ? `${Math.round(cfg.revenueShare * 100)}% rev share on use` : 'No coverage — disruptions cancel'}
+                      disabled={saving}
+                      onClick={() => patch('/api/occ/wet-lease', { contract: k }, `Wet lease set to ${WL_LABEL[k]}`)}
+                    />
+                  ))}
+                </OptionGrid>
+              </ConfigCard>
+
+              <ConfigCard
+                title="Hotel Partnership"
+                image="/occ/occ_hotel.png"
+                subtitle="Reduces hotel cost per passenger when flights are cancelled without wet-lease coverage."
+              >
+                <OptionGrid>
+                  {Object.entries(cat.hotel_partnerships || {}).map(([k, cfg]) => (
+                    <OptionCard
+                      key={k}
+                      selected={data.hotel_partnership === k}
+                      label={HP_LABEL[k] || k}
+                      cost={cfg.weeklyCost}
+                      detail={`$${cfg.hotelCostPerPax}/pax on cancel`}
+                      disabled={saving}
+                      onClick={() => patch('/api/occ/hotel-partnership', { partnership: k }, `Hotel partnership set to ${HP_LABEL[k]}`)}
+                    />
+                  ))}
+                </OptionGrid>
+              </ConfigCard>
             </div>
 
-            {/* Wet Lease */}
-            <Section
-              title="Wet Lease Contract"
-              subtitle="Covers cancellations from weather, technical-air, medical, and cascade events. Wet-lease operator takes a % of ticket revenue."
-              image="/occ/occ_wetlease.png"
-            >
-              <OptionGrid>
-                {Object.entries(cat.wet_lease_contracts || {}).map(([k, cfg]) => (
-                  <OptionCard
-                    key={k}
-                    selected={data.wet_lease_contract === k}
-                    label={WL_LABEL[k] || k}
-                    cost={cfg.weeklyCost}
-                    detail={cfg.revenueShare != null ? `${Math.round(cfg.revenueShare * 100)}% rev share` : 'No coverage — disruptions cancel'}
-                    disabled={saving}
-                    onClick={() => patch('/api/occ/wet-lease', { contract: k }, `Wet lease set to ${WL_LABEL[k]}`)}
-                  />
-                ))}
-              </OptionGrid>
-            </Section>
-
-            {/* Hotel Partnership */}
-            <Section
-              title="Hotel Partnership"
-              subtitle="Reduces hotel cost-per-passenger when flights are cancelled without wet-lease coverage."
-              image="/occ/occ_hotel.png"
-            >
-              <OptionGrid>
-                {Object.entries(cat.hotel_partnerships || {}).map(([k, cfg]) => (
-                  <OptionCard
-                    key={k}
-                    selected={data.hotel_partnership === k}
-                    label={HP_LABEL[k] || k}
-                    cost={cfg.weeklyCost}
-                    detail={`$${cfg.hotelCostPerPax}/pax on cancel`}
-                    disabled={saving}
-                    onClick={() => patch('/api/occ/hotel-partnership', { partnership: k }, `Hotel partnership set to ${HP_LABEL[k]}`)}
-                  />
-                ))}
-              </OptionGrid>
-            </Section>
-
-            {/* Maintenance Programs (per aircraft) */}
-            <Section
+            {/* Maintenance Programs */}
+            <ConfigCard
               title="Maintenance Programs"
-              subtitle="Per aircraft. Reduces Technical (Ground) and Technical (Air) delay rates."
               image="/occ/occ_maintenance.png"
+              subtitle="Per aircraft. Reduces Technical (Ground) and Technical (Air) delay rates."
             >
               {(data?.aircraft || []).length === 0 ? (
                 <EmptyState>No aircraft yet.</EmptyState>
               ) : (
-                <div style={{ display: 'grid', gap: 8 }}>
-                  {data.aircraft.map(ac => (
-                    <AircraftRow
-                      key={ac.id}
-                      aircraft={ac}
-                      catalog={cat.maintenance_programs}
-                      disabled={saving}
-                      onChange={(program) => patch(`/api/occ/aircraft/${ac.id}/maintenance`, { program },
-                        `${ac.registration}: ${PROGRAM_LABEL[program]}`)}
-                    />
-                  ))}
-                </div>
+                <table className="occ-table" style={tblStyle}>
+                  <thead>
+                    <tr>
+                      <th style={th}>Aircraft</th>
+                      <th style={{ ...th, textAlign: 'right' }}>Program</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.aircraft.map(ac => (
+                      <tr key={ac.id} style={trStyle}>
+                        <td style={td}>
+                          <div style={{ fontWeight: 600, color: '#2C2C2C' }}>{ac.registration}</div>
+                          <div style={subTextStyle}>{ac.type_name} · {ac.home_airport || '—'}</div>
+                        </td>
+                        <td style={{ ...td, textAlign: 'right' }}>
+                          <PillGroup
+                            options={cat.maintenance_programs}
+                            current={ac.maintenance_program}
+                            labels={PROGRAM_LABEL}
+                            disabled={saving}
+                            onChange={(program) => patch(`/api/occ/aircraft/${ac.id}/maintenance`, { program }, `${ac.registration}: ${PROGRAM_LABEL[program]}`)}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               )}
-            </Section>
+            </ConfigCard>
 
-            {/* Ground Handling (per hub) */}
-            <Section
+            {/* Ground Handling */}
+            <ConfigCard
               title="Ground Handling Levels"
-              subtitle="Per hub (home base, primary hub, secondary hubs). Reduces Ground Ops delay rate at that airport."
               image="/occ/occ_ground.png"
+              subtitle="Per hub (home base, primary hub, secondary hubs). Reduces Ground Ops delay rate at that airport."
             >
               {(data?.hubs || []).length === 0 ? (
                 <EmptyState>No hubs yet — open a primary hub or add a secondary hub.</EmptyState>
               ) : (
-                <div style={{ display: 'grid', gap: 8 }}>
-                  {data.hubs.map(h => (
-                    <HubRow
-                      key={h.iata_code}
-                      hub={h}
-                      catalog={cat.ground_handling_levels}
-                      disabled={saving}
-                      onChange={(level) => patch(`/api/occ/hub/${h.iata_code}/ground-handling`, { level },
-                        `${h.iata_code}: ${GH_LABEL[level]}`)}
-                    />
-                  ))}
-                </div>
+                <table className="occ-table" style={tblStyle}>
+                  <thead>
+                    <tr>
+                      <th style={th}>Hub</th>
+                      <th style={{ ...th, textAlign: 'right' }}>Level</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.hubs.map(h => (
+                      <tr key={h.iata_code} style={trStyle}>
+                        <td style={td}>
+                          <div style={{ fontWeight: 600, color: '#2C2C2C' }}>{h.iata_code} · {h.name}</div>
+                          <div style={subTextStyle}>{h.country} · Cat {h.category}</div>
+                        </td>
+                        <td style={{ ...td, textAlign: 'right' }}>
+                          <PillGroup
+                            options={cat.ground_handling_levels}
+                            current={h.ground_handling_level}
+                            labels={GH_LABEL}
+                            disabled={saving}
+                            onChange={(level) => patch(`/api/occ/hub/${h.iata_code}/ground-handling`, { level }, `${h.iata_code}: ${GH_LABEL[level]}`)}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               )}
-            </Section>
+            </ConfigCard>
           </>
         )}
 
-        {tab === 'report' && report && (
-          <ReportView report={report} />
-        )}
+        {tab === 'report' && report && <ReportView report={report} />}
       </div>
     </div>
   );
 }
 
 // ── Sub-components ───────────────────────────────────────────────────────────
+
+function KPI({ label, value, valColor = '#2C2C2C', sub }) {
+  return (
+    <div style={{ background: '#fff', borderRadius: '8px', padding: '20px 24px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', flex: '1 1 0', minWidth: '180px' }}>
+      <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', marginBottom: '6px' }}>{label}</div>
+      <div style={{ fontSize: '1.55rem', fontWeight: 700, color: valColor, lineHeight: 1.1 }}>{value}</div>
+      {sub && <div style={{ marginTop: '6px', fontSize: '0.72rem', color: '#888', lineHeight: 1.3 }}>{sub}</div>}
+    </div>
+  );
+}
+
 function TabBtn({ active, onClick, children }) {
   return (
     <button onClick={onClick} style={{
@@ -265,49 +303,31 @@ function TabBtn({ active, onClick, children }) {
   );
 }
 
-function Section({ title, subtitle, image, children }) {
+// info-card with the standard dark header bar + an OCC banner image flush
+// underneath, then the children below.
+function ConfigCard({ title, image, subtitle, children }) {
   return (
-    <section style={{ marginBottom: 26, background: '#fff', borderRadius: 8, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
+    <div className="info-card" style={{ marginBottom: 20 }}>
+      <div className="card-header-bar">
+        <span className="card-header-bar-title">{title}</span>
+      </div>
       {image && (
         <div style={{
-          height: 120,
-          backgroundImage: `linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,0.55) 100%), url('${image}')`,
+          height: 110,
+          margin: '-20px -28px 16px',
+          backgroundImage: `linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.4) 100%), url('${image}')`,
           backgroundSize: 'cover',
           backgroundPosition: 'center',
-          display: 'flex',
-          alignItems: 'flex-end',
-          padding: '0 20px 14px',
-        }}>
-          <div>
-            <h2 style={{ fontSize: '1.1rem', margin: 0, color: '#fff', textShadow: '0 1px 4px rgba(0,0,0,0.6)' }}>{title}</h2>
-            {subtitle && <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,0.9)', fontSize: '0.8rem', textShadow: '0 1px 3px rgba(0,0,0,0.6)' }}>{subtitle}</p>}
-          </div>
-        </div>
+        }} />
       )}
-      <div style={{ padding: image ? '16px 20px 20px' : 0 }}>
-        {!image && (
-          <>
-            <h2 style={{ fontSize: '1.05rem', margin: '0 0 4px' }}>{title}</h2>
-            {subtitle && <p style={{ margin: '0 0 12px', color: '#666', fontSize: '0.85rem' }}>{subtitle}</p>}
-          </>
-        )}
-        {children}
-      </div>
-    </section>
-  );
-}
-
-function SummaryCell({ label, value, highlight }) {
-  return (
-    <div style={{ textAlign: 'left' }}>
-      <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: '#666', letterSpacing: '0.04em' }}>{label}</div>
-      <div style={{ fontSize: '1.2rem', fontWeight: 700, marginTop: 2, color: highlight ? '#2C2C2C' : '#444' }}>{value}</div>
+      {subtitle && <p style={{ margin: '0 0 16px', color: '#666', fontSize: '0.85rem', lineHeight: 1.4 }}>{subtitle}</p>}
+      {children}
     </div>
   );
 }
 
 function OptionGrid({ children }) {
-  return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>{children}</div>;
+  return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>{children}</div>;
 }
 
 function OptionCard({ selected, label, cost, detail, disabled, onClick }) {
@@ -317,70 +337,41 @@ function OptionCard({ selected, label, cost, detail, disabled, onClick }) {
       background: selected ? '#2C2C2C' : '#fff',
       color: selected ? '#fff' : '#2C2C2C',
       border: selected ? '2px solid #2C2C2C' : '2px solid #E0E0E0',
-      borderRadius: 8, cursor: selected ? 'default' : 'pointer',
-      opacity: disabled && !selected ? 0.6 : 1,
+      borderRadius: 6, cursor: selected ? 'default' : 'pointer',
+      opacity: disabled && !selected ? 0.5 : 1,
+      transition: 'all 0.15s',
     }}>
-      <div style={{ fontSize: '0.95rem', fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: '0.92rem', fontWeight: 700 }}>{label}</div>
       <div style={{ fontSize: '0.78rem', marginTop: 4, opacity: 0.85 }}>{cost > 0 ? `${fmtMoney(cost)} / week` : 'Free'}</div>
-      <div style={{ fontSize: '0.75rem', marginTop: 6, opacity: 0.75 }}>{detail}</div>
+      <div style={{ fontSize: '0.74rem', marginTop: 6, opacity: 0.75 }}>{detail}</div>
     </button>
   );
 }
 
-function AircraftRow({ aircraft, catalog, disabled, onChange }) {
+function PillGroup({ options, current, labels, disabled, onChange }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: '#fff', border: '1px solid #E0E0E0', borderRadius: 6 }}>
-      <div style={{ flex: '0 0 200px' }}>
-        <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{aircraft.registration}</div>
-        <div style={{ fontSize: '0.75rem', color: '#666' }}>{aircraft.type_name} · {aircraft.home_airport || '—'}</div>
-      </div>
-      <div style={{ display: 'flex', gap: 6 }}>
-        {Object.entries(catalog || {}).map(([k, cfg]) => (
+    <div style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+      {Object.entries(options || {}).map(([k, cfg]) => {
+        const isCurrent = current === k;
+        return (
           <button
             key={k}
-            disabled={disabled || aircraft.maintenance_program === k}
+            disabled={disabled || isCurrent}
             onClick={() => onChange(k)}
             style={{
-              padding: '6px 14px', borderRadius: 4, fontSize: '0.82rem', cursor: aircraft.maintenance_program === k ? 'default' : 'pointer',
-              background: aircraft.maintenance_program === k ? '#2C2C2C' : '#fff',
-              color: aircraft.maintenance_program === k ? '#fff' : '#2C2C2C',
+              padding: '6px 12px', borderRadius: 4, fontSize: '0.78rem', fontWeight: 600,
+              cursor: isCurrent ? 'default' : 'pointer',
+              background: isCurrent ? '#2C2C2C' : '#fff',
+              color: isCurrent ? '#fff' : '#2C2C2C',
               border: '1px solid #2C2C2C',
-              opacity: disabled && aircraft.maintenance_program !== k ? 0.6 : 1,
+              opacity: disabled && !isCurrent ? 0.5 : 1,
+              transition: 'all 0.15s',
             }}
           >
-            {PROGRAM_LABEL[k]} {cfg.weeklyCost > 0 ? `($${cfg.weeklyCost})` : ''}
+            {labels[k]}{cfg.weeklyCost > 0 ? ` · $${cfg.weeklyCost.toLocaleString()}` : ''}
           </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function HubRow({ hub, catalog, disabled, onChange }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: '#fff', border: '1px solid #E0E0E0', borderRadius: 6 }}>
-      <div style={{ flex: '0 0 200px' }}>
-        <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{hub.iata_code} · {hub.name}</div>
-        <div style={{ fontSize: '0.75rem', color: '#666' }}>{hub.country} · Cat {hub.category}</div>
-      </div>
-      <div style={{ display: 'flex', gap: 6 }}>
-        {Object.entries(catalog || {}).map(([k, cfg]) => (
-          <button
-            key={k}
-            disabled={disabled || hub.ground_handling_level === k}
-            onClick={() => onChange(k)}
-            style={{
-              padding: '6px 14px', borderRadius: 4, fontSize: '0.82rem', cursor: hub.ground_handling_level === k ? 'default' : 'pointer',
-              background: hub.ground_handling_level === k ? '#2C2C2C' : '#fff',
-              color: hub.ground_handling_level === k ? '#fff' : '#2C2C2C',
-              border: '1px solid #2C2C2C',
-              opacity: disabled && hub.ground_handling_level !== k ? 0.6 : 1,
-            }}
-          >
-            {GH_LABEL[k]} {cfg.weeklyCost > 0 ? `($${cfg.weeklyCost.toLocaleString()})` : ''}
-          </button>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 }
@@ -397,28 +388,52 @@ function ReportView({ report }) {
   const f = report.flights || {};
   const t = report.totals || {};
   const otRate = f.on_time_rate;
+  const otPct = otRate != null ? (otRate * 100).toFixed(1) + '%' : '—';
 
   return (
-    <div>
-      {/* Stats grid */}
-      <div className="info-card" style={{ padding: 20, marginBottom: 20, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16 }}>
-        <Stat label="Flights Finalized" value={f.finalized} />
-        <Stat label="On-Time Rate" value={otRate != null ? (otRate * 100).toFixed(1) + '%' : '—'} highlight />
-        <Stat label="Delayed (completed)" value={f.delayed_completed} />
-        <Stat label="Cancelled" value={f.cancelled} />
-        <Stat label="Disruption Cost" value={fmtMoney(t.disruption_cost)} />
-        <Stat label="Wet Lease Activations" value={t.wet_lease_activations} />
-        <Stat label="Wet Lease Cost" value={fmtMoney(t.wet_lease_cost)} />
-        <Stat label="Satisfaction Malus" value={'-' + (t.satisfaction_malus || 0)} />
+    <>
+      {/* Two-column: Summary + Events */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '20px' }}>
+        <div className="info-card" style={{ marginBottom: 0 }}>
+          <div className="card-header-bar">
+            <span className="card-header-bar-title">Summary — Last 7 Days</span>
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <tbody>
+              <ReportRow label="Flights Finalized"   value={(f.finalized || 0).toLocaleString()} />
+              <ReportRow label="On-Time Rate"        value={otPct} bold />
+              <ReportRow label="Delayed (completed)" value={(f.delayed_completed || 0).toLocaleString()} />
+              <ReportRow label="Cancelled"           value={(f.cancelled || 0).toLocaleString()} />
+            </tbody>
+          </table>
+        </div>
+
+        <div className="info-card" style={{ marginBottom: 0 }}>
+          <div className="card-header-bar">
+            <span className="card-header-bar-title">Cost & Impact</span>
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <tbody>
+              <ReportRow label="Disruption Cost"        value={fmtMoney(t.disruption_cost)} />
+              <ReportRow label="Wet Lease Cost"        value={fmtMoney(t.wet_lease_cost)} />
+              <ReportRow label="Wet Lease Activations" value={`${t.wet_lease_activations || 0}×`} />
+              <ReportRow label="Total Satisfaction Malus" value={`-${t.satisfaction_malus || 0}`} bold />
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      <Section title="Events Breakdown" subtitle="Last 7 days, grouped by event type and outcome.">
+      {/* Events breakdown */}
+      <div className="info-card">
+        <div className="card-header-bar">
+          <span className="card-header-bar-title">Events Breakdown</span>
+        </div>
         {(report.events || []).length === 0 ? (
           <EmptyState>No disruption events in the last 7 days.</EmptyState>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff', border: '1px solid #E0E0E0', borderRadius: 6, overflow: 'hidden' }}>
+          <table style={tblStyle}>
             <thead>
-              <tr style={{ background: '#F5F5F5' }}>
+              <tr>
                 <th style={th}>Event</th>
                 <th style={th}>Outcome</th>
                 <th style={{ ...th, textAlign: 'right' }}>Count</th>
@@ -429,11 +444,11 @@ function ReportView({ report }) {
             </thead>
             <tbody>
               {report.events.map((e, i) => (
-                <tr key={i} style={{ borderTop: '1px solid #F0F0F0' }}>
+                <tr key={i} style={trStyle}>
                   <td style={td}>{EVENT_LABEL[e.event_type] || e.event_type}</td>
                   <td style={td}>
                     {OUTCOME_LABEL[e.outcome] || e.outcome}
-                    {e.wet_leased && <span style={{ marginLeft: 6, fontSize: '0.7rem', color: '#666' }}>(wet-leased)</span>}
+                    {e.wet_leased && <span style={{ marginLeft: 6, fontSize: '0.7rem', color: '#888' }}>(wet-leased)</span>}
                   </td>
                   <td style={{ ...td, textAlign: 'right' }}>{e.count}</td>
                   <td style={{ ...td, textAlign: 'right' }}>{e.total_delay_min || 0}</td>
@@ -444,19 +459,23 @@ function ReportView({ report }) {
             </tbody>
           </table>
         )}
-      </Section>
-    </div>
+      </div>
+    </>
   );
 }
 
-const th = { padding: '10px 14px', textAlign: 'left', fontSize: '0.78rem', fontWeight: 600, color: '#666', textTransform: 'uppercase', letterSpacing: '0.04em' };
-const td = { padding: '10px 14px', fontSize: '0.88rem', color: '#2C2C2C' };
-
-function Stat({ label, value, highlight }) {
+function ReportRow({ label, value, bold }) {
   return (
-    <div>
-      <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: '#666', letterSpacing: '0.04em' }}>{label}</div>
-      <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: 2, color: highlight ? '#22c55e' : '#2C2C2C' }}>{value ?? '—'}</div>
-    </div>
+    <tr>
+      <td style={{ padding: '0.45rem 0', fontSize: '0.85rem', color: bold ? '#2C2C2C' : '#555', fontWeight: bold ? 700 : 400, borderTop: bold ? '1px solid #E8E8E8' : 'none' }}>{label}</td>
+      <td style={{ padding: '0.45rem 0', textAlign: 'right', fontSize: '0.88rem', fontWeight: bold ? 700 : 500, color: bold ? '#2C2C2C' : '#444', borderTop: bold ? '1px solid #E8E8E8' : 'none' }}>{value}</td>
+    </tr>
   );
 }
+
+// ── shared table styles ─────────────────────────────────────────────────────
+const tblStyle = { width: '100%', borderCollapse: 'collapse' };
+const th = { padding: '8px 10px', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid #E0E0E0' };
+const td = { padding: '12px 10px', fontSize: '0.88rem', color: '#2C2C2C', verticalAlign: 'middle' };
+const trStyle = { borderTop: '1px solid #F0F0F0' };
+const subTextStyle = { fontSize: '0.74rem', color: '#888', marginTop: 2 };

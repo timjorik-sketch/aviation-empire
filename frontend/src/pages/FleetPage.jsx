@@ -451,7 +451,16 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
   if (loading) {
     return (
       <div className="fleet-page">
-        <Loader fullPage />
+        <div className="fleet-hero">
+          <div className="fleet-hero-overlay">
+            <h1>Fleet Management</h1>
+            <p>{airline.name} - Build Your Apron Empire</p>
+          </div>
+        </div>
+        <div className="fleet-container">
+          <TopBar onBack={onBack} balance={airline.balance} backLabel="Dashboard" />
+          <Loader />
+        </div>
       </div>
     );
   }

@@ -270,6 +270,7 @@ router.get('/:code/departures', async (req, res) => {
     const code = req.params.code.toUpperCase();
     const result = await pool.query(`
       SELECT f.id, f.flight_number, f.departure_time, f.arrival_time, f.status,
+             f.delay_reason, f.delay_minutes, f.diversion_airport_code,
              COALESCE(r.arrival_airport, ws.arrival_airport) AS destination,
              ap_dest.name AS destination_name,
              al.name AS airline_name, al.airline_code,
@@ -294,7 +295,10 @@ router.get('/:code/departures', async (req, res) => {
       status: r.status, destination: r.destination,
       destination_name: r.destination_name, airline_name: r.airline_name,
       airline_code: r.airline_code, aircraft_model: r.aircraft_model,
-      logo_filename: r.logo_filename ?? null
+      logo_filename: r.logo_filename ?? null,
+      delay_reason: r.delay_reason,
+      delay_minutes: r.delay_minutes,
+      diversion_airport_code: r.diversion_airport_code,
     }));
     res.json({ flights });
   } catch (error) {
@@ -309,6 +313,7 @@ router.get('/:code/arrivals', async (req, res) => {
     const code = req.params.code.toUpperCase();
     const result = await pool.query(`
       SELECT f.id, f.flight_number, f.departure_time, f.arrival_time, f.status,
+             f.delay_reason, f.delay_minutes, f.diversion_airport_code,
              COALESCE(r.departure_airport, ws.departure_airport) AS origin,
              ap_orig.name AS origin_name,
              al.name AS airline_name, al.airline_code,
@@ -332,7 +337,10 @@ router.get('/:code/arrivals', async (req, res) => {
       departure_time: r.departure_time, arrival_time: r.arrival_time,
       status: r.status, origin: r.origin, origin_name: r.origin_name,
       airline_name: r.airline_name, airline_code: r.airline_code,
-      aircraft_model: r.aircraft_model, logo_filename: r.logo_filename ?? null
+      aircraft_model: r.aircraft_model, logo_filename: r.logo_filename ?? null,
+      delay_reason: r.delay_reason,
+      delay_minutes: r.delay_minutes,
+      diversion_airport_code: r.diversion_airport_code,
     }));
     res.json({ flights });
   } catch (error) {

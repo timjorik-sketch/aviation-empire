@@ -95,6 +95,15 @@ function addMins(hm, add) {
   return minsToHM(parseHM(hm) + add);
 }
 
+function formatHours(min) {
+  if (!min) return '0m';
+  const m = Math.round(min);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  return rem === 0 ? `${h}h` : `${h}h${rem}m`;
+}
+
 function minutesToHM(min) {
   const h = Math.floor(min / 60), m = min % 60;
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
@@ -2020,12 +2029,14 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     const st = f.status === 'completed' ? (
                           f.delay_reason === 'medical' && f.diversion_airport_code
                             ? { label: `Diverted via ${f.diversion_airport_code}`, cls: 'cancelled', color: '#f97316' }
-                            : f.delay_reason
-                              ? { label: 'Completed (delayed)', cls: 'ontime', color: '#eab308' }
-                              : { label: 'Completed', cls: 'ontime', color: '#22c55e' }
+                            : f.delay_reason === 'technical_air'
+                              ? { label: `Completed (delayed +${formatHours(f.delay_minutes)})`, cls: 'ontime', color: '#eab308' }
+                              : f.delay_reason
+                                ? { label: 'Completed (delayed)', cls: 'ontime', color: '#eab308' }
+                                : { label: 'Completed', cls: 'ontime', color: '#22c55e' }
                         )
                       : f.status === 'cancelled' ? (
-                          // Legacy: pre-Variante-2 tech_air cancellations rendered as "Diverted to"
+                          // Legacy: pre-current-model tech_air cancels rendered as "Diverted to"
                           f.delay_reason === 'technical_air'
                             ? { label: `Diverted to ${f.departure_airport || '—'}`, cls: 'cancelled', color: '#f97316' }
                             : f.is_wet_leased
@@ -2034,14 +2045,14 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                         )
                       : f.status === 'delayed' ? (
                           f.delay_reason === 'technical_air'
-                            ? { label: `Diverted to ${f.departure_airport || '—'}`, cls: 'boarding', color: '#f97316' }
+                            ? { label: `Diverted (turnback)`, cls: 'boarding', color: '#f97316' }
                             : { label: `Delayed +${f.delay_minutes || 0}m`, cls: 'boarding', color: '#eab308' }
                         )
                       : f.status === 'in-flight' ? (
                           f.delay_reason === 'medical' && f.diversion_airport_code
                             ? { label: 'Diverted', cls: 'boarding', color: '#f97316' }
                             : f.delay_reason === 'technical_air'
-                              ? { label: 'Diverted (returning)', cls: 'boarding', color: '#f97316' }
+                              ? { label: `Diverted +${formatHours(f.delay_minutes)}`, cls: 'boarding', color: '#f97316' }
                               : computeArrStatus(f.departure_time, f.arrival_time, nowMs)
                         )
                       : computeDepStatus(f.departure_time, nowMs);

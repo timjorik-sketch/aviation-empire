@@ -1,7 +1,7 @@
 import express from 'express';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
-import { MAINTENANCE_PROGRAMS, GROUND_HANDLING_LEVELS, WET_LEASE_CONTRACTS, HOTEL_PARTNERSHIPS } from '../utils/delaySystem.js';
+import { MAINTENANCE_PROGRAMS, GROUND_HANDLING_LEVELS, HOTEL_PARTNERSHIPS } from '../utils/delaySystem.js';
 
 const router = express.Router();
 
@@ -380,7 +380,7 @@ async function processPayroll() {
 async function processOccBilling() {
   try {
     const dueResult = await pool.query(`
-      SELECT id, name, wet_lease_contract, hotel_partnership,
+      SELECT id, name, hotel_partnership,
              maintenance_program, ground_handling_level
       FROM airlines
       WHERE last_occ_billing_at IS NULL
@@ -414,15 +414,11 @@ async function processOccBilling() {
       const ghCfg = GROUND_HANDLING_LEVELS[airline.ground_handling_level] || GROUND_HANDLING_LEVELS.standard;
       const ghCost = ghCfg.weeklyCost * hubCount;
 
-      // 3. Wet lease
-      const wlCfg = WET_LEASE_CONTRACTS[airline.wet_lease_contract] || WET_LEASE_CONTRACTS.none;
-      const wlCost = wlCfg.weeklyCost;
-
-      // 4. Hotel partnership
+      // 3. Hotel partnership
       const hpCfg = HOTEL_PARTNERSHIPS[airline.hotel_partnership] || HOTEL_PARTNERSHIPS.none;
       const hpCost = hpCfg.weeklyCost;
 
-      const total = Math.round(maintCost + ghCost + wlCost + hpCost);
+      const total = Math.round(maintCost + ghCost + hpCost);
 
       await pool.query(
         'UPDATE airlines SET last_occ_billing_at = NOW(), balance = balance - $1 WHERE id = $2',
@@ -439,12 +435,6 @@ async function processOccBilling() {
         await pool.query(
           "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
           [airline.id, -Math.round(ghCost), `Ground Handling (${airline.ground_handling_level}, ${hubCount} hub${hubCount === 1 ? '' : 's'})`]
-        );
-      }
-      if (wlCost > 0) {
-        await pool.query(
-          "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
-          [airline.id, -Math.round(wlCost), `Wet Lease Contract (${airline.wet_lease_contract})`]
         );
       }
       if (hpCost > 0) {

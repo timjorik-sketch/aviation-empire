@@ -9,7 +9,6 @@ const fmtMoney = (n) => '$' + Math.round(n || 0).toLocaleString();
 
 const PROGRAM_LABEL = { basic: 'Basic', enhanced: 'Enhanced', premium: 'Premium' };
 const GH_LABEL      = { standard: 'Standard', priority: 'Priority', premium: 'Premium' };
-const WL_LABEL      = { none: 'No Contract', basic: 'Basic', premium: 'Premium', unlimited: 'Unlimited' };
 const HP_LABEL      = { none: 'No Partnership', basic: 'Basic', premium: 'Premium', exclusive: 'Exclusive' };
 
 const EVENT_LABEL = {
@@ -110,9 +109,8 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
   const ghCfg    = cat.ground_handling_levels?.[data?.ground_handling_level] || {};
   const weeklyMaint = (maintCfg.weeklyCost || 0) * fleetCount;
   const weeklyGh    = (ghCfg.weeklyCost    || 0) * hubCount;
-  const weeklyWl    = cat.wet_lease_contracts?.[data?.wet_lease_contract]?.weeklyCost || 0;
   const weeklyHp    = cat.hotel_partnerships?.[data?.hotel_partnership]?.weeklyCost || 0;
-  const weeklyTotal = weeklyMaint + weeklyGh + weeklyWl + weeklyHp;
+  const weeklyTotal = weeklyMaint + weeklyGh + weeklyHp;
 
   // KPI values from report
   const f = report?.flights || {};
@@ -138,8 +136,8 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
           <KPI label="Weekly OCC Cost" value={fmtMoney(weeklyTotal)} />
           <KPI label="On-Time Rate" value={otPct} valColor={otColor} sub={`of ${f.completed || 0} completed flights`} />
+          <KPI label="Cancellations" value={(f.cancelled || 0).toLocaleString()} sub="Last 7 days" />
           <KPI label="Disruption Cost" value={fmtMoney(t.disruption_cost)} sub="Last 7 days" />
-          <KPI label="Wet Lease Used" value={`${t.wet_lease_activations || 0}×`} sub={`${fmtMoney(t.wet_lease_cost)} paid`} />
         </div>
 
         {/* ── Tab bar ── */}
@@ -151,55 +149,11 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         {tab === 'config' && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' }}>
 
-            {/* Top-left: Wet Lease Contract */}
-            <ConfigCard
-              title="Wet Lease Contract"
-              image="/occ/occ_wetlease.png"
-              subtitle="Covers the next rotation departing from one of your hubs when a Technical (Air) or Medical event takes an aircraft out of service. Flights stranded at non-hub destinations cannot be wet-leased — those are cancelled with rebooking + hotel costs."
-              footnote={`Flat fee — applies airline-wide`}
-            >
-              <OptionGrid>
-                {Object.entries(cat.wet_lease_contracts || {}).map(([k, cfg]) => (
-                  <OptionCard
-                    key={k}
-                    selected={data.wet_lease_contract === k}
-                    label={WL_LABEL[k] || k}
-                    cost={cfg.weeklyCost}
-                    detail={cfg.revenueShare != null ? `${Math.round(cfg.revenueShare * 100)}% rev share on use` : 'No coverage — disruptions cancel'}
-                    disabled={saving}
-                    onClick={() => patch('/api/occ/wet-lease', { contract: k }, `Wet lease set to ${WL_LABEL[k]}`)}
-                  />
-                ))}
-              </OptionGrid>
-            </ConfigCard>
-
-            {/* Top-right: Hotel Partnership */}
-            <ConfigCard
-              title="Hotel Partnership"
-              image="/occ/occ_hotel.png"
-              subtitle="Reduces hotel cost per passenger when flights are cancelled without wet-lease coverage."
-              footnote={`Flat fee — applies airline-wide`}
-            >
-              <OptionGrid>
-                {Object.entries(cat.hotel_partnerships || {}).map(([k, cfg]) => (
-                  <OptionCard
-                    key={k}
-                    selected={data.hotel_partnership === k}
-                    label={HP_LABEL[k] || k}
-                    cost={cfg.weeklyCost}
-                    detail={`$${cfg.hotelCostPerPax}/pax on cancel`}
-                    disabled={saving}
-                    onClick={() => patch('/api/occ/hotel-partnership', { partnership: k }, `Hotel partnership set to ${HP_LABEL[k]}`)}
-                  />
-                ))}
-              </OptionGrid>
-            </ConfigCard>
-
-            {/* Bottom-left: Maintenance Programs */}
+            {/* Top-left: Maintenance Programs (most important — gates Tech Air rate) */}
             <ConfigCard
               title="Maintenance Program"
               image="/occ/occ_maintenance.png"
-              subtitle="Reduces Technical (Ground) and Technical (Air) delay rates for the entire fleet."
+              subtitle="Reduces Technical (Ground) and Technical (Air) delay rates for the entire fleet. Each Tech Air event costs ~$50–150k in cancellations."
               footnote={fleetCount > 0
                 ? `Per aircraft × ${fleetCount} aircraft → ${fmtMoney(weeklyMaint)} / week`
                 : 'No aircraft yet — fee applies once you have a fleet'}
@@ -222,7 +176,7 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
               </OptionGrid>
             </ConfigCard>
 
-            {/* Bottom-right: Ground Handling */}
+            {/* Top-right: Ground Handling */}
             <ConfigCard
               title="Ground Handling Level"
               image="/occ/occ_ground.png"
@@ -248,6 +202,30 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
                 ))}
               </OptionGrid>
             </ConfigCard>
+
+            {/* Bottom: Hotel Partnership (full width via gridColumn) */}
+            <div style={{ gridColumn: '1 / -1' }}>
+              <ConfigCard
+                title="Hotel Partnership"
+                image="/occ/occ_hotel.png"
+                subtitle="Reduces hotel cost per passenger when flights are cancelled and passengers are stranded at a non-hub destination."
+                footnote={`Flat fee — applies airline-wide`}
+              >
+                <OptionGrid>
+                  {Object.entries(cat.hotel_partnerships || {}).map(([k, cfg]) => (
+                    <OptionCard
+                      key={k}
+                      selected={data.hotel_partnership === k}
+                      label={HP_LABEL[k] || k}
+                      cost={cfg.weeklyCost}
+                      detail={`$${cfg.hotelCostPerPax}/pax on cancel`}
+                      disabled={saving}
+                      onClick={() => patch('/api/occ/hotel-partnership', { partnership: k }, `Hotel partnership set to ${HP_LABEL[k]}`)}
+                    />
+                  ))}
+                </OptionGrid>
+              </ConfigCard>
+            </div>
 
           </div>
         )}
@@ -379,8 +357,6 @@ function ReportView({ report }) {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <tbody>
               <ReportRow label="Disruption Cost"          value={fmtMoney(t.disruption_cost)} />
-              <ReportRow label="Wet Lease Cost"           value={fmtMoney(t.wet_lease_cost)} />
-              <ReportRow label="Wet Lease Activations"    value={`${t.wet_lease_activations || 0}×`} />
               <ReportRow label="Total Satisfaction Malus" value={`-${t.satisfaction_malus || 0}`} bold />
             </tbody>
           </table>
@@ -445,14 +421,14 @@ function formatTime(iso) {
 
 function formatOutcome(e) {
   if (e.event_type === 'technical_air' && e.outcome === 'delayed') {
-    return `Diverted to ${e.dep_airport || '—'}`;
+    return `Diverted (turnback) +${Math.round((e.delay_minutes || 0) / 60 * 10) / 10}h`;
   }
   if (e.event_type === 'medical' && e.outcome === 'diverted') {
     return e.diversion_airport
       ? `Diverted via ${e.diversion_airport}`
       : 'Medical diversion';
   }
-  if (e.outcome === 'wet_leased') return 'Wet-Leased';
+  if (e.outcome === 'wet_leased') return 'Wet-Leased (legacy)';
   if (e.outcome === 'cancelled')  return 'Cancelled';
   if (e.outcome === 'minor_delay') return `Delayed +${e.delay_minutes || 0}m`;
   return OUTCOME_LABEL[e.outcome] || e.outcome;

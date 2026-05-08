@@ -226,12 +226,14 @@ export async function rollDelaysForFlight(ctx) {
 
   // ── Cancel-events (priority order) ───────────────────────────────────────
   if (rollChance(rateTechAir)) {
-    // Aircraft turns back to its starting point (dep_airport). The CURRENT
-    // flight is scrubbed; passenger handling and the auto-ferry decision
-    // happen in the caller (which knows hub topology).
+    // Aircraft takes off normally, then turns back at a random fraction of
+    // the route. The CURRENT flight is heavily delayed (turnback + repair +
+    // re-fly). Caller (flights.js) computes total delay and eager-cancels
+    // the next two scheduled rotations.
     return {
       type: 'cancel',
       subtype: 'technical_air',
+      turnbackFraction: rand(0.10, 0.50),
       repairMinutes: REPAIR_TIME_MINUTES,
       satisfactionMalus: 10,
     };

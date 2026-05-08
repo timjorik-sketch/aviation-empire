@@ -62,14 +62,62 @@ export default function LiveFlightMap() {
 
     for (const f of flights) {
       const arc = greatCirclePoints(f.origin_lat, f.origin_lon, f.dest_lat, f.dest_lon, 200);
-      const idx = Math.min(Math.floor(f.progress * 200), 198);
-      const [lat, lon] = arc[idx];
-      const [nLat, nLon] = arc[idx + 1];
-      const bear = bearing(lat, lon, nLat, nLon);
 
-      // Orange highlight for any disrupted flight currently in the air:
-      //   medical (whether or not we found a diversion airport)
-      //   technical_air (delayed after turn-back & repair)
+      // Default position: linear progress along the great-circle.
+      let arcIdx = Math.min(Math.floor(f.progress * 200), 198);
+      let bear = bearing(arc[arcIdx][0], arc[arcIdx][1], arc[arcIdx + 1][0], arc[arcIdx + 1][1]);
+      let phaseLabel = null;
+
+      // Tech Air gets a multi-phase position computation that reflects the
+      // out-and-back-and-out-again choreography:
+      //   A: takeoff → turnback point  (forward, fraction 0..X of arc)
+      //   B: turnback → land at origin (backward, fraction X..0)
+      //   C: at origin (1h repair)     (parked at arc[0])
+      //   D: takeoff → arrival         (forward, fraction 0..1)
+      if (f.delay_reason === 'technical_air' && f.turnback_fraction != null && f.original_flight_min) {
+        const X = f.turnback_fraction;
+        const F = f.original_flight_min; // minutes (one-way)
+        const repairMin = 60;
+        const phaseEndA = X * F;
+        const phaseEndB = phaseEndA + X * F;
+        const phaseEndC = phaseEndB + repairMin;
+        const phaseEndD = phaseEndC + F;
+        const elapsedMin = (Date.now() - new Date(f.departure_time).getTime()) / 60000;
+
+        let arcFrac;
+        let backward = false;
+        if (elapsedMin < phaseEndA) {
+          // Phase A — forward to turnback point
+          const local = elapsedMin / phaseEndA;
+          arcFrac = local * X;
+          phaseLabel = `Outbound · turnback at ${(X * 100).toFixed(0)}%`;
+        } else if (elapsedMin < phaseEndB) {
+          // Phase B — backward to origin
+          const local = (elapsedMin - phaseEndA) / (phaseEndB - phaseEndA);
+          arcFrac = X - local * X;
+          backward = true;
+          phaseLabel = `Diverted — returning to ${f.origin_iata}`;
+        } else if (elapsedMin < phaseEndC) {
+          // Phase C — repairing on the ground at origin
+          arcFrac = 0;
+          phaseLabel = `Repairing at ${f.origin_iata}`;
+        } else if (elapsedMin < phaseEndD) {
+          // Phase D — forward to original destination
+          const local = (elapsedMin - phaseEndC) / (phaseEndD - phaseEndC);
+          arcFrac = local;
+          phaseLabel = `Continuing to ${f.destination_iata}`;
+        } else {
+          arcFrac = 1;
+          phaseLabel = 'Arriving';
+        }
+        arcIdx = Math.max(0, Math.min(Math.floor(arcFrac * 200), 198));
+        bear = bearing(arc[arcIdx][0], arc[arcIdx][1], arc[arcIdx + 1][0], arc[arcIdx + 1][1]);
+        if (backward) bear = (bear + 180) % 360;
+      }
+
+      const [lat, lon] = arc[arcIdx];
+
+      // Orange highlight for any disrupted flight currently in the air
       const isDisrupted = f.delay_reason === 'medical' || f.delay_reason === 'technical_air';
       const color = isDisrupted ? '#f97316' : '#26A9F0';
       const marker = L.marker([lat, lon], { icon: planeIcon(bear, color) });
@@ -82,8 +130,8 @@ export default function LiveFlightMap() {
         divNote = `<div style="margin-top:4px;font-size:0.72rem;font-weight:700;color:#f97316;text-transform:uppercase;letter-spacing:0.04em">Diverted via ${f.diversion_airport_code}</div>`;
       } else if (f.delay_reason === 'medical') {
         divNote = `<div style="margin-top:4px;font-size:0.72rem;font-weight:700;color:#f97316;text-transform:uppercase;letter-spacing:0.04em">Medical diversion</div>`;
-      } else if (f.delay_reason === 'technical_air') {
-        divNote = `<div style="margin-top:4px;font-size:0.72rem;font-weight:700;color:#f97316;text-transform:uppercase;letter-spacing:0.04em">Diverted (continuing after repair)</div>`;
+      } else if (f.delay_reason === 'technical_air' && phaseLabel) {
+        divNote = `<div style="margin-top:4px;font-size:0.72rem;font-weight:700;color:#f97316;text-transform:uppercase;letter-spacing:0.04em">${phaseLabel}</div>`;
       }
 
       marker.bindPopup(

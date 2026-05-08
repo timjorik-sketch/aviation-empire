@@ -9,7 +9,6 @@ import authMiddleware from '../middleware/auth.js';
 import {
   MAINTENANCE_PROGRAMS,
   GROUND_HANDLING_LEVELS,
-  WET_LEASE_CONTRACTS,
   HOTEL_PARTNERSHIPS,
   getAirlineHubCodes,
 } from '../utils/delaySystem.js';
@@ -21,7 +20,7 @@ router.get('/', authMiddleware, async (req, res) => {
   if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
   try {
     const airlineRes = await pool.query(
-      `SELECT id, wet_lease_contract, hotel_partnership,
+      `SELECT id, hotel_partnership,
               maintenance_program, ground_handling_level
        FROM airlines WHERE id = $1`,
       [req.airlineId]
@@ -38,7 +37,6 @@ router.get('/', authMiddleware, async (req, res) => {
     const hubCount = (await getAirlineHubCodes(req.airlineId)).size;
 
     res.json({
-      wet_lease_contract:    airline.wet_lease_contract    || 'none',
       hotel_partnership:     airline.hotel_partnership     || 'none',
       maintenance_program:   airline.maintenance_program   || 'basic',
       ground_handling_level: airline.ground_handling_level || 'standard',
@@ -47,7 +45,6 @@ router.get('/', authMiddleware, async (req, res) => {
       catalog: {
         maintenance_programs:   MAINTENANCE_PROGRAMS,
         ground_handling_levels: GROUND_HANDLING_LEVELS,
-        wet_lease_contracts:    WET_LEASE_CONTRACTS,
         hotel_partnerships:     HOTEL_PARTNERSHIPS,
       },
     });
@@ -55,14 +52,6 @@ router.get('/', authMiddleware, async (req, res) => {
     console.error('GET /api/occ error:', err);
     res.status(500).json({ error: 'Server error' });
   }
-});
-
-// PATCH /api/occ/wet-lease  { contract: 'none'|'basic'|'premium'|'unlimited' }
-router.patch('/wet-lease', authMiddleware, async (req, res) => {
-  const { contract } = req.body || {};
-  if (!WET_LEASE_CONTRACTS[contract]) return res.status(400).json({ error: 'Invalid contract' });
-  await pool.query('UPDATE airlines SET wet_lease_contract = $1 WHERE id = $2', [contract, req.airlineId]);
-  res.json({ ok: true, contract });
 });
 
 // PATCH /api/occ/hotel-partnership { partnership: 'none'|'basic'|'premium'|'exclusive' }

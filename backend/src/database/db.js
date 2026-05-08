@@ -418,8 +418,50 @@ async function initDatabase() {
     `ALTER TABLE fuel_prices ADD COLUMN IF NOT EXISTS price_per_kg REAL`,
     // used_aircraft_market
     `ALTER TABLE used_aircraft_market ADD COLUMN IF NOT EXISTS seller_type TEXT DEFAULT 'system'`,
+    // ── Operations Control Center (OCC) ────────────────────────────────────
+    // Per-airline contracts (wet lease, hotel partnership)
+    `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS wet_lease_contract TEXT DEFAULT 'none'`,
+    `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS hotel_partnership TEXT DEFAULT 'none'`,
+    `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS last_occ_billing_at TIMESTAMPTZ`,
+    // Per-aircraft maintenance program
+    `ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS maintenance_program TEXT DEFAULT 'basic'`,
+    // Flight delay columns
+    `ALTER TABLE flights ADD COLUMN IF NOT EXISTS delay_minutes INTEGER DEFAULT 0`,
+    `ALTER TABLE flights ADD COLUMN IF NOT EXISTS delay_reason TEXT`,
+    `ALTER TABLE flights ADD COLUMN IF NOT EXISTS diversion_airport_code TEXT`,
+    `ALTER TABLE flights ADD COLUMN IF NOT EXISTS is_wet_leased BOOLEAN DEFAULT FALSE`,
+    `ALTER TABLE flights ADD COLUMN IF NOT EXISTS turnback_fraction REAL`,
   ];
   await runStatements(alterCols, 'alter cols');
+
+  // ── OCC tables: per-hub ground handling + delay events log ─────────────────
+  const occTables = [
+    `CREATE TABLE IF NOT EXISTS airline_ground_handling (
+       id SERIAL PRIMARY KEY,
+       airline_id INTEGER NOT NULL REFERENCES airlines(id) ON DELETE CASCADE,
+       airport_code TEXT NOT NULL,
+       level TEXT NOT NULL DEFAULT 'standard',
+       UNIQUE (airline_id, airport_code)
+     )`,
+    `CREATE INDEX IF NOT EXISTS idx_aghl_airline ON airline_ground_handling(airline_id)`,
+    `CREATE TABLE IF NOT EXISTS flight_delay_events (
+       id SERIAL PRIMARY KEY,
+       flight_id INTEGER REFERENCES flights(id) ON DELETE SET NULL,
+       airline_id INTEGER NOT NULL REFERENCES airlines(id) ON DELETE CASCADE,
+       aircraft_id INTEGER REFERENCES aircraft(id) ON DELETE SET NULL,
+       event_type TEXT NOT NULL,
+       outcome TEXT NOT NULL,
+       delay_minutes INTEGER DEFAULT 0,
+       cost INTEGER DEFAULT 0,
+       satisfaction_malus INTEGER DEFAULT 0,
+       wet_leased BOOLEAN DEFAULT FALSE,
+       diversion_airport TEXT,
+       created_at TIMESTAMPTZ DEFAULT NOW()
+     )`,
+    `CREATE INDEX IF NOT EXISTS idx_fde_airline_time ON flight_delay_events(airline_id, created_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_fde_flight ON flight_delay_events(flight_id)`,
+  ];
+  await runStatements(occTables, 'occ tables');
 
   // ── flights.aircraft_id: switch from CASCADE to SET NULL so historical
   //    flight records (and their seats_sold/revenue) survive aircraft scrap.

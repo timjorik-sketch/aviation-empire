@@ -1715,7 +1715,8 @@ router.get('/:id/flights', authMiddleware, async (req, res) => {
              COALESCE(fir_cl.actual_capacity, 0) as fir_capacity,
              ac_ref.airline_cabin_profile_id,
              f.satisfaction_score,
-             f.violated_rules
+             f.violated_rules,
+             f.delay_minutes, f.delay_reason, f.diversion_airport_code, f.is_wet_leased
       FROM flights f
       LEFT JOIN routes r ON f.route_id = r.id
       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
@@ -1759,6 +1760,10 @@ router.get('/:id/flights', authMiddleware, async (req, res) => {
       fir_capacity: r.fir_capacity,
       satisfaction_score: r.satisfaction_score,
       violated_rules: r.violated_rules ? JSON.parse(r.violated_rules) : [],
+      delay_minutes: r.delay_minutes,
+      delay_reason: r.delay_reason,
+      diversion_airport_code: r.diversion_airport_code,
+      is_wet_leased: r.is_wet_leased,
     }));
 
     const maintResult = await pool.query(`

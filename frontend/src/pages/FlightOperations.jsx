@@ -148,12 +148,18 @@ function FlightCard({ flight, onNavigateToAirport, onNavigateToAircraft }) {
   const remH  = Math.floor(remMs / 3600000);
   const remM  = Math.floor((remMs % 3600000) / 60000);
   const timeStr = remMs > 0 ? `${remH}h ${String(remM).padStart(2, '0')}m remaining` : 'Landing';
+  const isDiverted = flight.delay_reason === 'medical' && flight.diversion_airport_code;
 
   return (
     <div className="fo-card">
       <div className="fo-card-hd">
         <span className="fo-card-reg">{flight.flight_number}</span>
         <span className="fo-card-type">{flight.aircraft_type}</span>
+        {isDiverted && (
+          <span style={{ marginLeft: 'auto', fontSize: '0.68rem', fontWeight: 700, color: '#fff', background: '#f97316', padding: '2px 8px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            Diverted → {flight.diversion_airport_code}
+          </span>
+        )}
       </div>
       <div className="fo-fp-wrap">
         <div className="fo-fp-route">
@@ -282,10 +288,11 @@ function FlightOperations({ airline, onBalanceUpdate, onBack, onNavigateToAirpor
               </div>
               <div className="fo-nav-list">
                 {[
-                  { label: 'Route Planning',      page: 'routes'            },
-                  { label: 'Service Profiles',    page: 'service-profiles'  },
-                  { label: 'Network',             page: 'hubs'              },
-                  { label: 'Airport Overview',    page: 'airport-overview'  },
+                  { label: 'Route Planning',             page: 'routes'            },
+                  { label: 'Service Profiles',           page: 'service-profiles'  },
+                  { label: 'Operations Control Center',  page: 'ops-control'       },
+                  { label: 'Network',                    page: 'hubs'              },
+                  { label: 'Airport Overview',           page: 'airport-overview'  },
                 ].map(({ label, page }) => (
                   <button key={page} className="fo-nav-btn" onClick={() => onNavigate?.(page)}>
                     {label}

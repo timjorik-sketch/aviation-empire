@@ -24,6 +24,7 @@ import marketAnalysesRouter, { startMarketAnalysesProcessor } from './routes/mar
 import leaderboardsRoutes from './routes/leaderboards.js';
 import adminRoutes from './routes/admin.js';
 import interestRoutes from './routes/interest.js';
+import occRoutes from './routes/occ.js';
 import { globalLimiter, authLimiter, interestLimiter } from './middleware/rateLimiters.js';
 
 dotenv.config();
@@ -103,6 +104,7 @@ app.use('/api/market-analyses', marketAnalysesRouter);
 app.use('/api/leaderboards', leaderboardsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/interest', interestRoutes);
+app.use('/api/occ', occRoutes);
 
 // Alias routes for convenience
 app.use('/api/fleet', aircraftRoutes);

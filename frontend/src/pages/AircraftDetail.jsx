@@ -2016,9 +2016,24 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                         </tr>
                       );
                     } else {
-                    const st = f.status === 'completed' ? { label: 'Completed', cls: 'ontime', color: '#22c55e' }
-                      : f.status === 'cancelled' ? { label: 'Canceled', cls: 'cancelled', color: '#dc2626' }
-                      : f.status === 'in-flight' ? computeArrStatus(f.departure_time, f.arrival_time, nowMs)
+                    const st = f.status === 'completed' ? (
+                          f.delay_reason === 'medical' && f.diversion_airport_code
+                            ? { label: `Diverted via ${f.diversion_airport_code}`, cls: 'cancelled', color: '#f97316' }
+                            : f.delay_reason
+                              ? { label: 'Completed (delayed)', cls: 'ontime', color: '#eab308' }
+                              : { label: 'Completed', cls: 'ontime', color: '#22c55e' }
+                        )
+                      : f.status === 'cancelled' ? (
+                          f.is_wet_leased
+                            ? { label: 'Wet-Leased', cls: 'cancelled', color: '#a16207' }
+                            : { label: 'Canceled', cls: 'cancelled', color: '#dc2626' }
+                        )
+                      : f.status === 'delayed' ? { label: `Delayed +${f.delay_minutes || 0}m`, cls: 'boarding', color: '#eab308' }
+                      : f.status === 'in-flight' ? (
+                          f.delay_reason === 'medical' && f.diversion_airport_code
+                            ? { label: 'Diverted', cls: 'boarding', color: '#f97316' }
+                            : computeArrStatus(f.departure_time, f.arrival_time, nowMs)
+                        )
                       : computeDepStatus(f.departure_time, nowMs);
                     rows.push(
                       <tr key={f.id}>

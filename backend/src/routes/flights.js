@@ -4,6 +4,13 @@ import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 import { calcFlightSatisfaction, getAirlineSatisfactionScore, getSatisfactionMultiplier } from '../utils/satisfaction.js';
 import { calcMarketPrices, calcBaseRate, calcAirportPremium } from '../utils/marketPricing.js';
+import {
+  rollDelaysForFlight,
+  getAirlineHubCodes,
+  calcCancelCosts,
+  getWetLeaseShare,
+  logDelayEvent,
+} from '../utils/delaySystem.js';
 
 const router = express.Router();
 
@@ -137,7 +144,8 @@ router.get('/', authMiddleware, async (req, res) => {
         r.departure_airport, r.arrival_airport, r.distance_km,
         dep.name as departure_name, arr.name as arrival_name,
         ac.registration, at.full_name as aircraft_type, f.aircraft_id,
-        f.satisfaction_score, f.violated_rules
+        f.satisfaction_score, f.violated_rules,
+        f.delay_minutes, f.delay_reason, f.diversion_airport_code, f.is_wet_leased
       FROM flights f
       JOIN routes r ON f.route_id = r.id
       JOIN airports dep ON r.departure_airport = dep.iata_code
@@ -169,6 +177,10 @@ router.get('/', authMiddleware, async (req, res) => {
       aircraft_id: row.aircraft_id,
       satisfaction_score: row.satisfaction_score,
       violated_rules: row.violated_rules ? JSON.parse(row.violated_rules) : [],
+      delay_minutes: row.delay_minutes,
+      delay_reason: row.delay_reason,
+      diversion_airport_code: row.diversion_airport_code,
+      is_wet_leased: row.is_wet_leased,
     }));
 
     res.json({ flights });
@@ -968,7 +980,8 @@ async function processBookings() {
 async function patchNullSatisfactionScores() {
   const findResult = await pool.query(`
     SELECT f.id, f.service_profile_id, f.aircraft_id,
-           COALESCE(r.distance_km, ws_r.distance_km, 1000) AS distance_km
+           COALESCE(r.distance_km, ws_r.distance_km, 1000) AS distance_km,
+           f.delay_reason
     FROM flights f
     LEFT JOIN routes r ON f.route_id = r.id
     LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
@@ -978,7 +991,8 @@ async function patchNullSatisfactionScores() {
   `);
   const toFix = findResult.rows.map(r => ({
     id: r.id, service_profile_id: r.service_profile_id, aircraft_id: r.aircraft_id,
-    distance_km: r.distance_km || 1000
+    distance_km: r.distance_km || 1000,
+    delay_reason: r.delay_reason || null,
   }));
 
   const acIds = [...new Set(toFix.map(f => f.aircraft_id).filter(Boolean))];
@@ -1045,14 +1059,91 @@ async function patchNullSatisfactionScores() {
       firstSeatType,
     });
 
+    // Apply delay/diversion satisfaction malus on top of cabin/service score.
+    // Cancelled flights are excluded by the WHERE clause above.
+    let finalScore = satScore;
+    if (f.delay_reason) {
+      const malusByReason = {
+        technical_ground: 10,
+        ground_ops:       10,
+        atc:              10,
+        medical:          5,
+      };
+      const m = malusByReason[f.delay_reason] || 0;
+      if (m) finalScore = Math.max(0, finalScore - m);
+    }
+
     await pool.query('UPDATE flights SET satisfaction_score = $1, violated_rules = $2 WHERE id = $3',
-      [satScore, JSON.stringify(satViolations), f.id]);
+      [finalScore, JSON.stringify(satViolations), f.id]);
   }
 
   if (toFix.length > 0) {
     console.log(`[SatBackfill] Patched satisfaction_score for ${toFix.length} flight(s)`);
   }
   return toFix.length;
+}
+
+// Cancel (or wet-lease) the next scheduled flight of an aircraft after a given
+// time. Used when a medical diversion's delay exceeds the turnaround at the
+// destination, making the very next leg infeasible.
+async function cancelOrWetLeaseNextLeg({ aircraftId, airlineId, afterTime, wetLeaseContract, hotelPartnership, reason }) {
+  const r = await pool.query(`
+    SELECT f.id, f.flight_number, f.seats_sold, f.ticket_price,
+           COALESCE(f.booked_economy,  0) AS booked_eco,
+           COALESCE(f.booked_business, 0) AS booked_biz,
+           COALESCE(f.booked_first,    0) AS booked_fir,
+           COALESCE(f.economy_price,   0) AS eco_price,
+           COALESCE(f.business_price,  0) AS biz_price,
+           COALESCE(f.first_price,     0) AS fir_price,
+           COALESCE(f.booking_revenue_collected, 0) AS rev_collected
+    FROM flights f
+    WHERE f.aircraft_id = $1 AND f.status = 'scheduled'
+      AND f.departure_time > $2::timestamptz
+    ORDER BY f.departure_time ASC LIMIT 1
+  `, [aircraftId, afterTime]);
+  const next = r.rows[0];
+  if (!next) return;
+
+  const wetLeaseAvailable = wetLeaseContract && wetLeaseContract !== 'none';
+  const isWetLeased = !!wetLeaseAvailable;
+  const totalBooked = (next.booked_eco || 0) + (next.booked_biz || 0) + (next.booked_fir || 0);
+  const seats = totalBooked > 0 ? totalBooked : (next.seats_sold || 0);
+
+  let cost = 0;
+  if (isWetLeased) {
+    const revenue = next.rev_collected
+      ? (next.booked_eco * (next.eco_price || 0)
+        + next.booked_biz * (next.biz_price || next.eco_price || 0)
+        + next.booked_fir * (next.fir_price || next.eco_price || 0))
+      : (next.seats_sold || 0) * (next.ticket_price || 0);
+    const share = getWetLeaseShare(wetLeaseContract) || 0;
+    cost = Math.round(revenue * share);
+  } else {
+    const cancel = calcCancelCosts(seats, hotelPartnership);
+    cost = cancel.totalCost;
+  }
+
+  await pool.query(
+    "UPDATE flights SET status = 'cancelled', delay_reason = $1, is_wet_leased = $2 WHERE id = $3",
+    [reason, isWetLeased, next.id]
+  );
+
+  if (cost > 0) {
+    await pool.query('UPDATE airlines SET balance = balance - $1 WHERE id = $2', [cost, airlineId]);
+    const desc = isWetLeased
+      ? `Wet Lease - ${next.flight_number} (${reason})`
+      : `Cancellation - ${next.flight_number} (${reason})`;
+    await pool.query(
+      "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
+      [airlineId, -cost, desc]
+    );
+  }
+
+  await logDelayEvent({
+    flightId: next.id, airlineId, aircraftId,
+    eventType: reason, outcome: isWetLeased ? 'wet_leased' : 'cancelled',
+    cost, satisfactionMalus: isWetLeased ? 10 : 20, wetLeased: isWetLeased,
+  });
 }
 
 // Process flights - update statuses and calculate revenue
@@ -1136,6 +1227,8 @@ async function processFlights() {
     }
 
     // Boarding → In-Flight (process departures BEFORE boarding check so locations are up-to-date)
+    // Includes 'delayed' status: minor-delay flights board normally; the extended
+    // departure_time keeps them parked until their new takeoff slot.
     const boardingReadyResult = await pool.query(`
       SELECT f.id, f.flight_number,
              COALESCE(r.distance_km, ws_r.distance_km, 0) as distance_km,
@@ -1146,7 +1239,7 @@ async function processFlights() {
       LEFT JOIN routes ws_r ON ws.route_id = ws_r.id
       LEFT JOIN aircraft ac ON f.aircraft_id = ac.id
       LEFT JOIN aircraft_types at ON ac.aircraft_type_id = at.id
-      WHERE f.status = 'boarding'
+      WHERE f.status IN ('boarding', 'delayed')
       AND f.departure_time <= $1::timestamptz
     `, [now.toISOString()]);
 
@@ -1193,7 +1286,14 @@ async function processFlights() {
              COALESCE(f.booked_economy, f.seats_sold, 0)  as booked_eco,
              COALESCE(f.booked_business, 0) as booked_biz,
              COALESCE(f.booked_first, 0)    as booked_fir,
-             COALESCE(NULLIF(f.total_seats, 0), at.max_passengers, 100) as total_capacity
+             COALESCE(NULLIF(f.total_seats, 0), at.max_passengers, 100) as total_capacity,
+             f.delay_reason, f.delay_minutes, f.diversion_airport_code,
+             COALESCE(div_apt.landing_fee_light,  300)  as div_landing_light,
+             COALESCE(div_apt.landing_fee_medium, 700)  as div_landing_medium,
+             COALESCE(div_apt.landing_fee_heavy,  2200) as div_landing_heavy,
+             COALESCE(div_apt.ground_handling_fee_light,  400) as div_gh_light,
+             COALESCE(div_apt.ground_handling_fee_medium, 650) as div_gh_medium,
+             COALESCE(div_apt.ground_handling_fee_heavy, 950) as div_gh_heavy
       FROM flights f
       LEFT JOIN routes r ON f.route_id = r.id
       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
@@ -1202,6 +1302,7 @@ async function processFlights() {
       LEFT JOIN aircraft_types at ON ac.aircraft_type_id = at.id
       LEFT JOIN airports arr_apt ON COALESCE(r.arrival_airport, ws.arrival_airport) = arr_apt.iata_code
       LEFT JOIN airports dep_apt ON COALESCE(r.departure_airport, ws.departure_airport) = dep_apt.iata_code
+      LEFT JOIN airports div_apt ON f.diversion_airport_code = div_apt.iata_code
       WHERE f.status = 'in-flight'
       AND f.arrival_time <= $1::timestamptz
     `, [now.toISOString()]);
@@ -1233,6 +1334,11 @@ async function processFlights() {
       booked_biz: row.booked_biz,
       booked_fir: row.booked_fir,
       total_capacity: row.total_capacity,
+      delay_reason: row.delay_reason,
+      delay_minutes: row.delay_minutes || 0,
+      diversion_airport_code: row.diversion_airport_code,
+      div_landing_light: row.div_landing_light, div_landing_medium: row.div_landing_medium, div_landing_heavy: row.div_landing_heavy,
+      div_gh_light: row.div_gh_light, div_gh_medium: row.div_gh_medium, div_gh_heavy: row.div_gh_heavy,
     }));
 
     for (const flight of completedFlights) {
@@ -1259,12 +1365,34 @@ async function processFlights() {
 
         const atcFee = flight.atc_fee > 0 ? flight.atc_fee : Math.round(distKm * ATC_RATE_PER_KM);
         const fuelCost = flight.fuel_cost || 0;
-        const totalCosts = landingFee + groundHandling + atcFee + fuelCost + cateringCost;
+
+        // Diversion landing/ground-handling fee at the diversion airport
+        // (in addition to the regular fees at the original arrival airport).
+        let diversionFee = 0;
+        const isDiverted = flight.delay_reason === 'medical' && flight.diversion_airport_code;
+        if (isDiverted) {
+          const dlFee = wc === 'L' ? (flight.div_landing_light || 300)
+                       : wc === 'H' ? (flight.div_landing_heavy || 2200)
+                       : (flight.div_landing_medium || 700);
+          const dgh   = wc === 'L' ? (flight.div_gh_light || 400)
+                       : wc === 'H' ? (flight.div_gh_heavy || 950)
+                       : (flight.div_gh_medium || 650);
+          diversionFee = dlFee + dgh;
+        }
+
+        const totalCosts = landingFee + groundHandling + atcFee + fuelCost + cateringCost + diversionFee;
 
         await pool.query(
           'UPDATE flights SET status = $1, atc_fee = CASE WHEN atc_fee = 0 THEN $2 ELSE atc_fee END, landing_fee = $3, ground_handling_cost = $4, catering_cost = $5 WHERE id = $6',
           ['completed', atcFee, landingFee, groundHandling, cateringCost, flight.id]
         );
+
+        if (diversionFee > 0) {
+          await pool.query(
+            "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
+            [flight.airline_id, -diversionFee, `Diversion Fees (${flight.diversion_airport_code}) - ${flight.flight_number}`]
+          );
+        }
 
         if (flight.aircraft_id) {
           const flightHours = flight.departure_time && flight.arrival_time
@@ -1381,10 +1509,13 @@ async function processFlights() {
     // Scheduled → Boarding (15 min before departure)
     // NOTE: This runs AFTER flight completions and transfer completions
     // so that aircraft current_location is up-to-date before checking.
+    // Also rolls delay/cancel/diversion events here (one roll per flight).
     const boardingCandidatesResult = await pool.query(`
       SELECT
         f.id, f.flight_number, f.airline_id, f.aircraft_id,
         COALESCE(r.departure_airport, ws.departure_airport) AS dep_airport,
+        COALESCE(r.arrival_airport,   ws.arrival_airport)   AS arr_airport,
+        COALESCE(r.distance_km, ws_r.distance_km, 0)        AS distance_km,
         COALESCE(f.booked_economy,  0) AS booked_eco,
         COALESCE(f.booked_business, 0) AS booked_biz,
         COALESCE(f.booked_first,    0) AS booked_fir,
@@ -1392,49 +1523,251 @@ async function processFlights() {
         COALESCE(f.business_price,  0) AS biz_price,
         COALESCE(f.first_price,     0) AS fir_price,
         COALESCE(f.booking_revenue_collected, 0) AS rev_collected,
-        ac.current_location
+        f.seats_sold, f.ticket_price,
+        ac.current_location, ac.home_airport, ac.condition, ac.maintenance_program,
+        al.wet_lease_contract, al.hotel_partnership,
+        at.wake_turbulence_category AS wake_cat,
+        at.min_runway_landing_m AS min_runway,
+        dep_apt.category AS dep_category
       FROM flights f
       LEFT JOIN routes r           ON f.route_id           = r.id
       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
+      LEFT JOIN routes ws_r        ON ws.route_id          = ws_r.id
       LEFT JOIN aircraft ac        ON f.aircraft_id        = ac.id
+      LEFT JOIN aircraft_types at  ON ac.aircraft_type_id  = at.id
+      LEFT JOIN airlines al        ON f.airline_id         = al.id
+      LEFT JOIN airports dep_apt   ON COALESCE(r.departure_airport, ws.departure_airport) = dep_apt.iata_code
       WHERE f.status = 'scheduled'
         AND f.departure_time <= $1::timestamptz + INTERVAL '15 minutes'
     `, [now.toISOString()]);
 
-    const boardingCandidates = boardingCandidatesResult.rows.map(r => ({
-      id: r.id, flight_number: r.flight_number, airline_id: r.airline_id, aircraft_id: r.aircraft_id,
-      dep_airport: r.dep_airport,
-      booked_eco: r.booked_eco, booked_biz: r.booked_biz, booked_fir: r.booked_fir,
-      eco_price: r.eco_price, biz_price: r.biz_price, fir_price: r.fir_price,
-      rev_collected: r.rev_collected,
-      current_location: r.current_location,
-    }));
+    const boardingCandidates = boardingCandidatesResult.rows;
+
+    // Cache hub sets per airline so we don't re-query for every candidate flight
+    const hubCacheByAirline = new Map();
+    async function hubsFor(airlineId) {
+      if (!hubCacheByAirline.has(airlineId)) {
+        hubCacheByAirline.set(airlineId, await getAirlineHubCodes(airlineId));
+      }
+      return hubCacheByAirline.get(airlineId);
+    }
 
     for (const f of boardingCandidates) {
+      // ── Aircraft-not-at-dep cascade cancel (existing behavior, possibly
+      //    triggered by a prior technical_air event teleporting to homebase) ──
       if (f.current_location !== null && f.current_location !== f.dep_airport) {
-        let penalty = 0;
-        if (f.rev_collected) {
-          penalty += f.booked_eco * f.eco_price * 1.2;
-          penalty += f.booked_biz * (f.biz_price || f.eco_price) * 1.2;
-          penalty += f.booked_fir * (f.fir_price || f.eco_price) * 1.2;
+        const wetLeaseAvailable = f.wet_lease_contract && f.wet_lease_contract !== 'none';
+        const totalBooked = (f.booked_eco || 0) + (f.booked_biz || 0) + (f.booked_fir || 0);
+        const seats = totalBooked > 0 ? totalBooked : (f.seats_sold || 0);
+
+        let cost = 0;
+        let isWetLeased = false;
+
+        if (wetLeaseAvailable) {
+          // Wet lease saves the leg: airline pays % of expected revenue
+          const revenueExpected = f.rev_collected
+            ? (f.booked_eco * (f.eco_price || 0)
+              + f.booked_biz * (f.biz_price || f.eco_price || 0)
+              + f.booked_fir * (f.fir_price || f.eco_price || 0))
+            : (f.seats_sold || 0) * (f.ticket_price || 0);
+          const share = getWetLeaseShare(f.wet_lease_contract) || 0;
+          cost = Math.round(revenueExpected * share);
+          isWetLeased = true;
+        } else if (f.rev_collected) {
+          // Refund-style penalty (legacy: 1.2x ticket price). Kept for backwards
+          // compatibility with airlines that haven't subscribed to wet lease.
+          let penalty = 0;
+          penalty += (f.booked_eco || 0) * (f.eco_price || 0) * 1.2;
+          penalty += (f.booked_biz || 0) * (f.biz_price || f.eco_price || 0) * 1.2;
+          penalty += (f.booked_fir || 0) * (f.fir_price || f.eco_price || 0) * 1.2;
+          cost = Math.round(penalty);
+        } else {
+          // No revenue collected yet → just charge rebooking + hotel
+          const cancel = calcCancelCosts(seats, f.hotel_partnership);
+          cost = cancel.totalCost;
         }
-        penalty = Math.round(penalty);
 
-        await pool.query("UPDATE flights SET status = 'cancelled' WHERE id = $1", [f.id]);
+        await pool.query(
+          "UPDATE flights SET status = 'cancelled', delay_reason = 'cascade', is_wet_leased = $1 WHERE id = $2",
+          [isWetLeased, f.id]
+        );
 
-        if (penalty > 0) {
-          await pool.query('UPDATE airlines SET balance = balance - $1 WHERE id = $2', [penalty, f.airline_id]);
+        if (cost > 0) {
+          await pool.query('UPDATE airlines SET balance = balance - $1 WHERE id = $2', [cost, f.airline_id]);
+          const desc = isWetLeased
+            ? `Wet Lease - ${f.flight_number} (cascade)`
+            : `Cancellation - ${f.flight_number} (aircraft at ${f.current_location} not ${f.dep_airport})`;
           await pool.query(
             "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
-            [f.airline_id, -penalty, `Flight ${f.flight_number} cancelled - aircraft not at ${f.dep_airport} (at ${f.current_location})`]
+            [f.airline_id, -cost, desc]
           );
         }
 
-        console.log(`[FlightProc] ${f.flight_number} CANCELLED - not at ${f.dep_airport}, at ${f.current_location}, penalty $${penalty}`);
+        await logDelayEvent({
+          flightId: f.id, airlineId: f.airline_id, aircraftId: f.aircraft_id,
+          eventType: 'cascade', outcome: isWetLeased ? 'wet_leased' : 'cancelled',
+          cost, satisfactionMalus: isWetLeased ? 10 : 20, wetLeased: isWetLeased,
+        });
+
+        console.log(`[FlightProc] ${f.flight_number} cascade-${isWetLeased ? 'WET-LEASED' : 'CANCELLED'} - not at ${f.dep_airport}, at ${f.current_location}, cost $${cost}`);
         continue;
       }
 
-      await pool.query("UPDATE flights SET status = 'boarding' WHERE id = $1", [f.id]);
+      // ── Roll delay/cancel/diversion event ──────────────────────────────
+      if (!f.aircraft_id) {
+        // No aircraft assigned → can't roll delays; just transition.
+        await pool.query("UPDATE flights SET status = 'boarding' WHERE id = $1", [f.id]);
+        continue;
+      }
+
+      const hubCodes = await hubsFor(f.airline_id);
+      const isInboundToHub = hubCodes.has(f.arr_airport);
+
+      const decision = await rollDelaysForFlight({
+        airline: {
+          id: f.airline_id,
+          wet_lease_contract: f.wet_lease_contract || 'none',
+          hotel_partnership:  f.hotel_partnership  || 'none',
+        },
+        aircraft: {
+          id: f.aircraft_id,
+          condition: f.condition,
+          maintenance_program: f.maintenance_program || 'basic',
+          home_airport: f.home_airport,
+          wakeCategory: f.wake_cat || 'M',
+          minRunwayLanding: f.min_runway || 0,
+        },
+        departureAirport: { iata_code: f.dep_airport, category: f.dep_category || 4 },
+        arrivalAirport:   { iata_code: f.arr_airport },
+        distanceKm: f.distance_km || 0,
+        isInboundToHub,
+      });
+
+      // ── Outcome dispatch ────────────────────────────────────────────────
+      if (decision.type === 'none') {
+        await pool.query("UPDATE flights SET status = 'boarding' WHERE id = $1", [f.id]);
+        continue;
+      }
+
+      if (decision.type === 'minor') {
+        const dm = decision.delayMinutes;
+        const techCost = decision.technicalCost || 0;
+
+        // Extend departure_time AND arrival_time by delay; status='delayed' to
+        // signal UI. The boarding→in-flight loop accepts 'delayed' too.
+        await pool.query(
+          `UPDATE flights SET status = 'delayed',
+             departure_time = departure_time + ($1::int * INTERVAL '1 minute'),
+             arrival_time   = arrival_time   + ($1::int * INTERVAL '1 minute'),
+             delay_minutes = $1, delay_reason = $2
+           WHERE id = $3`,
+          [dm, decision.subtype, f.id]
+        );
+
+        if (techCost > 0) {
+          await pool.query('UPDATE airlines SET balance = balance - $1 WHERE id = $2', [techCost, f.airline_id]);
+          await pool.query(
+            "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'maintenance', $2, $3)",
+            [f.airline_id, -techCost, `Technical Fix - ${f.flight_number}`]
+          );
+        }
+
+        await logDelayEvent({
+          flightId: f.id, airlineId: f.airline_id, aircraftId: f.aircraft_id,
+          eventType: decision.subtype, outcome: 'minor_delay',
+          delayMinutes: dm, cost: techCost, satisfactionMalus: decision.satisfactionMalus,
+        });
+
+        console.log(`[Delay] ${f.flight_number} ${decision.subtype} +${dm}min, cost $${techCost}`);
+        continue;
+      }
+
+      if (decision.type === 'cancel' && decision.subtype === 'medical') {
+        // Diversion: keep flight on path but extend arrival_time and tag with
+        // diversion airport. status moves to 'boarding' (will go in-flight at
+        // dep_time normally). UI/reports surface 'diverted' via delay_reason.
+        const dm = decision.diversionDelayMinutes;
+        await pool.query(
+          `UPDATE flights SET status = 'boarding',
+             arrival_time = arrival_time + ($1::int * INTERVAL '1 minute'),
+             delay_minutes = $1, delay_reason = 'medical', diversion_airport_code = $2
+           WHERE id = $3`,
+          [dm, decision.diversionAirport, f.id]
+        );
+
+        // If medical delay > turnaround at destination → cancel/wet-lease the
+        // very next leg (eagerly, so player sees the impact).
+        if (decision.willCancelAtDest) {
+          await cancelOrWetLeaseNextLeg({
+            aircraftId: f.aircraft_id,
+            airlineId: f.airline_id,
+            afterTime: f.arrival_time, // original arrival time; next leg sits after this
+            wetLeaseContract: f.wet_lease_contract || 'none',
+            hotelPartnership: f.hotel_partnership || 'none',
+            reason: 'medical_cascade',
+          });
+        }
+
+        await logDelayEvent({
+          flightId: f.id, airlineId: f.airline_id, aircraftId: f.aircraft_id,
+          eventType: 'medical', outcome: 'diverted',
+          delayMinutes: dm, cost: 0, satisfactionMalus: decision.satisfactionMalus,
+          diversionAirport: decision.diversionAirport,
+        });
+
+        console.log(`[Delay] ${f.flight_number} MEDICAL diversion to ${decision.diversionAirport}, +${dm}min`);
+        continue;
+      }
+
+      // weather or technical_air: cancel current flight
+      const subtype = decision.subtype;
+      const isWetLeased = !!decision.wetLeased;
+      const totalBooked = (f.booked_eco || 0) + (f.booked_biz || 0) + (f.booked_fir || 0);
+      const seats = totalBooked > 0 ? totalBooked : (f.seats_sold || 0);
+
+      let cost = 0;
+      if (isWetLeased) {
+        const revenue = f.rev_collected
+          ? (f.booked_eco * (f.eco_price || 0)
+            + f.booked_biz * (f.biz_price || f.eco_price || 0)
+            + f.booked_fir * (f.fir_price || f.eco_price || 0))
+          : (f.seats_sold || 0) * (f.ticket_price || 0);
+        const share = getWetLeaseShare(f.wet_lease_contract) || 0;
+        cost = Math.round(revenue * share);
+      } else {
+        const cancel = calcCancelCosts(seats, f.hotel_partnership);
+        cost = cancel.totalCost;
+      }
+
+      await pool.query(
+        "UPDATE flights SET status = 'cancelled', delay_reason = $1, is_wet_leased = $2 WHERE id = $3",
+        [subtype, isWetLeased, f.id]
+      );
+
+      if (cost > 0) {
+        await pool.query('UPDATE airlines SET balance = balance - $1 WHERE id = $2', [cost, f.airline_id]);
+        const desc = isWetLeased
+          ? `Wet Lease - ${f.flight_number} (${subtype})`
+          : `Cancellation - ${f.flight_number} (${subtype})`;
+        await pool.query(
+          "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
+          [f.airline_id, -cost, desc]
+        );
+      }
+
+      // For technical_air the aircraft "turns back" to homebase. Teleport
+      // current_location so the next scheduled leg cascades correctly.
+      if (subtype === 'technical_air' && f.aircraft_id && f.home_airport) {
+        await pool.query('UPDATE aircraft SET current_location = $1 WHERE id = $2', [f.home_airport, f.aircraft_id]);
+      }
+
+      await logDelayEvent({
+        flightId: f.id, airlineId: f.airline_id, aircraftId: f.aircraft_id,
+        eventType: subtype, outcome: isWetLeased ? 'wet_leased' : 'cancelled',
+        cost, satisfactionMalus: decision.satisfactionMalus, wetLeased: isWetLeased,
+      });
+
+      console.log(`[Delay] ${f.flight_number} ${subtype.toUpperCase()} ${isWetLeased ? 'WET-LEASED' : 'CANCELLED'}, cost $${cost}`);
     }
   } catch (error) {
     console.error('Process flights error:', error);

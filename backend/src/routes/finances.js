@@ -430,15 +430,52 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
     const totalFlightCostTx = parseFloat(totalFlightCostTxRow.val) || 0;
     const airportFeesCatering = Math.max(0, Math.round(totalFlightCostTx - weekFuel - weekAtc));
 
-    const weekMaintenanceRow   = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND (type='maintenance' OR description LIKE '%Maintenance%') AND amount<0 AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
-    const weekCancellationsRow = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND (description ILIKE '%cancel%' OR description ILIKE '%penalty%') AND amount<0 AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
+    // ── Maintenance: scheduled aircraft maintenance only.
+    //    EXCLUDES "Technical Fix" (per-incident from delay system; counted as
+    //    disruption) and "Maintenance Program" (weekly OCC subscription).
+    const weekMaintenanceRow   = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND (type='maintenance' OR description LIKE '%Maintenance%') AND amount<0 AND description NOT LIKE 'Technical Fix%' AND description NOT LIKE 'Maintenance Program%' AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
+
+    // ── Disruption Costs: per-incident fallout from the delay system.
+    //    Cancellations, wet-lease activations (NOT the weekly contract),
+    //    diversion fees, technical fixes. Also legacy "%cancel%/%penalty%".
+    const weekDisruptionRow    = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND amount<0 AND (
+      description LIKE 'Cancellation%' OR
+      (description LIKE 'Wet Lease %' AND description NOT LIKE 'Wet Lease Contract%') OR
+      description LIKE 'Diversion Fees%' OR
+      description LIKE 'Technical Fix%' OR
+      description ILIKE '%cancel%' OR description ILIKE '%penalty%'
+    ) AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
+
+    // ── OCC Subscriptions: weekly recurring fees from the OCC config.
+    const weekOccSubsRow       = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND amount<0 AND (
+      description LIKE 'Maintenance Program%' OR
+      description LIKE 'Ground Handling%' OR
+      description LIKE 'Wet Lease Contract%' OR
+      description LIKE 'Hotel Partnership%'
+    ) AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
+
     const weekAircraftPurchRow = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND type='aircraft_purchase' AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
     const weekPayrollRow       = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND description IN ('Weekly Payroll','Wöchentliche Personalkosten') AND amount<0 AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
     const weekExpansionRow     = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND amount<0 AND (description LIKE 'Opened destination%' OR description LIKE 'Mega Hub%' OR description LIKE 'Airport slot%' OR description LIKE 'Airport expansion%') AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
-    const weekOtherCostsRow    = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND amount<0 AND type NOT IN ('maintenance','aircraft_purchase') AND description NOT LIKE 'Flight Costs%' AND description NOT ILIKE '%cancel%' AND description NOT ILIKE '%penalty%' AND description NOT IN ('Weekly Payroll','Wöchentliche Personalkosten') AND description NOT LIKE 'Opened destination%' AND description NOT LIKE 'Mega Hub%' AND description NOT LIKE 'Airport slot%' AND description NOT LIKE 'Airport expansion%' AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
+
+    // "Other" excludes everything we already bucket above so the totals don't double-count.
+    const weekOtherCostsRow    = await q(`SELECT COALESCE(SUM(ABS(amount)),0) as val FROM transactions WHERE airline_id=$1 AND amount<0 AND type NOT IN ('maintenance','aircraft_purchase')
+      AND description NOT LIKE 'Flight Costs%'
+      AND description NOT ILIKE '%cancel%' AND description NOT ILIKE '%penalty%'
+      AND description NOT LIKE 'Cancellation%'
+      AND description NOT LIKE 'Wet Lease %'
+      AND description NOT LIKE 'Diversion Fees%'
+      AND description NOT LIKE 'Technical Fix%'
+      AND description NOT LIKE 'Maintenance Program%'
+      AND description NOT LIKE 'Ground Handling%'
+      AND description NOT LIKE 'Hotel Partnership%'
+      AND description NOT IN ('Weekly Payroll','Wöchentliche Personalkosten')
+      AND description NOT LIKE 'Opened destination%' AND description NOT LIKE 'Mega Hub%' AND description NOT LIKE 'Airport slot%' AND description NOT LIKE 'Airport expansion%'
+      AND created_at>=NOW()-INTERVAL '7 days'`, [airlineId]);
 
     const weekMaintenance   = Math.round(parseFloat(weekMaintenanceRow.val) || 0);
-    const weekCancellations = Math.round(parseFloat(weekCancellationsRow.val) || 0);
+    const weekDisruption    = Math.round(parseFloat(weekDisruptionRow.val) || 0);
+    const weekOccSubs       = Math.round(parseFloat(weekOccSubsRow.val) || 0);
     const weekAircraftPurch = Math.round(parseFloat(weekAircraftPurchRow.val) || 0);
     const weekPayroll       = Math.round(parseFloat(weekPayrollRow.val) || 0);
     const weekExpansion     = Math.round(parseFloat(weekExpansionRow.val) || 0);
@@ -573,7 +610,10 @@ router.get('/dashboard', authMiddleware, async (req, res) => {
         atc: weekAtc,
         airport_fees_catering: airportFeesCatering,
         maintenance: weekMaintenance,
-        cancellations: weekCancellations,
+        disruption_costs: weekDisruption,
+        occ_subscriptions: weekOccSubs,
+        // Legacy alias kept so older clients still see something here.
+        cancellations: weekDisruption,
         aircraft_purchases: weekAircraftPurch,
         payroll: weekPayroll,
         expansion: weekExpansion,

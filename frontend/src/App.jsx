@@ -34,6 +34,7 @@ import FlightSchedule from './pages/FlightSchedule';
 import Finances from './pages/Finances';
 import ServiceProfiles from './pages/ServiceProfiles';
 import CabinProfiles from './pages/CabinProfiles';
+import OperationsControlCenter from './pages/OperationsControlCenter';
 import AirportPage from './pages/AirportPage';
 import HubsDestinations from './pages/HubsDestinations';
 import AirportOverview from './pages/AirportOverview';
@@ -192,6 +193,7 @@ function App() {
   const [hubsBackPage, setHubsBackPage] = useState('dashboard');
   const [loading, setLoading] = useState(true);
   const [airlineStats, setAirlineStats] = useState({ destinations_count: 0, hubs: [], home_airport: null, weekly_revenue: 0, avg_satisfaction: null, daily_passengers: 0, total_passengers: 0 });
+  const [opsStats, setOpsStats] = useState(null);
   const [departures, setDepartures] = useState([]);
   const [arrivals, setArrivals] = useState([]);
   const [fleetSummary, setFleetSummary] = useState([]);
@@ -358,7 +360,7 @@ function App() {
   };
 
   useEffect(() => {
-    if (!activeAirline) { setDepartures([]); setArrivals([]); setFleetSummary([]); setAirlineStats({ destinations_count: 0, hubs: [], home_airport: null, weekly_revenue: 0, avg_satisfaction: null, daily_passengers: 0, total_passengers: 0 }); setActiveRoutes([]); return; }
+    if (!activeAirline) { setDepartures([]); setArrivals([]); setFleetSummary([]); setAirlineStats({ destinations_count: 0, hubs: [], home_airport: null, weekly_revenue: 0, avg_satisfaction: null, daily_passengers: 0, total_passengers: 0 }); setOpsStats(null); setActiveRoutes([]); return; }
     const token = localStorage.getItem('token');
     const h = { 'Authorization': `Bearer ${token}` };
     Promise.all([
@@ -367,12 +369,14 @@ function App() {
       fetch(`${API_URL}/api/airline/fleet-summary`, { headers: h }).then(r => r.json()),
       fetch(`${API_URL}/api/airline/stats`, { headers: h }).then(r => r.json()),
       fetch(`${API_URL}/api/airline/active-routes`, { headers: h }).then(r => r.json()),
-    ]).then(([dep, arr, fleet, stats, routesData]) => {
+      fetch(`${API_URL}/api/occ/weekly-report`, { headers: h }).then(r => r.json()).catch(() => null),
+    ]).then(([dep, arr, fleet, stats, routesData, ops]) => {
       setDepartures(dep.flights || []);
       setArrivals(arr.flights || []);
       setFleetSummary(fleet.fleet || []);
       setAirlineStats({ destinations_count: stats.destinations_count || 0, hubs: stats.hubs || [], home_airport: stats.home_airport || null, weekly_revenue: stats.weekly_revenue || 0, avg_satisfaction: stats.avg_satisfaction ?? null, daily_passengers: stats.daily_passengers || 0, total_passengers: stats.total_passengers || 0 });
       setActiveRoutes(routesData.routes || []);
+      setOpsStats(ops && !ops.error ? ops : null);
     }).catch(() => {});
   }, [activeAirline?.id]);
 
@@ -453,6 +457,7 @@ function App() {
     hubs: 'Network',
     'service-profiles': 'Service Profiles',
     'cabin-profiles': 'Cabin Profiles',
+    'ops-control': 'Operations Control Center',
     personnel: 'Staff & Crew',
     marketplace: 'Marketplace',
     'airport-overview': 'Airport Overview',
@@ -557,6 +562,9 @@ function App() {
   }
   if (currentPage === 'cabin-profiles') {
     return <CabinProfiles airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Dashboard'} />;
+  }
+  if (currentPage === 'ops-control') {
+    return <OperationsControlCenter airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Flight Operations'} />;
   }
   if (currentPage === 'hubs') {
     return <HubsDestinations airline={activeAirline} onBack={() => setCurrentPage(hubsBackPage)} backLabel={PAGE_LABELS[hubsBackPage] || 'Dashboard'} onNavigateToAirport={(code) => navigateToAirport(code, 'hubs')} onBalanceUpdate={handleBalanceUpdate} onNavigate={(page) => navigate(page)} />;
@@ -1032,6 +1040,50 @@ function App() {
                     </table>
                   </div>
                 </div>
+
+                {/* Operations card */}
+                {opsStats && opsStats.flights && opsStats.flights.finalized > 0 && (() => {
+                  const f = opsStats.flights || {};
+                  const t = opsStats.totals || {};
+                  const otRate = f.on_time_rate;
+                  const otPct = otRate != null ? (otRate * 100).toFixed(1) + '%' : '—';
+                  const otColor = otRate == null ? '#aaa' : otRate >= 0.95 ? '#22c55e' : otRate >= 0.85 ? '#eab308' : '#dc2626';
+                  return (
+                    <div className="hp-sidebar-card">
+                      <div className="hp-sidebar-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span>Operations — 7d</span>
+                        <button
+                          onClick={() => navigate('ops-control')}
+                          style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.3)', color: 'rgba(255,255,255,0.7)', padding: '0.22rem 0.65rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', letterSpacing: '0.03em' }}
+                        >
+                          OCC
+                        </button>
+                      </div>
+                      <div style={{ background: '#fff' }}>
+                        <table className="hp-info-table">
+                          <tbody>
+                            <tr>
+                              <td className="hp-it-label">On-Time Rate</td>
+                              <td className="hp-it-val" style={{ color: otColor }}>{otPct}</td>
+                            </tr>
+                            <tr>
+                              <td className="hp-it-label">Cancellations</td>
+                              <td className="hp-it-val">{f.cancelled || 0}</td>
+                            </tr>
+                            <tr>
+                              <td className="hp-it-label">Disruption Cost</td>
+                              <td className="hp-it-val">${(t.disruption_cost || 0).toLocaleString()}</td>
+                            </tr>
+                            <tr className="hp-it-last">
+                              <td className="hp-it-label">Wet Lease Used</td>
+                              <td className="hp-it-val">{t.wet_lease_activations || 0}×</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Fleet card */}
                 <div className="hp-sidebar-card">

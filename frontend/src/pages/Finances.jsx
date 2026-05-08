@@ -443,7 +443,8 @@ export default function Finances({ airline, onBack, onNavigateToAirport, onNavig
                 <BRow label="ATC / Navigation" value={fmt(cb.atc)} />
                 <BRow label="Airport Fees & Catering" value={fmt(cb.airport_fees_catering)} />
                 <BRow label="Maintenance" value={fmt(cb.maintenance)} />
-                <BRow label="Cancellation Penalties" value={fmt(cb.cancellations)} />
+                <BRow label="Disruption Costs" value={fmt(cb.disruption_costs ?? cb.cancellations)} />
+                {cb.occ_subscriptions > 0 && <BRow label="OCC Subscriptions" value={fmt(cb.occ_subscriptions)} />}
                 <BRow label="Aircraft Purchases" value={fmt(cb.aircraft_purchases)} />
                 {cb.payroll > 0 && <BRow label="Payroll" value={fmt(cb.payroll)} />}
                 {cb.expansion > 0 && <BRow label="Destinations & Slots" value={fmt(cb.expansion)} />}

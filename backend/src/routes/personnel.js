@@ -1,6 +1,7 @@
 import express from 'express';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
+import { MAINTENANCE_PROGRAMS, GROUND_HANDLING_LEVELS, WET_LEASE_CONTRACTS, HOTEL_PARTNERSHIPS } from '../utils/delaySystem.js';
 
 const router = express.Router();
 
@@ -367,9 +368,108 @@ async function processPayroll() {
   }
 }
 
+// ── OCC weekly billing ──────────────────────────────────────────────────────
+// Bills four subscription types in one transaction batch (per airline):
+// 1. Maintenance program (per aircraft)
+// 2. Ground handling (per hub)
+// 3. Wet lease contract (flat per airline)
+// 4. Hotel partnership (flat per airline)
+//
+// Uses last_occ_billing_at as a 7-day gate (independent of payroll cycle so
+// new airlines aren't double-charged on day 1).
+async function processOccBilling() {
+  try {
+    const dueResult = await pool.query(`
+      SELECT id, name, wet_lease_contract, hotel_partnership
+      FROM airlines
+      WHERE last_occ_billing_at IS NULL
+         OR last_occ_billing_at + INTERVAL '7 days' <= NOW()
+    `);
+    if (dueResult.rows.length === 0) return;
+
+    let processed = 0;
+    for (const airline of dueResult.rows) {
+      // 1. Maintenance program (sum across active aircraft)
+      const acRes = await pool.query(
+        "SELECT COALESCE(maintenance_program, 'basic') AS prog, COUNT(*)::int AS n FROM aircraft WHERE airline_id = $1 GROUP BY prog",
+        [airline.id]
+      );
+      let maintCost = 0;
+      let enhancedN = 0, premiumN = 0;
+      for (const row of acRes.rows) {
+        const cfg = MAINTENANCE_PROGRAMS[row.prog] || MAINTENANCE_PROGRAMS.basic;
+        maintCost += cfg.weeklyCost * row.n;
+        if (row.prog === 'enhanced') enhancedN = row.n;
+        if (row.prog === 'premium')  premiumN  = row.n;
+      }
+
+      // 2. Ground handling (sum across configured hubs)
+      const ghRes = await pool.query(
+        "SELECT level, COUNT(*)::int AS n FROM airline_ground_handling WHERE airline_id = $1 GROUP BY level",
+        [airline.id]
+      );
+      let ghCost = 0;
+      for (const row of ghRes.rows) {
+        const cfg = GROUND_HANDLING_LEVELS[row.level] || GROUND_HANDLING_LEVELS.standard;
+        ghCost += cfg.weeklyCost * row.n;
+      }
+
+      // 3. Wet lease
+      const wlCfg = WET_LEASE_CONTRACTS[airline.wet_lease_contract] || WET_LEASE_CONTRACTS.none;
+      const wlCost = wlCfg.weeklyCost;
+
+      // 4. Hotel partnership
+      const hpCfg = HOTEL_PARTNERSHIPS[airline.hotel_partnership] || HOTEL_PARTNERSHIPS.none;
+      const hpCost = hpCfg.weeklyCost;
+
+      const total = Math.round(maintCost + ghCost + wlCost + hpCost);
+
+      await pool.query(
+        'UPDATE airlines SET last_occ_billing_at = NOW(), balance = balance - $1 WHERE id = $2',
+        [total, airline.id]
+      );
+
+      if (maintCost > 0) {
+        await pool.query(
+          "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
+          [airline.id, -Math.round(maintCost), `Maintenance Program (${enhancedN} Enhanced, ${premiumN} Premium)`]
+        );
+      }
+      if (ghCost > 0) {
+        await pool.query(
+          "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
+          [airline.id, -Math.round(ghCost), `Ground Handling (weekly)`]
+        );
+      }
+      if (wlCost > 0) {
+        await pool.query(
+          "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
+          [airline.id, -Math.round(wlCost), `Wet Lease Contract (${airline.wet_lease_contract})`]
+        );
+      }
+      if (hpCost > 0) {
+        await pool.query(
+          "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
+          [airline.id, -Math.round(hpCost), `Hotel Partnership (${airline.hotel_partnership})`]
+        );
+      }
+
+      if (total > 0) {
+        console.log(`[OCC] ${airline.name}: -$${total.toLocaleString()} OCC weekly`);
+      }
+      processed++;
+    }
+
+    if (processed > 0) console.log(`[OCC] Processed ${processed} airline(s)`);
+  } catch (err) {
+    console.error('processOccBilling error:', err);
+  }
+}
+
 export function startPayrollProcessor() {
   // Run immediately on start (triggers for airlines with last_payroll_at = NULL)
   processPayroll();
+  processOccBilling();
   // Schedule re-checks at :13 each hour; only deducts when >= 7 days have passed
   const now = new Date();
   let minsUntil = (13 - now.getMinutes() + 60) % 60;
@@ -377,7 +477,8 @@ export function startPayrollProcessor() {
   const msUntil = minsUntil * 60000 - now.getSeconds() * 1000 - now.getMilliseconds();
   setTimeout(() => {
     processPayroll();
-    setInterval(processPayroll, 60 * 60 * 1000);
+    processOccBilling();
+    setInterval(() => { processPayroll(); processOccBilling(); }, 60 * 60 * 1000);
   }, msUntil);
   console.log(`[Payroll] Payroll processor started — next check in ${Math.round(msUntil / 60000)} min (at :13)`);
 }

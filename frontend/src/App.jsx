@@ -860,6 +860,8 @@ function App() {
 
       <div className="hp-container" style={{ paddingTop: 24 }}>
 
+        {activeAirline && <TopBar />}
+
         {/* ── Info strip with profile actions ── */}
         <div className="hp-info-strip">
           <div className="hp-identity">
@@ -892,8 +894,6 @@ function App() {
             <button className="hp-btn-logout-strip" onClick={handleLogout}>Logout</button>
           </div>
         </div>
-
-        {activeAirline && <TopBar />}
 
         <VerifyEmailBanner user={user} />
 

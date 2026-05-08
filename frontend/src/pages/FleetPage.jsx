@@ -1120,7 +1120,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
         /* Fleet Type Grid */
         .fleet-type-grid {
           display: grid;
-          grid-template-columns: repeat(3, 1fr);
+          grid-template-columns: repeat(4, 1fr);
           gap: 1.25rem;
         }
 
@@ -1209,6 +1209,12 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
         }
 
         /* Responsive */
+        @media (max-width: 1100px) {
+          .fleet-type-grid {
+            grid-template-columns: repeat(3, 1fr);
+          }
+        }
+
         @media (max-width: 900px) {
           .fleet-type-grid {
             grid-template-columns: repeat(2, 1fr);

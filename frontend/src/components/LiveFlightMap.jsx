@@ -30,10 +30,10 @@ function bearing(lat1, lon1, lat2, lon2) {
   return (toDeg(Math.atan2(y, x)) + 360) % 360;
 }
 
-function planeIcon(deg) {
+function planeIcon(deg, color = '#26A9F0') {
   return L.divIcon({
     className: '',
-    html: `<div style="font-size:16px;line-height:1;transform:rotate(${deg - 90}deg);color:#26A9F0;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.4))">✈</div>`,
+    html: `<div style="font-size:16px;line-height:1;transform:rotate(${deg - 90}deg);color:${color};filter:drop-shadow(0 1px 2px rgba(0,0,0,0.4))">✈</div>`,
     iconSize: [16, 16],
     iconAnchor: [8, 8],
   });
@@ -67,16 +67,31 @@ export default function LiveFlightMap() {
       const [nLat, nLon] = arc[idx + 1];
       const bear = bearing(lat, lon, nLat, nLon);
 
-      const marker = L.marker([lat, lon], { icon: planeIcon(bear) });
+      // Orange highlight for any disrupted flight currently in the air:
+      //   medical (whether or not we found a diversion airport)
+      //   technical_air (delayed after turn-back & repair)
+      const isDisrupted = f.delay_reason === 'medical' || f.delay_reason === 'technical_air';
+      const color = isDisrupted ? '#f97316' : '#26A9F0';
+      const marker = L.marker([lat, lon], { icon: planeIcon(bear, color) });
       const remH = Math.floor(f.remaining_ms / 3600000);
       const remM = Math.floor((f.remaining_ms % 3600000) / 60000);
       const eta = `${remH}h ${String(remM).padStart(2, '0')}m remaining`;
+
+      let divNote = '';
+      if (f.delay_reason === 'medical' && f.diversion_airport_code) {
+        divNote = `<div style="margin-top:4px;font-size:0.72rem;font-weight:700;color:#f97316;text-transform:uppercase;letter-spacing:0.04em">Diverted via ${f.diversion_airport_code}</div>`;
+      } else if (f.delay_reason === 'medical') {
+        divNote = `<div style="margin-top:4px;font-size:0.72rem;font-weight:700;color:#f97316;text-transform:uppercase;letter-spacing:0.04em">Medical diversion</div>`;
+      } else if (f.delay_reason === 'technical_air') {
+        divNote = `<div style="margin-top:4px;font-size:0.72rem;font-weight:700;color:#f97316;text-transform:uppercase;letter-spacing:0.04em">Diverted (continuing after repair)</div>`;
+      }
 
       marker.bindPopup(
         `<div style="font-family:system-ui,sans-serif;line-height:1.7;min-width:140px">
           <strong style="font-family:monospace;font-size:1rem">${f.flight_number}</strong><br>
           <span style="font-family:monospace;font-weight:700">${f.origin_iata} → ${f.destination_iata}</span><br>
           <span style="color:#888;font-size:0.85rem">${eta}</span>
+          ${divNote}
         </div>`,
         { maxWidth: 200 }
       );

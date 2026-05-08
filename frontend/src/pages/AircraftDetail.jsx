@@ -2025,15 +2025,24 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                               : { label: 'Completed', cls: 'ontime', color: '#22c55e' }
                         )
                       : f.status === 'cancelled' ? (
-                          f.is_wet_leased
-                            ? { label: 'Wet-Leased', cls: 'cancelled', color: '#a16207' }
-                            : { label: 'Canceled', cls: 'cancelled', color: '#dc2626' }
+                          // Legacy: pre-Variante-2 tech_air cancellations rendered as "Diverted to"
+                          f.delay_reason === 'technical_air'
+                            ? { label: `Diverted to ${f.departure_airport || '—'}`, cls: 'cancelled', color: '#f97316' }
+                            : f.is_wet_leased
+                              ? { label: 'Wet-Leased', cls: 'cancelled', color: '#2563eb' }
+                              : { label: 'Canceled', cls: 'cancelled', color: '#dc2626' }
                         )
-                      : f.status === 'delayed' ? { label: `Delayed +${f.delay_minutes || 0}m`, cls: 'boarding', color: '#eab308' }
+                      : f.status === 'delayed' ? (
+                          f.delay_reason === 'technical_air'
+                            ? { label: `Diverted to ${f.departure_airport || '—'}`, cls: 'boarding', color: '#f97316' }
+                            : { label: `Delayed +${f.delay_minutes || 0}m`, cls: 'boarding', color: '#eab308' }
+                        )
                       : f.status === 'in-flight' ? (
                           f.delay_reason === 'medical' && f.diversion_airport_code
                             ? { label: 'Diverted', cls: 'boarding', color: '#f97316' }
-                            : computeArrStatus(f.departure_time, f.arrival_time, nowMs)
+                            : f.delay_reason === 'technical_air'
+                              ? { label: 'Diverted (returning)', cls: 'boarding', color: '#f97316' }
+                              : computeArrStatus(f.departure_time, f.arrival_time, nowMs)
                         )
                       : computeDepStatus(f.departure_time, nowMs);
                     rows.push(

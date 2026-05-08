@@ -95,9 +95,13 @@ router.get('/weekly-report', authMiddleware, async (req, res) => {
   try {
     const sinceClause = "created_at >= NOW() - INTERVAL '7 days'";
 
+    // On-time rate is computed over COMPLETED flights only — cancellations
+    // pull it down artificially otherwise. Cancellations are reported
+    // separately via the 'cancelled' counter and the cancellation rate.
     const flightsRes = await pool.query(`
       SELECT
         COUNT(*) FILTER (WHERE status IN ('completed','cancelled')) AS finalized,
+        COUNT(*) FILTER (WHERE status = 'completed') AS completed,
         COUNT(*) FILTER (WHERE status = 'completed' AND (delay_reason IS NULL OR delay_reason = '')) AS on_time,
         COUNT(*) FILTER (WHERE status = 'completed' AND delay_reason IS NOT NULL AND delay_reason <> '') AS delayed_completed,
         COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled
@@ -105,16 +109,24 @@ router.get('/weekly-report', authMiddleware, async (req, res) => {
       WHERE airline_id = $1 AND created_at >= NOW() - INTERVAL '7 days'
     `, [req.airlineId]);
 
+    // Per-event listing (last 200) so the player can see exactly which flight
+    // and aircraft each disruption hit.
     const eventsRes = await pool.query(`
-      SELECT event_type, outcome, wet_leased,
-             COUNT(*)::int AS count,
-             COALESCE(SUM(cost), 0)::int AS total_cost,
-             COALESCE(SUM(satisfaction_malus), 0)::int AS total_sat_malus,
-             COALESCE(SUM(delay_minutes), 0)::int AS total_delay_min
-      FROM flight_delay_events
-      WHERE airline_id = $1 AND ${sinceClause}
-      GROUP BY event_type, outcome, wet_leased
-      ORDER BY event_type, outcome
+      SELECT fde.id, fde.event_type, fde.outcome, fde.wet_leased,
+             fde.delay_minutes, fde.cost, fde.satisfaction_malus,
+             fde.diversion_airport, fde.created_at,
+             f.flight_number,
+             a.registration AS aircraft_reg,
+             COALESCE(r.departure_airport, ws.departure_airport) AS dep_airport,
+             COALESCE(r.arrival_airport,   ws.arrival_airport)   AS arr_airport
+      FROM flight_delay_events fde
+      LEFT JOIN flights f          ON fde.flight_id   = f.id
+      LEFT JOIN aircraft a         ON fde.aircraft_id = a.id
+      LEFT JOIN routes r           ON f.route_id      = r.id
+      LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
+      WHERE fde.airline_id = $1 AND fde.${sinceClause}
+      ORDER BY fde.created_at DESC
+      LIMIT 200
     `, [req.airlineId]);
 
     const totalsRes = await pool.query(`
@@ -130,16 +142,22 @@ router.get('/weekly-report', authMiddleware, async (req, res) => {
     const fl = flightsRes.rows[0] || {};
     const totals = totalsRes.rows[0] || {};
     const finalized = parseInt(fl.finalized) || 0;
+    const completed = parseInt(fl.completed) || 0;
     const onTime    = parseInt(fl.on_time) || 0;
+    const cancelled = parseInt(fl.cancelled) || 0;
 
     res.json({
       window: { days: 7, from: new Date(Date.now() - 7*86400e3).toISOString(), to: new Date().toISOString() },
       flights: {
         finalized,
+        completed,
         on_time: onTime,
         delayed_completed: parseInt(fl.delayed_completed) || 0,
-        cancelled: parseInt(fl.cancelled) || 0,
-        on_time_rate: finalized > 0 ? onTime / finalized : null,
+        cancelled,
+        // On-time rate is over COMPLETED flights only. Cancellation rate is
+        // tracked separately so they don't conflate.
+        on_time_rate:     completed > 0 ? onTime / completed : null,
+        cancellation_rate: finalized > 0 ? cancelled / finalized : null,
       },
       totals: {
         disruption_cost: parseInt(totals.total_disruption_cost) || 0,
@@ -148,13 +166,19 @@ router.get('/weekly-report', authMiddleware, async (req, res) => {
         wet_lease_activations: parseInt(totals.wet_lease_activations) || 0,
       },
       events: eventsRes.rows.map(r => ({
+        id: r.id,
+        created_at: r.created_at,
         event_type: r.event_type,
         outcome: r.outcome,
         wet_leased: r.wet_leased,
-        count: r.count,
-        total_cost: r.total_cost,
-        total_sat_malus: r.total_sat_malus,
-        total_delay_min: r.total_delay_min,
+        delay_minutes: r.delay_minutes,
+        cost: r.cost,
+        satisfaction_malus: r.satisfaction_malus,
+        diversion_airport: r.diversion_airport,
+        flight_number: r.flight_number,
+        aircraft_reg: r.aircraft_reg,
+        dep_airport: r.dep_airport,
+        arr_airport: r.arr_airport,
       })),
     });
   } catch (err) {

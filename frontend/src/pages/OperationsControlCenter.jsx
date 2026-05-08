@@ -136,8 +136,8 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
 
         {/* ── 4 KPI Cards ── */}
         <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
-          <KPI label="Weekly OCC Cost" value={fmtMoney(weeklyTotal)} sub={`Maint ${fmtMoney(weeklyMaint)} · GH ${fmtMoney(weeklyGh)} · WL ${fmtMoney(weeklyWl)} · HP ${fmtMoney(weeklyHp)}`} />
-          <KPI label="On-Time Rate" value={otPct} valColor={otColor} sub={`${f.finalized || 0} flights finalized`} />
+          <KPI label="Weekly OCC Cost" value={fmtMoney(weeklyTotal)} />
+          <KPI label="On-Time Rate" value={otPct} valColor={otColor} sub={`of ${f.completed || 0} completed flights`} />
           <KPI label="Disruption Cost" value={fmtMoney(t.disruption_cost)} sub="Last 7 days" />
           <KPI label="Wet Lease Used" value={`${t.wet_lease_activations || 0}×`} sub={`${fmtMoney(t.wet_lease_cost)} paid`} />
         </div>
@@ -155,7 +155,7 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
             <ConfigCard
               title="Wet Lease Contract"
               image="/occ/occ_wetlease.png"
-              subtitle="Covers the next rotation when a Technical (Air) or Medical event takes an aircraft out of service. Operator takes a % of ticket revenue."
+              subtitle="Covers the next rotation departing from one of your hubs when a Technical (Air) or Medical event takes an aircraft out of service. Flights stranded at non-hub destinations cannot be wet-leased — those are cancelled with rebooking + hotel costs."
               footnote={`Flat fee — applies airline-wide`}
             >
               <OptionGrid>
@@ -397,26 +397,33 @@ function ReportView({ report }) {
           <table style={tblStyle}>
             <thead>
               <tr>
+                <th style={th}>When</th>
+                <th style={th}>Flight</th>
+                <th style={th}>Aircraft</th>
+                <th style={th}>Route</th>
                 <th style={th}>Event</th>
                 <th style={th}>Outcome</th>
-                <th style={{ ...th, textAlign: 'right' }}>Count</th>
-                <th style={{ ...th, textAlign: 'right' }}>Total Delay (min)</th>
+                <th style={{ ...th, textAlign: 'right' }}>Delay</th>
                 <th style={{ ...th, textAlign: 'right' }}>Cost</th>
-                <th style={{ ...th, textAlign: 'right' }}>Sat. Malus</th>
+                <th style={{ ...th, textAlign: 'right' }}>Sat</th>
               </tr>
             </thead>
             <tbody>
-              {report.events.map((e, i) => (
-                <tr key={i} style={trStyle}>
+              {report.events.map((e) => (
+                <tr key={e.id} style={trStyle}>
+                  <td style={{ ...td, fontSize: '0.78rem', color: '#888' }}>{formatTime(e.created_at)}</td>
+                  <td style={{ ...td, fontFamily: 'monospace', fontWeight: 600 }}>{e.flight_number || '—'}</td>
+                  <td style={{ ...td, fontFamily: 'monospace', fontSize: '0.82rem', color: '#666' }}>{e.aircraft_reg || '—'}</td>
+                  <td style={{ ...td, fontFamily: 'monospace', fontSize: '0.82rem', color: '#666' }}>
+                    {e.dep_airport && e.arr_airport ? `${e.dep_airport} → ${e.arr_airport}` : '—'}
+                  </td>
                   <td style={td}>{EVENT_LABEL[e.event_type] || e.event_type}</td>
                   <td style={td}>
-                    {OUTCOME_LABEL[e.outcome] || e.outcome}
-                    {e.wet_leased && <span style={{ marginLeft: 6, fontSize: '0.7rem', color: '#888' }}>(wet-leased)</span>}
+                    <span style={{ color: outcomeColor(e), fontWeight: 600 }}>{formatOutcome(e)}</span>
                   </td>
-                  <td style={{ ...td, textAlign: 'right' }}>{e.count}</td>
-                  <td style={{ ...td, textAlign: 'right' }}>{e.total_delay_min || 0}</td>
-                  <td style={{ ...td, textAlign: 'right' }}>{fmtMoney(e.total_cost)}</td>
-                  <td style={{ ...td, textAlign: 'right' }}>-{e.total_sat_malus}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{e.delay_minutes ? `+${e.delay_minutes}m` : '—'}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{e.cost ? fmtMoney(e.cost) : '—'}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>{e.satisfaction_malus ? `-${e.satisfaction_malus}` : '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -425,6 +432,39 @@ function ReportView({ report }) {
       </div>
     </>
   );
+}
+
+// ── Event helpers ──────────────────────────────────────────────────────────
+function formatTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const day = d.toLocaleDateString(undefined, { weekday: 'short' });
+  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  return `${day} ${time}`;
+}
+
+function formatOutcome(e) {
+  if (e.event_type === 'technical_air' && e.outcome === 'delayed') {
+    return `Diverted to ${e.dep_airport || '—'}`;
+  }
+  if (e.event_type === 'medical' && e.outcome === 'diverted') {
+    return e.diversion_airport
+      ? `Diverted via ${e.diversion_airport}`
+      : 'Medical diversion';
+  }
+  if (e.outcome === 'wet_leased') return 'Wet-Leased';
+  if (e.outcome === 'cancelled')  return 'Cancelled';
+  if (e.outcome === 'minor_delay') return `Delayed +${e.delay_minutes || 0}m`;
+  return OUTCOME_LABEL[e.outcome] || e.outcome;
+}
+
+function outcomeColor(e) {
+  if (e.event_type === 'technical_air' && e.outcome === 'delayed') return '#f97316';
+  if (e.event_type === 'medical' && e.outcome === 'diverted')      return '#f97316';
+  if (e.outcome === 'wet_leased') return '#2563eb';
+  if (e.outcome === 'cancelled')  return '#dc2626';
+  if (e.outcome === 'minor_delay') return '#eab308';
+  return '#666';
 }
 
 function ReportRow({ label, value, bold }) {

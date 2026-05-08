@@ -478,7 +478,7 @@ async function initDatabase() {
   // ── SEED additional aircraft types (IDs 15-64) ───────────────────────────────
   await safeQuery(`
     INSERT INTO aircraft_types (id, manufacturer, model, full_name, max_passengers, range_km, cruise_speed_kmh, min_runway_takeoff_m, min_runway_landing_m, fuel_consumption_empty_per_km, fuel_consumption_full_per_km, wake_turbulence_category, new_price_usd, required_level, required_pilots, image_filename) VALUES
-    (15,'Airbus','A319 Neo','Airbus A319 Neo',160,6850,828,1860,1400,0.020,0.025,'M',101500000,8,2,'Aircraft_Airbus_319_Neo.png'),
+    (15,'Airbus','A319neo','Airbus A319neo',160,6850,828,1860,1400,0.020,0.025,'M',101500000,8,2,'Aircraft_Airbus_319_Neo.png'),
     (16,'Airbus','A330-200','Airbus A330-200',406,13450,871,2600,1830,0.031,0.040,'H',238500000,11,2,'Aircraft_Airbus_330-200.png'),
     (17,'Airbus','A330-300','Airbus A330-300',440,11750,871,2700,1830,0.033,0.042,'H',264200000,11,2,'Aircraft_Airbus_330-300.png'),
     (18,'Airbus','A330-800 Neo','Airbus A330-800 Neo',406,15094,871,2480,1830,0.028,0.036,'H',259900000,11,2,'Aircraft_Airbus_330-800_Neo.png'),
@@ -532,6 +532,15 @@ async function initDatabase() {
   `, null, 'aircraft_types seed');
   await safeQuery(`SELECT setval('aircraft_types_id_seq', COALESCE((SELECT MAX(id) FROM aircraft_types), 1))`, null, 'setval at');
 
+  // ── NAME NORMALIZATIONS ─────────────────────────────────────────────────────
+  // Standardize Airbus Neo naming on the manufacturer's "A3XXneo" form.
+  // Why: keeps existing DB rows aligned with the new seed names so the
+  // full_name-based UPDATE filters below still match.
+  await runStatements([
+    "UPDATE aircraft_types SET model='A319neo', full_name='Airbus A319neo' WHERE model IN ('A319 Neo','A319neo')",
+    "UPDATE aircraft_types SET model='A321neo', full_name='Airbus A321neo' WHERE model IN ('A321 Neo','A321neo')",
+  ], 'neo name normalization');
+
   // ── DATA CORRECTIONS ─────────────────────────────────────────────────────────
   // Aircraft runway & fuel corrections
   const fuelCorrections = [
@@ -553,7 +562,7 @@ async function initDatabase() {
     ["UPDATE aircraft_types SET min_runway_landing_m=1440, fuel_consumption_per_km=1.6  WHERE full_name='Embraer ERJ 135'"],
     ["UPDATE aircraft_types SET min_runway_landing_m=1560, fuel_consumption_per_km=2.1  WHERE full_name='Embraer E195-E2'"],
     ["UPDATE aircraft_types SET min_runway_landing_m=1850, fuel_consumption_per_km=2.9  WHERE full_name='Airbus A319'"],
-    ["UPDATE aircraft_types SET min_runway_landing_m=1750, fuel_consumption_per_km=2.5  WHERE full_name='Airbus A319 Neo'"],
+    ["UPDATE aircraft_types SET min_runway_landing_m=1750, fuel_consumption_per_km=2.5  WHERE full_name='Airbus A319neo'"],
     ["UPDATE aircraft_types SET min_runway_landing_m=1600, fuel_consumption_per_km=2.6  WHERE full_name='Embraer E195'"],
     ["UPDATE aircraft_types SET min_runway_landing_m=1480, fuel_consumption_per_km=1.7  WHERE full_name='Embraer ERJ 140'"],
     ["UPDATE aircraft_types SET min_runway_landing_m=1520, fuel_consumption_per_km=1.8  WHERE full_name='Embraer ERJ 145'"],
@@ -569,7 +578,7 @@ async function initDatabase() {
     ["UPDATE aircraft_types SET min_runway_landing_m=2100, fuel_consumption_per_km=3.2  WHERE full_name='Boeing 757-200'"],
     ["UPDATE aircraft_types SET min_runway_landing_m=1600, fuel_consumption_per_km=2.1  WHERE full_name='Bombardier CRJ-700'"],
     ["UPDATE aircraft_types SET min_runway_landing_m=2560, fuel_consumption_per_km=3.3  WHERE full_name='Airbus A321'"],
-    ["UPDATE aircraft_types SET min_runway_landing_m=2300, fuel_consumption_per_km=2.8  WHERE full_name='Airbus A321 Neo'"],
+    ["UPDATE aircraft_types SET min_runway_landing_m=2300, fuel_consumption_per_km=2.8  WHERE full_name='Airbus A321neo'"],
     ["UPDATE aircraft_types SET min_runway_landing_m=1980, fuel_consumption_per_km=3.3  WHERE full_name='Airbus A321 XLR'"],
     ["UPDATE aircraft_types SET min_runway_landing_m=2100, fuel_consumption_per_km=2.9  WHERE full_name='Boeing 737-10 Max'"],
     ["UPDATE aircraft_types SET min_runway_landing_m=2100, fuel_consumption_per_km=3.4  WHERE full_name='Boeing 737-400'"],
@@ -616,9 +625,9 @@ async function initDatabase() {
     ["UPDATE aircraft_types SET required_level=5  WHERE full_name IN ('COMAC C909 (ARJ21)','Embraer E190','Embraer E190-E2','Sukhoi Superjet 100')"],
     ["UPDATE aircraft_types SET required_level=6  WHERE full_name IN ('Embraer E195','Embraer E195-E2','Boeing 737-300','Boeing 737-400')"],
     ["UPDATE aircraft_types SET required_level=7  WHERE full_name IN ('Boeing 737-500','Boeing 737-600','Airbus A318','Airbus A220-100')"],
-    ["UPDATE aircraft_types SET required_level=8  WHERE full_name IN ('Airbus A220-300','Airbus A319','Airbus A319 Neo','COMAC C919')"],
+    ["UPDATE aircraft_types SET required_level=8  WHERE full_name IN ('Airbus A220-300','Airbus A319','Airbus A319neo','COMAC C919')"],
     ["UPDATE aircraft_types SET required_level=9  WHERE full_name IN ('Airbus A320','Airbus A321','Boeing 737-800','Boeing 737-8 Max')"],
-    ["UPDATE aircraft_types SET required_level=10 WHERE full_name IN ('Airbus A321 Neo','Boeing 737-10 Max','Boeing 757-200','Boeing 757-300')"],
+    ["UPDATE aircraft_types SET required_level=10 WHERE full_name IN ('Airbus A321neo','Boeing 737-10 Max','Boeing 757-200','Boeing 757-300')"],
     ["UPDATE aircraft_types SET required_level=11 WHERE full_name IN ('Airbus A330-200','Airbus A330-300','Airbus A330-800 Neo','Airbus A330-900 Neo','Airbus A321 XLR')"],
     ["UPDATE aircraft_types SET required_level=12 WHERE full_name IN ('Airbus A340-300','Airbus A340-500','Airbus A340-600','Boeing 787-8')"],
     ["UPDATE aircraft_types SET required_level=13 WHERE full_name IN ('Airbus A350-900','Boeing 787-9','Boeing 787-10','Boeing 777-200','Boeing 777-200LR')"],
@@ -630,11 +639,11 @@ async function initDatabase() {
     ["UPDATE aircraft_types SET display_order=101 WHERE full_name='Airbus A220-300'"],
     ["UPDATE aircraft_types SET display_order=200 WHERE full_name='Airbus A318'"],
     ["UPDATE aircraft_types SET display_order=210 WHERE full_name='Airbus A319'"],
-    ["UPDATE aircraft_types SET display_order=211 WHERE full_name='Airbus A319 Neo'"],
+    ["UPDATE aircraft_types SET display_order=211 WHERE full_name='Airbus A319neo'"],
     ["UPDATE aircraft_types SET display_order=300 WHERE full_name='Airbus A320'"],
     ["UPDATE aircraft_types SET display_order=301 WHERE full_name='Airbus A320neo'"],
     ["UPDATE aircraft_types SET display_order=400 WHERE full_name='Airbus A321'"],
-    ["UPDATE aircraft_types SET display_order=401 WHERE full_name='Airbus A321 Neo'"],
+    ["UPDATE aircraft_types SET display_order=401 WHERE full_name='Airbus A321neo'"],
     ["UPDATE aircraft_types SET display_order=402 WHERE full_name='Airbus A321 XLR'"],
     ["UPDATE aircraft_types SET display_order=500 WHERE full_name='Airbus A330-200'"],
     ["UPDATE aircraft_types SET display_order=501 WHERE full_name='Airbus A330-300'"],
@@ -724,7 +733,7 @@ async function initDatabase() {
     "UPDATE aircraft_types SET min_runway_takeoff_m=1440 WHERE full_name='Embraer ERJ 135'",
     "UPDATE aircraft_types SET min_runway_takeoff_m=1560 WHERE full_name='Embraer E195-E2'",
     "UPDATE aircraft_types SET min_runway_takeoff_m=2164 WHERE full_name='Airbus A319'",
-    "UPDATE aircraft_types SET min_runway_takeoff_m=1860 WHERE full_name='Airbus A319 Neo'",
+    "UPDATE aircraft_types SET min_runway_takeoff_m=1860 WHERE full_name='Airbus A319neo'",
     "UPDATE aircraft_types SET min_runway_takeoff_m=1650 WHERE full_name='Embraer E195'",
     "UPDATE aircraft_types SET min_runway_takeoff_m=1480 WHERE full_name='Embraer ERJ 140'",
     "UPDATE aircraft_types SET min_runway_takeoff_m=1520 WHERE full_name='Embraer ERJ 145'",
@@ -740,7 +749,7 @@ async function initDatabase() {
     "UPDATE aircraft_types SET min_runway_takeoff_m=2400 WHERE full_name='Boeing 757-200'",
     "UPDATE aircraft_types SET min_runway_takeoff_m=1600 WHERE full_name='Bombardier CRJ-700'",
     "UPDATE aircraft_types SET min_runway_takeoff_m=2560 WHERE full_name='Airbus A321'",
-    "UPDATE aircraft_types SET min_runway_takeoff_m=2300 WHERE full_name='Airbus A321 Neo'",
+    "UPDATE aircraft_types SET min_runway_takeoff_m=2300 WHERE full_name='Airbus A321neo'",
     "UPDATE aircraft_types SET min_runway_takeoff_m=2500 WHERE full_name='Airbus A321 XLR'",
     "UPDATE aircraft_types SET min_runway_takeoff_m=2400 WHERE full_name='Boeing 737-10 Max'",
     "UPDATE aircraft_types SET min_runway_takeoff_m=2250 WHERE full_name='Boeing 737-400'",

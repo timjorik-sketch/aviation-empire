@@ -2809,7 +2809,7 @@ INSERT OR IGNORE INTO aircraft_types (id, manufacturer, model, full_name, max_pa
 (8,  'Airbus',  'A319',     'Airbus A319',      160, 6850,  829, 2164, 1400, 0.023, 0.029, 'M', 89500000,  8, 2, 'Aircraft_Airbus_319.png'),
 (9,  'Airbus',  'A320',     'Airbus A320',      180, 6150,  828, 2090, 1480, 0.024, 0.030, 'M', 101000000, 9, 2, 'Aircraft_Airbus_320.png'),
 (10, 'Airbus',  'A321',     'Airbus A321',      220, 5950,  828, 2560, 1530, 0.026, 0.033, 'M', 118300000, 9, 2, 'Aircraft_Airbus_321.png'),
-(11, 'Airbus',  'A321 Neo', 'Airbus A321 Neo',  244, 7400,  828, 2300, 1530, 0.023, 0.029, 'M', 129500000, 10, 2, 'Aircraft_Airbus_321_Neo.png'),
+(11, 'Airbus',  'A321neo', 'Airbus A321neo',  244, 7400,  828, 2300, 1530, 0.023, 0.029, 'M', 129500000, 10, 2, 'Aircraft_Airbus_321_Neo.png'),
 -- Wide-body (Level 12-14)
 (12, 'Boeing',  '787-8',    'Boeing 787-8',     330, 13530, 903, 3050, 1600, 0.027, 0.035, 'H', 248300000, 12, 2, 'Aircraft_Boeing_787-800.png'),
 (13, 'Boeing',  '777-300',  'Boeing 777-300',   550, 11135, 905, 3200, 1890, 0.032, 0.042, 'H', 375500000, 14, 2, 'Aircraft_Boeing_777-300.png'),
@@ -2819,7 +2819,7 @@ INSERT OR IGNORE INTO aircraft_types (id, manufacturer, model, full_name, max_pa
 -- Additional aircraft types
 INSERT OR IGNORE INTO aircraft_types (id, manufacturer, model, full_name, max_passengers, range_km, cruise_speed_kmh, min_runway_takeoff_m, min_runway_landing_m, fuel_consumption_empty_per_km, fuel_consumption_full_per_km, wake_turbulence_category, new_price_usd, required_level, required_pilots, image_filename) VALUES
 -- Airbus narrow-body Neo (Level 3)
-(15, 'Airbus',            'A319 Neo',      'Airbus A319 Neo',                        160,  6850,  833, 1860, 1400, 0.020, 0.025, 'M',  101500000, 3, 2, 'Aircraft_Airbus_319_Neo.png'),
+(15, 'Airbus',            'A319neo',       'Airbus A319neo',                         160,  6850,  833, 1860, 1400, 0.020, 0.025, 'M',  101500000, 3, 2, 'Aircraft_Airbus_319_Neo.png'),
 -- Airbus wide-body classics (Level 4)
 (16, 'Airbus',            'A330-200',      'Airbus A330-200',                         406, 13450,  871, 2600, 1830, 0.031, 0.040, 'H',  238500000, 4, 2, 'Aircraft_Airbus_330-200.png'),
 (17, 'Airbus',            'A330-300',      'Airbus A330-300',                         440, 11750,  871, 2700, 1830, 0.033, 0.042, 'H',  264200000, 4, 2, 'Aircraft_Airbus_330-300.png'),

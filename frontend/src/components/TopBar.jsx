@@ -139,16 +139,14 @@ export default function TopBar({ onBack, backLabel = 'Back', balance: balancePro
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          width: 40px;
-          height: 40px;
-          padding: 0;
-          background: transparent;
+          padding: 0.4rem 0.75rem;
+          background: #fff;
           border: 1px solid #E0E0E0;
           border-radius: 6px;
           color: #2C2C2C;
           cursor: pointer;
           font-weight: 600;
-          font-size: 1.05rem;
+          font-size: 0.92rem;
           line-height: 1;
           transition: background 0.15s, border-color 0.15s;
         }

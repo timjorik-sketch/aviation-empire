@@ -98,6 +98,14 @@ router.get('/weekly-report', authMiddleware, async (req, res) => {
       WHERE airline_id = $1 AND created_at >= NOW() - INTERVAL '7 days'
     `, [req.airlineId]);
 
+    const liveRes = await pool.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE status IN ('boarding','delayed','in-flight')) AS active,
+        COUNT(*) FILTER (WHERE departure_time::date = CURRENT_DATE AND status <> 'cancelled') AS scheduled_today
+      FROM flights
+      WHERE airline_id = $1
+    `, [req.airlineId]);
+
     // Per-event listing (last 200) so the player can see exactly which flight
     // and aircraft each disruption hit.
     const eventsRes = await pool.query(`
@@ -130,6 +138,7 @@ router.get('/weekly-report', authMiddleware, async (req, res) => {
     `, [req.airlineId]);
 
     const fl = flightsRes.rows[0] || {};
+    const live = liveRes.rows[0] || {};
     const totals = totalsRes.rows[0] || {};
     const finalized = parseInt(fl.finalized) || 0;
     const completed = parseInt(fl.completed) || 0;
@@ -139,6 +148,8 @@ router.get('/weekly-report', authMiddleware, async (req, res) => {
     res.json({
       window: { days: 7, from: new Date(Date.now() - 7*86400e3).toISOString(), to: new Date().toISOString() },
       flights: {
+        active: parseInt(live.active) || 0,
+        scheduled_today: parseInt(live.scheduled_today) || 0,
         finalized,
         completed,
         on_time: onTime,

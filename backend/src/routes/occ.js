@@ -100,7 +100,7 @@ router.get('/weekly-report', authMiddleware, async (req, res) => {
 
     const liveRes = await pool.query(`
       SELECT
-        COUNT(*) FILTER (WHERE status IN ('boarding','delayed','in-flight')) AS active,
+        COUNT(*) FILTER (WHERE status = 'in-flight') AS active,
         COUNT(*) FILTER (WHERE departure_time::date = CURRENT_DATE AND status <> 'cancelled') AS scheduled_today
       FROM flights
       WHERE airline_id = $1

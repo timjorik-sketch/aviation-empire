@@ -143,6 +143,7 @@ router.get('/', authMiddleware, async (req, res) => {
         f.ticket_price, f.total_seats, f.seats_sold, f.status, f.revenue, f.created_at,
         r.departure_airport, r.arrival_airport, r.distance_km,
         dep.name as departure_name, arr.name as arrival_name,
+        arr.continent as arrival_continent, arr.country as arrival_country,
         ac.registration, at.full_name as aircraft_type, f.aircraft_id,
         f.satisfaction_score, f.violated_rules,
         f.delay_minutes, f.delay_reason, f.diversion_airport_code, f.is_wet_leased
@@ -172,6 +173,8 @@ router.get('/', authMiddleware, async (req, res) => {
       distance_km: row.distance_km,
       departure_name: row.departure_name,
       arrival_name: row.arrival_name,
+      arrival_continent: row.arrival_continent,
+      arrival_country: row.arrival_country,
       aircraft_registration: row.registration,
       aircraft_type: row.aircraft_type,
       aircraft_id: row.aircraft_id,

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import TopBar from '../components/TopBar.jsx';
 import Toast from '../components/Toast.jsx';
 import Loader from '../components/Loader.jsx';
@@ -225,11 +225,33 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [activePage, setActivePage] = useState(0);
+  const [filterAircraftType, setFilterAircraftType] = useState(null);
+  const [filterHaul, setFilterHaul]                 = useState(null);
+  const [filterContinent, setFilterContinent]       = useState(null);
+  const [acTypeOpen, setAcTypeOpen]   = useState(false);
+  const [haulOpen, setHaulOpen]       = useState(false);
+  const [continentOpen, setContinentOpen] = useState(false);
 
-  const ACTIVE_PAGE_SIZE = 24;
+  const ACTIVE_PAGE_SIZE = 15;
+
+  // Haul classification by route distance (km).
+  const HAUL_BUCKETS = [
+    { key: 'short',  label: 'Short Haul',  test: km => km < 1500 },
+    { key: 'medium', label: 'Medium Haul', test: km => km >= 1500 && km < 4000 },
+    { key: 'long',   label: 'Long Haul',   test: km => km >= 4000 },
+  ];
+  const haulOf = (km) => HAUL_BUCKETS.find(b => b.test(km || 0))?.key || null;
 
   const token = localStorage.getItem('token');
   const auth = useMemo(() => ({ 'Authorization': `Bearer ${token}` }), [token]);
+
+  // Refs keep onBalanceUpdate / airline.balance accessible inside fetchFlights
+  // without making the callback unstable. Without this, every balance update
+  // would re-create fetchFlights, re-fire the load effect, and flash the loader.
+  const onBalanceUpdateRef = useRef(onBalanceUpdate);
+  const balanceRef = useRef(airline?.balance);
+  useEffect(() => { onBalanceUpdateRef.current = onBalanceUpdate; }, [onBalanceUpdate]);
+  useEffect(() => { balanceRef.current = airline?.balance; }, [airline?.balance]);
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -256,11 +278,12 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
       setFlights(d.flights || []);
       const airlineRes = await fetch(`${API_URL}/api/airline`, { headers: auth });
       const airlineData = await airlineRes.json();
-      if (airlineData.airline && onBalanceUpdate && airline && airlineData.airline.balance !== airline.balance) {
-        onBalanceUpdate(airlineData.airline.balance);
+      const newBalance = airlineData?.airline?.balance;
+      if (newBalance != null && onBalanceUpdateRef.current && newBalance !== balanceRef.current) {
+        onBalanceUpdateRef.current(newBalance);
       }
     } catch { /* silent */ }
-  }, [auth, onBalanceUpdate, airline]);
+  }, [auth]);
 
   const fetchClientFeedback = useCallback(async () => {
     try {
@@ -270,16 +293,25 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
     } catch { /* silent */ }
   }, [auth]);
 
+  // Initial load — only fires once. Uses a ref guard so even if a callback
+  // ref changes, we never re-show the full-page loader.
+  const initialLoadedRef = useRef(false);
   useEffect(() => {
+    if (initialLoadedRef.current) return;
+    initialLoadedRef.current = true;
     (async () => {
       setLoading(true);
       await Promise.all([fetchConfig(), fetchReport(), fetchFlights(), fetchClientFeedback()]);
       setLoading(false);
     })();
+  }, [fetchConfig, fetchReport, fetchFlights, fetchClientFeedback]);
+
+  // Live refresh intervals — never touch `loading`.
+  useEffect(() => {
     const flightsInterval = setInterval(fetchFlights, 10000);
     const fbInterval = setInterval(fetchClientFeedback, 60000);
     return () => { clearInterval(flightsInterval); clearInterval(fbInterval); };
-  }, [fetchConfig, fetchReport, fetchFlights, fetchClientFeedback]);
+  }, [fetchFlights, fetchClientFeedback]);
 
   const patch = async (url, body, successMsg) => {
     setSaving(true); setError(''); setSuccess('');
@@ -334,10 +366,54 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
   const stabColor = stability == null ? '#2C2C2C' : stability >= 0.95 ? '#16a34a' : stability >= 0.85 ? '#eab308' : '#dc2626';
 
   const activeFlights = flights.filter(fl => fl.status === 'in-flight');
-  const activePageCount = Math.max(1, Math.ceil(activeFlights.length / ACTIVE_PAGE_SIZE));
+
+  // Counts on the *unfiltered* set so each filter shows total options.
+  const aircraftTypeOptions = (() => {
+    const map = new Map();
+    for (const fl of activeFlights) {
+      if (!fl.aircraft_type) continue;
+      map.set(fl.aircraft_type, (map.get(fl.aircraft_type) || 0) + 1);
+    }
+    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  })();
+  const haulOptions = (() => {
+    const map = new Map();
+    for (const fl of activeFlights) {
+      const k = haulOf(fl.distance_km);
+      if (!k) continue;
+      map.set(k, (map.get(k) || 0) + 1);
+    }
+    return HAUL_BUCKETS.filter(b => map.has(b.key)).map(b => [b.key, b.label, map.get(b.key)]);
+  })();
+  const continentOptions = (() => {
+    const map = new Map();
+    for (const fl of activeFlights) {
+      if (!fl.arrival_continent) continue;
+      map.set(fl.arrival_continent, (map.get(fl.arrival_continent) || 0) + 1);
+    }
+    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  })();
+
+  const filteredActive = activeFlights.filter(fl => {
+    if (filterAircraftType && fl.aircraft_type !== filterAircraftType) return false;
+    if (filterHaul && haulOf(fl.distance_km) !== filterHaul) return false;
+    if (filterContinent && fl.arrival_continent !== filterContinent) return false;
+    return true;
+  });
+  const hasActiveFilters = !!(filterAircraftType || filterHaul || filterContinent);
+  const resetActiveFilters = () => {
+    setFilterAircraftType(null);
+    setFilterHaul(null);
+    setFilterContinent(null);
+  };
+
+  const activePageCount = Math.max(1, Math.ceil(filteredActive.length / ACTIVE_PAGE_SIZE));
   const safeActivePage  = Math.min(activePage, activePageCount - 1);
-  const activeFlightsPage = activeFlights.slice(safeActivePage * ACTIVE_PAGE_SIZE, (safeActivePage + 1) * ACTIVE_PAGE_SIZE);
+  const activeFlightsPage = filteredActive.slice(safeActivePage * ACTIVE_PAGE_SIZE, (safeActivePage + 1) * ACTIVE_PAGE_SIZE);
   const feedbackCount = clientFeedback.length;
+
+  // Reset to first page whenever filters change so the user sees the head of the result set.
+  useEffect(() => { setActivePage(0); }, [filterAircraftType, filterHaul, filterContinent]);
 
   return (
     <div className="app">
@@ -370,35 +446,135 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         </div>
 
         {tab === 'active' && (
-          <div className="info-card">
-            <div className="card-header-bar">
-              <span className="card-header-bar-title">Active Flights ({activeFlights.length})</span>
-            </div>
-            {activeFlights.length === 0 ? (
-              <div className="occ-empty">No flights currently in the air.</div>
-            ) : (
-              <>
-                <div className="occ-grid">
-                  {activeFlightsPage.map(fl => (
-                    <FlightCard
-                      key={fl.id}
-                      flight={fl}
-                      onNavigateToAirport={onNavigateToAirport}
-                      onNavigateToAircraft={onNavigateToAircraft}
-                    />
-                  ))}
-                </div>
-                {activePageCount > 1 && (
-                  <Pagination
-                    page={safeActivePage}
-                    pageCount={activePageCount}
-                    pageSize={ACTIVE_PAGE_SIZE}
-                    total={activeFlights.length}
-                    onChange={setActivePage}
-                  />
+          <div className="occ-fl-layout">
+            {/* Filter sidebar */}
+            <aside className="occ-fl-sidebar">
+              <div className="occ-fl-sb-section">
+                <button className="occ-fl-sb-toggle" onClick={() => setAcTypeOpen(o => !o)}>
+                  <span className="occ-fl-sb-label">Aircraft Type</span>
+                  <span className="occ-fl-sb-arrow">{acTypeOpen ? '▲' : '▼'}</span>
+                </button>
+                {(acTypeOpen || filterAircraftType) && (
+                  <>
+                    <button
+                      className={`occ-fl-sb-item${!filterAircraftType ? ' occ-fl-sb-item--active' : ''}`}
+                      onClick={() => setFilterAircraftType(null)}
+                    >
+                      <span>All Types</span>
+                      <span className="occ-fl-sb-count">{activeFlights.length}</span>
+                    </button>
+                    {aircraftTypeOptions.map(([type, count]) => (
+                      <button
+                        key={type}
+                        className={`occ-fl-sb-item${filterAircraftType === type ? ' occ-fl-sb-item--active' : ''}`}
+                        onClick={() => setFilterAircraftType(filterAircraftType === type ? null : type)}
+                      >
+                        <span>{type}</span>
+                        <span className="occ-fl-sb-count">{count}</span>
+                      </button>
+                    ))}
+                  </>
                 )}
-              </>
-            )}
+              </div>
+
+              <div className="occ-fl-sb-section">
+                <button className="occ-fl-sb-toggle" onClick={() => setHaulOpen(o => !o)}>
+                  <span className="occ-fl-sb-label">Haul Length</span>
+                  <span className="occ-fl-sb-arrow">{haulOpen ? '▲' : '▼'}</span>
+                </button>
+                {(haulOpen || filterHaul) && (
+                  <>
+                    <button
+                      className={`occ-fl-sb-item${!filterHaul ? ' occ-fl-sb-item--active' : ''}`}
+                      onClick={() => setFilterHaul(null)}
+                    >
+                      <span>All Hauls</span>
+                      <span className="occ-fl-sb-count">{activeFlights.length}</span>
+                    </button>
+                    {haulOptions.map(([key, label, count]) => (
+                      <button
+                        key={key}
+                        className={`occ-fl-sb-item${filterHaul === key ? ' occ-fl-sb-item--active' : ''}`}
+                        onClick={() => setFilterHaul(filterHaul === key ? null : key)}
+                      >
+                        <span>{label}</span>
+                        <span className="occ-fl-sb-count">{count}</span>
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+
+              <div className="occ-fl-sb-section">
+                <button className="occ-fl-sb-toggle" onClick={() => setContinentOpen(o => !o)}>
+                  <span className="occ-fl-sb-label">Bound To</span>
+                  <span className="occ-fl-sb-arrow">{continentOpen ? '▲' : '▼'}</span>
+                </button>
+                {(continentOpen || filterContinent) && (
+                  <>
+                    <button
+                      className={`occ-fl-sb-item${!filterContinent ? ' occ-fl-sb-item--active' : ''}`}
+                      onClick={() => setFilterContinent(null)}
+                    >
+                      <span>All Continents</span>
+                      <span className="occ-fl-sb-count">{activeFlights.length}</span>
+                    </button>
+                    {continentOptions.map(([cont, count]) => (
+                      <button
+                        key={cont}
+                        className={`occ-fl-sb-item${filterContinent === cont ? ' occ-fl-sb-item--active' : ''}`}
+                        onClick={() => setFilterContinent(filterContinent === cont ? null : cont)}
+                      >
+                        <span>{cont}</span>
+                        <span className="occ-fl-sb-count">{count}</span>
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+
+              {hasActiveFilters && (
+                <div className="occ-fl-sb-section">
+                  <button className="occ-fl-sb-reset" onClick={resetActiveFilters}>Reset Filters</button>
+                </div>
+              )}
+            </aside>
+
+            {/* Content */}
+            <div className="info-card" style={{ marginBottom: 0 }}>
+              <div className="card-header-bar">
+                <span className="card-header-bar-title">
+                  Active Flights ({filteredActive.length}{hasActiveFilters && filteredActive.length !== activeFlights.length ? ` of ${activeFlights.length}` : ''})
+                </span>
+              </div>
+              {activeFlights.length === 0 ? (
+                <div className="occ-empty">No flights currently in the air.</div>
+              ) : filteredActive.length === 0 ? (
+                <div className="occ-empty">No flights match your filters.</div>
+              ) : (
+                <>
+                  <div className="occ-grid">
+                    {activeFlightsPage.map(fl => (
+                      <FlightCard
+                        key={fl.id}
+                        flight={fl}
+                        onNavigateToAirport={onNavigateToAirport}
+                        onNavigateToAircraft={onNavigateToAircraft}
+                      />
+                    ))}
+                  </div>
+                  {activePageCount > 1 && (
+                    <Pagination
+                      page={safeActivePage}
+                      pageCount={activePageCount}
+                      pageSize={ACTIVE_PAGE_SIZE}
+                      total={filteredActive.length}
+                      onChange={setActivePage}
+                    />
+                  )}
+                </>
+              )}
+            </div>
           </div>
         )}
 
@@ -551,6 +727,50 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
       </div>
 
       <style>{`
+        /* Active Flights layout: sidebar + content */
+        .occ-fl-layout { display: grid; grid-template-columns: 230px 1fr; gap: 1rem; align-items: start; }
+        .occ-fl-sidebar {
+          background: #fff; border-radius: 8px; padding: 1rem;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+          position: sticky; top: 1rem;
+          max-height: calc(100vh - 2rem); overflow-y: auto;
+        }
+        .occ-fl-sb-section { margin-bottom: 1.25rem; }
+        .occ-fl-sb-section:last-child { margin-bottom: 0; }
+        .occ-fl-sb-toggle {
+          width: 100%; display: flex; justify-content: space-between; align-items: center;
+          background: none; border: none; cursor: pointer; padding: 0 0 0.4rem 0; margin: 0;
+        }
+        .occ-fl-sb-toggle:hover .occ-fl-sb-label { color: #666; }
+        .occ-fl-sb-label {
+          font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+          letter-spacing: 0.1em; color: #999;
+        }
+        .occ-fl-sb-arrow { font-size: 0.55rem; color: #bbb; }
+        .occ-fl-sb-item {
+          width: 100%; display: flex; justify-content: space-between; align-items: center;
+          padding: 0.4rem 0.6rem; border: none; border-radius: 5px; cursor: pointer;
+          font-size: 0.82rem; color: #444; background: transparent; text-align: left;
+          transition: background 0.12s, color 0.12s;
+        }
+        .occ-fl-sb-item:hover { background: #F5F5F5; color: #2C2C2C; }
+        .occ-fl-sb-item--active { background: #2C2C2C; color: #fff; font-weight: 600; }
+        .occ-fl-sb-count {
+          font-size: 0.72rem; opacity: 0.5; background: rgba(0,0,0,0.08);
+          padding: 1px 5px; border-radius: 8px; flex-shrink: 0;
+        }
+        .occ-fl-sb-item--active .occ-fl-sb-count { background: rgba(255,255,255,0.2); opacity: 0.8; }
+        .occ-fl-sb-reset {
+          width: 100%; padding: 0.45rem; background: #FEE2E2; color: #DC2626;
+          border: none; border-radius: 6px; font-size: 0.8rem; font-weight: 600; cursor: pointer;
+        }
+        .occ-fl-sb-reset:hover { background: #FECACA; }
+
+        @media (max-width: 720px) {
+          .occ-fl-layout { grid-template-columns: 1fr; }
+          .occ-fl-sidebar { position: static; max-height: none; }
+        }
+
         .occ-empty { color: #999; font-size: 0.88rem; font-style: italic; padding: 1.5rem 1.1rem; }
         .occ-grid {
           display: grid;

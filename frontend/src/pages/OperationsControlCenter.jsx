@@ -183,7 +183,7 @@ function FlightCard({ flight, onNavigateToAirport, onNavigateToAircraft }) {
   const timeStr = remMs > 0 ? `${remH}h ${String(remM).padStart(2, '0')}m remaining` : 'Landing';
   const isDiverted = flight.delay_reason === 'medical' && flight.diversion_airport_code;
   const isDelayed  = !isDiverted && flight.delay_reason && (flight.delay_minutes || 0) > 0;
-  const badgeStyle = { marginLeft: 'auto', fontSize: '0.68rem', fontWeight: 700, color: '#fff', background: '#f97316', padding: '2px 8px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '0.04em' };
+  const badgeStyle = { marginLeft: 'auto', fontSize: '0.68rem', fontWeight: 700, color: '#a16207', background: 'rgba(234,179,8,0.18)', border: '1px solid rgba(234,179,8,0.4)', padding: '2px 8px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '0.04em' };
 
   return (
     <div className="occ-card">
@@ -1157,8 +1157,8 @@ function formatOutcome(e) {
 }
 
 function outcomeColor(e) {
-  if (e.event_type === 'technical_air' && e.outcome === 'delayed') return '#f97316';
-  if (e.event_type === 'medical' && e.outcome === 'diverted')      return '#f97316';
+  if (e.event_type === 'technical_air' && e.outcome === 'delayed') return '#eab308';
+  if (e.event_type === 'medical' && e.outcome === 'diverted')      return '#eab308';
   if (e.outcome === 'wet_leased') return '#2563eb';
   if (e.outcome === 'cancelled')  return '#dc2626';
   if (e.outcome === 'minor_delay') return '#eab308';

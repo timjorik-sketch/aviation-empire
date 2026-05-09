@@ -129,22 +129,22 @@ function getArrivalStatus(flight, now) {
   const arr = new Date(flight.arrival_time).getTime();
   const diffToArr = (arr - now) / 60000;
   if (dep && now < dep)  return { label: 'Scheduled', cls: 'ap-st-scheduled' };
-  if (diffToArr > 5)     return { label: 'In Flight', cls: 'ap-st-scheduled' };
+  if (diffToArr > 5)     return { label: 'In Flight', cls: 'ap-st-boarding' };
   if (diffToArr >= 0)    return { label: 'Approach',  cls: 'ap-st-boarding' };
   if (diffToArr >= -1)   return { label: 'Landed',    cls: 'ap-st-ontime' };
   return null; // expired — filter out
 }
 
 function StatusDots({ cls, label }) {
-  const isDelayed = cls === 'ap-st-delayed';   // orange — Delayed or Diverted label
+  const isDelayed = cls === 'ap-st-delayed';   // light yellow — Delayed or Diverted
   const isYellow  = cls === 'ap-st-ontime';    // landed (static)
   // Anything still in motion blinks. Landed is the only settled state.
   const isBlinking = cls === 'ap-st-boarding' || cls === 'ap-st-ontime-b' || isDelayed;
-  const dotColor   = isDelayed ? '#f97316'
+  const dotColor   = isDelayed ? '#facc15'
                    : isYellow ? '#facc15'
                    : isBlinking ? '#facc15'
                    : 'rgba(255,255,255,0.25)';
-  const textColor  = isDelayed ? '#f97316'
+  const textColor  = isDelayed ? '#facc15'
                    : isYellow ? '#facc15'
                    : isBlinking ? '#facc15'
                    : 'rgba(255,255,255,0.45)';

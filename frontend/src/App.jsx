@@ -644,8 +644,8 @@ function App() {
   }
 
   function StatusDots({ cls, label }) {
-    const isBlinking = cls === 'board' || cls === 'ontime';
-    const isYellow   = cls === 'arr';
+    const isBlinking = cls === 'board' || cls === 'ontime' || cls === 'delayed';
+    const isYellow   = cls === 'arr' || cls === 'delayed';
     const dotColor   = isYellow ? '#facc15' : isBlinking ? '#facc15' : 'rgba(255,255,255,0.25)';
     const textColor  = isYellow ? '#facc15' : isBlinking ? '#facc15' : 'rgba(255,255,255,0.45)';
     return (
@@ -660,6 +660,7 @@ function App() {
   }
 
   function getDepStatus(f) {
+    if (f.delay_reason) return { label: 'Delayed', cls: 'delayed' };
     const now = Date.now();
     const dep = new Date(f.departure_time).getTime();
     const diffMin = (dep - now) / 60000;
@@ -670,6 +671,7 @@ function App() {
     return { label: 'Departed', cls: 'board' };
   }
   function getArrStatus(f) {
+    if (f.delay_reason) return { label: 'Delayed', cls: 'delayed' };
     const now = Date.now();
     const dep = f.departure_time ? new Date(f.departure_time).getTime() : null;
     const arr = new Date(f.arrival_time).getTime();

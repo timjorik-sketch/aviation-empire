@@ -119,7 +119,7 @@ export default function LiveFlightMap() {
 
       // Orange highlight for any disrupted flight currently in the air
       const isDisrupted = f.delay_reason === 'medical' || f.delay_reason === 'technical_air';
-      const color = isDisrupted ? '#f97316' : '#26A9F0';
+      const color = isDisrupted ? '#facc15' : '#26A9F0';
       const marker = L.marker([lat, lon], { icon: planeIcon(bear, color) });
       const remH = Math.floor(f.remaining_ms / 3600000);
       const remM = Math.floor((f.remaining_ms % 3600000) / 60000);
@@ -127,11 +127,11 @@ export default function LiveFlightMap() {
 
       let divNote = '';
       if (f.delay_reason === 'medical' && f.diversion_airport_code) {
-        divNote = `<div style="margin-top:4px;font-size:0.72rem;font-weight:700;color:#f97316;text-transform:uppercase;letter-spacing:0.04em">Diverted via ${f.diversion_airport_code}</div>`;
+        divNote = `<div style="margin-top:4px;font-size:0.72rem;font-weight:700;color:#facc15;text-transform:uppercase;letter-spacing:0.04em">Diverted via ${f.diversion_airport_code}</div>`;
       } else if (f.delay_reason === 'medical') {
-        divNote = `<div style="margin-top:4px;font-size:0.72rem;font-weight:700;color:#f97316;text-transform:uppercase;letter-spacing:0.04em">Medical diversion</div>`;
+        divNote = `<div style="margin-top:4px;font-size:0.72rem;font-weight:700;color:#facc15;text-transform:uppercase;letter-spacing:0.04em">Medical diversion</div>`;
       } else if (f.delay_reason === 'technical_air' && phaseLabel) {
-        divNote = `<div style="margin-top:4px;font-size:0.72rem;font-weight:700;color:#f97316;text-transform:uppercase;letter-spacing:0.04em">${phaseLabel}</div>`;
+        divNote = `<div style="margin-top:4px;font-size:0.72rem;font-weight:700;color:#facc15;text-transform:uppercase;letter-spacing:0.04em">${phaseLabel}</div>`;
       }
 
       marker.bindPopup(

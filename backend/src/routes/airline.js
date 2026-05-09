@@ -321,7 +321,8 @@ router.get('/departures', authMiddleware, async (req, res) => {
              at.image_filename, at.model,
              ap_dep.name AS departure_airport_name,
              ap_arr.name AS arrival_airport_name,
-             f.satisfaction_score
+             f.satisfaction_score,
+             f.delay_reason, f.delay_minutes, f.diversion_airport_code
       FROM flights f
       LEFT JOIN routes r           ON f.route_id           = r.id
       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
@@ -346,6 +347,9 @@ router.get('/departures', authMiddleware, async (req, res) => {
       departure_airport_name: row.departure_airport_name,
       arrival_airport_name: row.arrival_airport_name,
       satisfaction_score: row.satisfaction_score,
+      delay_reason: row.delay_reason,
+      delay_minutes: row.delay_minutes,
+      diversion_airport_code: row.diversion_airport_code,
     }));
     res.json({ flights });
   } catch (error) {
@@ -366,7 +370,8 @@ router.get('/arrivals', authMiddleware, async (req, res) => {
              at.image_filename, at.model,
              ap_dep.name AS departure_airport_name,
              ap_arr.name AS arrival_airport_name,
-             f.satisfaction_score
+             f.satisfaction_score,
+             f.delay_reason, f.delay_minutes, f.diversion_airport_code
       FROM flights f
       LEFT JOIN routes r           ON f.route_id           = r.id
       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
@@ -391,6 +396,9 @@ router.get('/arrivals', authMiddleware, async (req, res) => {
       departure_airport_name: row.departure_airport_name,
       arrival_airport_name: row.arrival_airport_name,
       satisfaction_score: row.satisfaction_score,
+      delay_reason: row.delay_reason,
+      delay_minutes: row.delay_minutes,
+      diversion_airport_code: row.diversion_airport_code,
     }));
     res.json({ flights });
   } catch (error) {

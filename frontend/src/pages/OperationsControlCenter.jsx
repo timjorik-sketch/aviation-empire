@@ -20,6 +20,7 @@ const EVENT_LABEL = {
   medical:          'Medical',
   cascade:          'Cascade',
   medical_cascade:  'Medical Cascade',
+  wrong_location:   'Wrong Location',
   // legacy — kept so old report rows still render a label
   weather:          'Weather',
 };

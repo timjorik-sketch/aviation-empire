@@ -8,7 +8,6 @@ import {
   rollDelaysForFlight,
   getAirlineHubCodes,
   calcCancelCosts,
-  getWetLeaseShare,
   logDelayEvent,
 } from '../utils/delaySystem.js';
 
@@ -1573,7 +1572,10 @@ async function processFlights() {
       const arrIsHub = hubCodes.has(f.arr_airport);
 
       // ── Aircraft can't operate this flight: wrong location OR in repair ──
-      // Always cancel — wet-lease was removed from the model.
+      // 'cascade' is reserved for flights eagerly cancelled inside a known
+      // upstream disruption window (Tech Air / Medical). When we discover
+      // at boarding time that the aircraft simply isn't where the schedule
+      // expected it, we tag it 'wrong_location' instead.
       const inRepair      = f.unavailable_until && new Date(f.unavailable_until) > now;
       const wrongLocation = f.current_location !== null && f.current_location !== f.dep_airport;
       if (wrongLocation || inRepair) {
@@ -1583,7 +1585,7 @@ async function processFlights() {
         const cost = cancel.totalCost;
 
         await pool.query(
-          "UPDATE flights SET status = 'cancelled', delay_reason = 'cascade', is_wet_leased = false WHERE id = $1",
+          "UPDATE flights SET status = 'cancelled', delay_reason = 'wrong_location', is_wet_leased = false WHERE id = $1",
           [f.id]
         );
 
@@ -1598,11 +1600,11 @@ async function processFlights() {
 
         await logDelayEvent({
           flightId: f.id, airlineId: f.airline_id, aircraftId: f.aircraft_id,
-          eventType: 'cascade', outcome: 'cancelled',
+          eventType: 'wrong_location', outcome: 'cancelled',
           cost, satisfactionMalus: 20, wetLeased: false,
         });
 
-        console.log(`[FlightProc] ${f.flight_number} cascade-CANCELLED (${inRepair ? 'in repair' : `at ${f.current_location}`}), cost $${cost}`);
+        console.log(`[FlightProc] ${f.flight_number} CANCELLED wrong_location (${inRepair ? 'in repair' : `at ${f.current_location}`}), cost $${cost}`);
         continue;
       }
 

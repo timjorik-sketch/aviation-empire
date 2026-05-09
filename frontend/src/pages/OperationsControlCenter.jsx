@@ -29,7 +29,7 @@ const OUTCOME_LABEL = {
   diverted:    'Diverted',
 };
 
-export default function OperationsControlCenter({ airline, onBack, backLabel = 'Flight Operations' }) {
+export default function OperationsControlCenter({ airline, onBack, backLabel = 'Flight Operations', onNavigateToAircraft, onNavigateToAirport }) {
   const [tab, setTab] = useState('config');
   const [data, setData] = useState(null);
   const [report, setReport] = useState(null);
@@ -115,9 +115,9 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
   // KPI values from report
   const f = report?.flights || {};
   const t = report?.totals || {};
-  const otRate = f.on_time_rate;
-  const otPct = otRate != null ? (otRate * 100).toFixed(1) + '%' : '—';
-  const otColor = otRate == null ? '#2C2C2C' : otRate >= 0.95 ? '#16a34a' : otRate >= 0.85 ? '#eab308' : '#dc2626';
+  const stability = f.stability;
+  const stabPct = stability != null ? (stability * 100).toFixed(1) + '%' : '—';
+  const stabColor = stability == null ? '#2C2C2C' : stability >= 0.95 ? '#16a34a' : stability >= 0.85 ? '#eab308' : '#dc2626';
 
   return (
     <div className="app">
@@ -135,7 +135,7 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         {/* ── 4 KPI Cards ── */}
         <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
           <KPI label="Weekly OCC Cost" value={fmtMoney(weeklyTotal)} />
-          <KPI label="On-Time Rate" value={otPct} valColor={otColor} sub={`of ${f.completed || 0} completed flights`} />
+          <KPI label="Stability" value={stabPct} valColor={stabColor} sub={`of ${f.finalized || 0} finalized flights`} />
           <KPI label="Cancellations" value={(f.cancelled || 0).toLocaleString()} sub="Last 7 days" />
           <KPI label="Disruption Cost" value={fmtMoney(t.disruption_cost)} sub="Last 7 days" />
         </div>
@@ -147,18 +147,22 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         </div>
 
         {tab === 'config' && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gap: '16px',
+          }}>
 
-            {/* Top-left: Maintenance Programs (most important — gates Tech Air rate) */}
+            {/* Maintenance Programs (most important — gates Tech Air rate) */}
             <ConfigCard
               title="Maintenance Program"
               image="/occ/occ_maintenance.png"
-              subtitle="Reduces Technical (Ground) and Technical (Air) delay rates for the entire fleet. Each Tech Air event costs ~$50–150k in cancellations."
+              subtitle="Reduces Technical delay rates for the entire fleet."
               footnote={fleetCount > 0
-                ? `Per aircraft × ${fleetCount} aircraft → ${fmtMoney(weeklyMaint)} / week`
-                : 'No aircraft yet — fee applies once you have a fleet'}
+                ? `Per aircraft × ${fleetCount} → ${fmtMoney(weeklyMaint)} / week`
+                : 'No aircraft yet'}
             >
-              <OptionGrid>
+              <OptionStack>
                 {Object.entries(cat.maintenance_programs || {}).map(([k, cfg]) => (
                   <OptionCard
                     key={k}
@@ -173,19 +177,19 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
                     onClick={() => patch('/api/occ/maintenance', { program: k }, `Maintenance set to ${PROGRAM_LABEL[k]}`)}
                   />
                 ))}
-              </OptionGrid>
+              </OptionStack>
             </ConfigCard>
 
-            {/* Top-right: Ground Handling */}
+            {/* Ground Handling */}
             <ConfigCard
               title="Ground Handling Level"
               image="/occ/occ_ground.png"
-              subtitle="Reduces Ground Ops delay rate at every hub (home base, primary hub, secondary hubs)."
+              subtitle="Reduces Ground Ops delay rate at every hub."
               footnote={hubCount > 0
-                ? `Per hub × ${hubCount} hub${hubCount === 1 ? '' : 's'} → ${fmtMoney(weeklyGh)} / week`
-                : 'No hubs yet — fee applies once you open a hub'}
+                ? `Per hub × ${hubCount} → ${fmtMoney(weeklyGh)} / week`
+                : 'No hubs yet'}
             >
-              <OptionGrid>
+              <OptionStack>
                 {Object.entries(cat.ground_handling_levels || {}).map(([k, cfg]) => (
                   <OptionCard
                     key={k}
@@ -200,37 +204,41 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
                     onClick={() => patch('/api/occ/ground-handling', { level: k }, `Ground handling set to ${GH_LABEL[k]}`)}
                   />
                 ))}
-              </OptionGrid>
+              </OptionStack>
             </ConfigCard>
 
-            {/* Bottom: Hotel Partnership (full width via gridColumn) */}
-            <div style={{ gridColumn: '1 / -1' }}>
-              <ConfigCard
-                title="Hotel Partnership"
-                image="/occ/occ_hotel.png"
-                subtitle="Reduces hotel cost per passenger when flights are cancelled and passengers are stranded at a non-hub destination."
-                footnote={`Flat fee — applies airline-wide`}
-              >
-                <OptionGrid>
-                  {Object.entries(cat.hotel_partnerships || {}).map(([k, cfg]) => (
-                    <OptionCard
-                      key={k}
-                      selected={data.hotel_partnership === k}
-                      label={HP_LABEL[k] || k}
-                      cost={cfg.weeklyCost}
-                      detail={`$${cfg.hotelCostPerPax}/pax on cancel`}
-                      disabled={saving}
-                      onClick={() => patch('/api/occ/hotel-partnership', { partnership: k }, `Hotel partnership set to ${HP_LABEL[k]}`)}
-                    />
-                  ))}
-                </OptionGrid>
-              </ConfigCard>
-            </div>
+            {/* Hotel Partnership */}
+            <ConfigCard
+              title="Hotel Partnership"
+              image="/occ/occ_hotel.png"
+              subtitle="Lowers hotel cost per pax when cancellations strand passengers at a non-hub."
+              footnote="Flat fee — applies airline-wide"
+            >
+              <OptionStack>
+                {Object.entries(cat.hotel_partnerships || {}).map(([k, cfg]) => (
+                  <OptionCard
+                    key={k}
+                    selected={data.hotel_partnership === k}
+                    label={HP_LABEL[k] || k}
+                    cost={cfg.weeklyCost}
+                    detail={`$${cfg.hotelCostPerPax}/pax on cancel`}
+                    disabled={saving}
+                    onClick={() => patch('/api/occ/hotel-partnership', { partnership: k }, `Hotel partnership set to ${HP_LABEL[k]}`)}
+                  />
+                ))}
+              </OptionStack>
+            </ConfigCard>
 
           </div>
         )}
 
-        {tab === 'report' && report && <ReportView report={report} />}
+        {tab === 'report' && report && (
+          <ReportView
+            report={report}
+            onNavigateToAircraft={onNavigateToAircraft}
+            onNavigateToAirport={onNavigateToAirport}
+          />
+        )}
       </div>
     </div>
   );
@@ -297,6 +305,10 @@ function OptionGrid({ children }) {
   return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>{children}</div>;
 }
 
+function OptionStack({ children }) {
+  return <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{children}</div>;
+}
+
 function OptionCard({ selected, label, cost, costSuffix, detail, disabled, onClick }) {
   const costLabel = cost > 0
     ? `${fmtMoney(cost)}${costSuffix ? ` ${costSuffix}` : ' / week'}`
@@ -326,16 +338,16 @@ function EmptyState({ children }) {
   );
 }
 
-function ReportView({ report }) {
+function ReportView({ report, onNavigateToAircraft, onNavigateToAirport }) {
   const f = report.flights || {};
   const t = report.totals || {};
-  const otRate = f.on_time_rate;
-  const otPct = otRate != null ? (otRate * 100).toFixed(1) + '%' : '—';
+  const stability = f.stability;
+  const stabPct = stability != null ? (stability * 100).toFixed(1) + '%' : '—';
 
   return (
     <>
       {/* Two-column: Summary + Cost & Impact */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '20px' }}>
         <div className="info-card" style={{ marginBottom: 0 }}>
           <div className="card-header-bar">
             <span className="card-header-bar-title">Summary — Last 7 Days</span>
@@ -343,7 +355,7 @@ function ReportView({ report }) {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <tbody>
               <ReportRow label="Flights Finalized"   value={(f.finalized || 0).toLocaleString()} />
-              <ReportRow label="On-Time Rate"        value={otPct} bold />
+              <ReportRow label="Stability"           value={stabPct} bold />
               <ReportRow label="Delayed (completed)" value={(f.delayed_completed || 0).toLocaleString()} />
               <ReportRow label="Cancelled"           value={(f.cancelled || 0).toLocaleString()} />
             </tbody>
@@ -370,45 +382,66 @@ function ReportView({ report }) {
         {(report.events || []).length === 0 ? (
           <EmptyState>No disruption events in the last 7 days.</EmptyState>
         ) : (
-          <table style={tblStyle}>
-            <thead>
-              <tr>
-                <th style={th}>When</th>
-                <th style={th}>Flight</th>
-                <th style={th}>Aircraft</th>
-                <th style={th}>Route</th>
-                <th style={th}>Event</th>
-                <th style={th}>Outcome</th>
-                <th style={{ ...th, textAlign: 'right' }}>Delay</th>
-                <th style={{ ...th, textAlign: 'right' }}>Cost</th>
-                <th style={{ ...th, textAlign: 'right' }}>Sat</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.events.map((e) => (
-                <tr key={e.id} style={trStyle}>
-                  <td style={{ ...td, fontSize: '0.78rem', color: '#888' }}>{formatTime(e.created_at)}</td>
-                  <td style={{ ...td, fontFamily: 'monospace', fontWeight: 600 }}>{e.flight_number || '—'}</td>
-                  <td style={{ ...td, fontFamily: 'monospace', fontSize: '0.82rem', color: '#666' }}>{e.aircraft_reg || '—'}</td>
-                  <td style={{ ...td, fontFamily: 'monospace', fontSize: '0.82rem', color: '#666' }}>
-                    {e.dep_airport && e.arr_airport ? `${e.dep_airport} → ${e.arr_airport}` : '—'}
-                  </td>
-                  <td style={td}>{EVENT_LABEL[e.event_type] || e.event_type}</td>
-                  <td style={td}>
-                    <span style={{ color: outcomeColor(e), fontWeight: 600 }}>{formatOutcome(e)}</span>
-                  </td>
-                  <td style={{ ...td, textAlign: 'right' }}>{e.delay_minutes ? `+${e.delay_minutes}m` : '—'}</td>
-                  <td style={{ ...td, textAlign: 'right' }}>{e.cost ? fmtMoney(e.cost) : '—'}</td>
-                  <td style={{ ...td, textAlign: 'right' }}>{e.satisfaction_malus ? `-${e.satisfaction_malus}` : '—'}</td>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={tblStyle}>
+              <thead>
+                <tr>
+                  <th style={th}>When</th>
+                  <th style={th}>Flight</th>
+                  <th style={th}>Aircraft</th>
+                  <th style={th}>Route</th>
+                  <th style={th}>Event</th>
+                  <th style={th}>Outcome</th>
+                  <th style={{ ...th, textAlign: 'right' }}>Delay</th>
+                  <th style={{ ...th, textAlign: 'right' }}>Cost</th>
+                  <th style={{ ...th, textAlign: 'right' }}>Sat</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {report.events.map((e) => (
+                  <tr key={e.id} style={trStyle}>
+                    <td style={{ ...td, fontSize: '0.78rem', color: '#888' }}>{formatTime(e.created_at)}</td>
+                    <td style={{ ...td, fontFamily: 'monospace', fontWeight: 600 }}>{e.flight_number || '—'}</td>
+                    <td style={{ ...td, fontFamily: 'monospace', fontSize: '0.82rem' }}>
+                      {e.aircraft_reg && e.aircraft_id && onNavigateToAircraft
+                        ? <button onClick={() => onNavigateToAircraft(e.aircraft_id)} style={linkBtn}>{e.aircraft_reg}</button>
+                        : <span style={{ color: '#666' }}>{e.aircraft_reg || '—'}</span>}
+                    </td>
+                    <td style={{ ...td, fontFamily: 'monospace', fontSize: '0.82rem' }}>
+                      {e.dep_airport && e.arr_airport ? (
+                        <span>
+                          {onNavigateToAirport
+                            ? <button onClick={() => onNavigateToAirport(e.dep_airport)} style={linkBtn}>{e.dep_airport}</button>
+                            : <span style={{ color: '#666' }}>{e.dep_airport}</span>}
+                          <span style={{ color: '#999' }}> → </span>
+                          {onNavigateToAirport
+                            ? <button onClick={() => onNavigateToAirport(e.arr_airport)} style={linkBtn}>{e.arr_airport}</button>
+                            : <span style={{ color: '#666' }}>{e.arr_airport}</span>}
+                        </span>
+                      ) : <span style={{ color: '#666' }}>—</span>}
+                    </td>
+                    <td style={td}>{EVENT_LABEL[e.event_type] || e.event_type}</td>
+                    <td style={td}>
+                      <span style={{ color: outcomeColor(e), fontWeight: 600 }}>{formatOutcome(e)}</span>
+                    </td>
+                    <td style={{ ...td, textAlign: 'right' }}>{e.delay_minutes ? `+${e.delay_minutes}m` : '—'}</td>
+                    <td style={{ ...td, textAlign: 'right' }}>{e.cost ? fmtMoney(e.cost) : '—'}</td>
+                    <td style={{ ...td, textAlign: 'right' }}>{e.satisfaction_malus ? `-${e.satisfaction_malus}` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </>
   );
 }
+
+const linkBtn = {
+  background: 'transparent', border: 'none', padding: 0, font: 'inherit',
+  color: '#2563eb', cursor: 'pointer', textDecoration: 'underline',
+};
 
 // ── Event helpers ──────────────────────────────────────────────────────────
 function formatTime(iso) {

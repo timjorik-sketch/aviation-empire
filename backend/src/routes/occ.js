@@ -84,9 +84,9 @@ router.get('/weekly-report', authMiddleware, async (req, res) => {
   try {
     const sinceClause = "created_at >= NOW() - INTERVAL '7 days'";
 
-    // On-time rate is computed over COMPLETED flights only — cancellations
-    // pull it down artificially otherwise. Cancellations are reported
-    // separately via the 'cancelled' counter and the cancellation rate.
+    // "Stability" is the share of all finalized flights that completed
+    // on time AND uncancelled. It deliberately includes cancellations in
+    // the denominator — a player with many cancels has low stability.
     const flightsRes = await pool.query(`
       SELECT
         COUNT(*) FILTER (WHERE status IN ('completed','cancelled')) AS finalized,
@@ -104,6 +104,7 @@ router.get('/weekly-report', authMiddleware, async (req, res) => {
       SELECT fde.id, fde.event_type, fde.outcome, fde.wet_leased,
              fde.delay_minutes, fde.cost, fde.satisfaction_malus,
              fde.diversion_airport, fde.created_at,
+             fde.aircraft_id,
              f.flight_number,
              a.registration AS aircraft_reg,
              COALESCE(r.departure_airport, ws.departure_airport) AS dep_airport,
@@ -143,9 +144,9 @@ router.get('/weekly-report', authMiddleware, async (req, res) => {
         on_time: onTime,
         delayed_completed: parseInt(fl.delayed_completed) || 0,
         cancelled,
-        // On-time rate is over COMPLETED flights only. Cancellation rate is
-        // tracked separately so they don't conflate.
-        on_time_rate:     completed > 0 ? onTime / completed : null,
+        // Stability = share of finalized flights that ran AND ran on time.
+        // Cancelled flights count against stability.
+        stability:         finalized > 0 ? onTime / finalized : null,
         cancellation_rate: finalized > 0 ? cancelled / finalized : null,
       },
       totals: {
@@ -165,6 +166,7 @@ router.get('/weekly-report', authMiddleware, async (req, res) => {
         satisfaction_malus: r.satisfaction_malus,
         diversion_airport: r.diversion_airport,
         flight_number: r.flight_number,
+        aircraft_id: r.aircraft_id,
         aircraft_reg: r.aircraft_reg,
         dep_airport: r.dep_airport,
         arr_airport: r.arr_airport,

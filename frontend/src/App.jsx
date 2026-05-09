@@ -574,7 +574,15 @@ function App() {
     return wrap(<CabinProfiles airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Dashboard'} />);
   }
   if (currentPage === 'ops-control') {
-    return wrap(<OperationsControlCenter airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Flight Operations'} />);
+    return wrap(
+      <OperationsControlCenter
+        airline={activeAirline}
+        onBack={() => setCurrentPage(previousPage)}
+        backLabel={PAGE_LABELS[previousPage] || 'Flight Operations'}
+        onNavigateToAirport={(code) => navigateToAirport(code, 'ops-control')}
+        onNavigateToAircraft={(id) => { setPreviousPage('ops-control'); setSelectedAircraftId(id); setCurrentPage('aircraft-detail'); }}
+      />
+    );
   }
   if (currentPage === 'hubs') {
     return wrap(<HubsDestinations airline={activeAirline} onBack={() => setCurrentPage(hubsBackPage)} backLabel={PAGE_LABELS[hubsBackPage] || 'Dashboard'} onNavigateToAirport={(code) => navigateToAirport(code, 'hubs')} onBalanceUpdate={handleBalanceUpdate} onNavigate={(page) => navigate(page)} />);
@@ -1057,9 +1065,9 @@ function App() {
                 {opsStats && opsStats.flights && opsStats.flights.finalized > 0 && (() => {
                   const f = opsStats.flights || {};
                   const t = opsStats.totals || {};
-                  const otRate = f.on_time_rate;
-                  const otPct = otRate != null ? (otRate * 100).toFixed(1) + '%' : '—';
-                  const otColor = otRate == null ? '#aaa' : otRate >= 0.95 ? '#22c55e' : otRate >= 0.85 ? '#eab308' : '#dc2626';
+                  const stab = f.stability;
+                  const stabPct = stab != null ? (stab * 100).toFixed(1) + '%' : '—';
+                  const stabColor = stab == null ? '#aaa' : stab >= 0.95 ? '#22c55e' : stab >= 0.85 ? '#eab308' : '#dc2626';
                   return (
                     <div className="hp-sidebar-card">
                       <div className="hp-sidebar-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -1075,20 +1083,16 @@ function App() {
                         <table className="hp-info-table">
                           <tbody>
                             <tr>
-                              <td className="hp-it-label">On-Time Rate</td>
-                              <td className="hp-it-val" style={{ color: otColor }}>{otPct}</td>
+                              <td className="hp-it-label">Stability</td>
+                              <td className="hp-it-val" style={{ color: stabColor }}>{stabPct}</td>
                             </tr>
                             <tr>
                               <td className="hp-it-label">Cancellations</td>
                               <td className="hp-it-val">{f.cancelled || 0}</td>
                             </tr>
-                            <tr>
+                            <tr className="hp-it-last">
                               <td className="hp-it-label">Disruption Cost</td>
                               <td className="hp-it-val">${(t.disruption_cost || 0).toLocaleString()}</td>
-                            </tr>
-                            <tr className="hp-it-last">
-                              <td className="hp-it-label">Wet Lease Used</td>
-                              <td className="hp-it-val">{t.wet_lease_activations || 0}×</td>
                             </tr>
                           </tbody>
                         </table>

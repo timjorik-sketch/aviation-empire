@@ -93,36 +93,19 @@ function flightDate(isoStr) {
   return new Date(isoStr).toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' });
 }
 
-function formatHoursLabel(min) {
-  if (!min) return '0m';
-  const m = Math.round(min);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  const rem = m % 60;
-  return rem === 0 ? `${h}h` : `${h}h${rem}m`;
-}
-
-// Departure status: time-based, but disrupted flights (delay_reason set)
-// surface a Delayed/Diverted badge on top of the time-based label.
+// Departure board status, view_type-aware.
+//   normal     → time-based, with simple "Delayed" if delay_reason set
+//   diversion  → "Diverted" (medical-diverted aircraft re-departing here)
 function getDepartureStatus(flight, now) {
+  if (flight.view_type === 'diversion') {
+    return { label: 'Diverted', cls: 'ap-st-delayed' };
+  }
+  if (flight.delay_reason) {
+    return { label: 'Delayed', cls: 'ap-st-delayed' };
+  }
+
   const dep = new Date(flight.departure_time).getTime();
   const diffMin = (dep - now) / 60000;
-
-  // Disruption-aware overrides
-  if (flight.delay_reason === 'technical_air') {
-    return { label: `Delayed +${formatHoursLabel(flight.delay_minutes)}`, cls: 'ap-st-delayed' };
-  }
-  if (flight.delay_reason === 'medical') {
-    return flight.diversion_airport_code
-      ? { label: `Diverted via ${flight.diversion_airport_code}`, cls: 'ap-st-delayed' }
-      : { label: 'Diverted', cls: 'ap-st-delayed' };
-  }
-  if (flight.delay_reason && (flight.delay_minutes || 0) > 0) {
-    // Minor delay (technical_ground / ground_ops / atc)
-    return { label: `Delayed +${flight.delay_minutes}m`, cls: 'ap-st-delayed-m' };
-  }
-
-  // Pure time-based (existing behavior)
   if (diffMin > 60)  return { label: 'Scheduled', cls: 'ap-st-scheduled' };
   if (diffMin > 30)  return { label: 'On Time',   cls: 'ap-st-ontime-b' };
   if (diffMin > 3)   return { label: 'Boarding',  cls: 'ap-st-boarding' };
@@ -130,24 +113,21 @@ function getDepartureStatus(flight, now) {
   return { label: 'Departed', cls: 'ap-st-boarding' };
 }
 
-// Arrival status: same disruption-aware overrides; otherwise time-based.
+// Arrival board status, view_type-aware.
+//   normal    → time-based, "Delayed" if delay_reason set
+//   turnback  → "Diverted" (tech_air aircraft returning here)
+//   diversion → "Diverted" (medical-diverted aircraft landing here)
 function getArrivalStatus(flight, now) {
+  if (flight.view_type === 'turnback' || flight.view_type === 'diversion') {
+    return { label: 'Diverted', cls: 'ap-st-delayed' };
+  }
+  if (flight.delay_reason) {
+    return { label: 'Delayed', cls: 'ap-st-delayed' };
+  }
+
   const dep = flight.departure_time ? new Date(flight.departure_time).getTime() : null;
   const arr = new Date(flight.arrival_time).getTime();
   const diffToArr = (arr - now) / 60000;
-
-  if (flight.delay_reason === 'technical_air') {
-    return { label: `Delayed +${formatHoursLabel(flight.delay_minutes)}`, cls: 'ap-st-delayed' };
-  }
-  if (flight.delay_reason === 'medical') {
-    return flight.diversion_airport_code
-      ? { label: `Diverted via ${flight.diversion_airport_code}`, cls: 'ap-st-delayed' }
-      : { label: 'Diverted', cls: 'ap-st-delayed' };
-  }
-  if (flight.delay_reason && (flight.delay_minutes || 0) > 0) {
-    return { label: `Delayed +${flight.delay_minutes}m`, cls: 'ap-st-delayed-m' };
-  }
-
   if (dep && now < dep)  return { label: 'Scheduled', cls: 'ap-st-scheduled' };
   if (diffToArr > 5)     return { label: 'In Flight', cls: 'ap-st-scheduled' };
   if (diffToArr >= 0)    return { label: 'Approach',  cls: 'ap-st-boarding' };

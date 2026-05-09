@@ -268,13 +268,22 @@ router.get('/:code/hover', async (req, res) => {
 router.get('/:code/departures', async (req, res) => {
   try {
     const code = req.params.code.toUpperCase();
+    // The board shows three classes of flight for this airport:
+    //   1. 'normal'    — naturally departing from CODE
+    //   2. 'diversion' — medical-diverted flight currently parked here, will
+    //                    continue to its original destination
+    //   The view_type column tells the frontend which label to render.
     const result = await pool.query(`
       SELECT f.id, f.flight_number, f.departure_time, f.arrival_time, f.status,
              f.delay_reason, f.delay_minutes, f.diversion_airport_code,
              COALESCE(r.arrival_airport, ws.arrival_airport) AS destination,
              ap_dest.name AS destination_name,
              al.name AS airline_name, al.airline_code,
-             at.model AS aircraft_model, al.logo_filename
+             at.model AS aircraft_model, al.logo_filename,
+             CASE
+               WHEN f.diversion_airport_code = $1 THEN 'diversion'
+               ELSE 'normal'
+             END AS view_type
       FROM flights f
       LEFT JOIN routes r        ON f.route_id = r.id
       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
@@ -282,10 +291,14 @@ router.get('/:code/departures', async (req, res) => {
       JOIN airlines al    ON f.airline_id = al.id
       JOIN aircraft ac    ON f.aircraft_id = ac.id
       JOIN aircraft_types at ON ac.aircraft_type_id = at.id
-      WHERE COALESCE(r.departure_airport, ws.departure_airport) = $1
-        AND f.departure_time >= NOW() - INTERVAL '1 minute'
-        AND f.departure_time <= NOW() + INTERVAL '3 days'
-        AND f.status != 'cancelled'
+      WHERE f.status != 'cancelled' AND (
+            (COALESCE(r.departure_airport, ws.departure_airport) = $1
+              AND f.departure_time >= NOW() - INTERVAL '1 minute'
+              AND f.departure_time <= NOW() + INTERVAL '3 days')
+         OR (f.diversion_airport_code = $1
+              AND f.delay_reason = 'medical'
+              AND f.status IN ('boarding','in-flight'))
+        )
       ORDER BY f.departure_time ASC
       LIMIT 30
     `, [code]);
@@ -299,6 +312,7 @@ router.get('/:code/departures', async (req, res) => {
       delay_reason: r.delay_reason,
       delay_minutes: r.delay_minutes,
       diversion_airport_code: r.diversion_airport_code,
+      view_type: r.view_type,
     }));
     res.json({ flights });
   } catch (error) {
@@ -311,13 +325,28 @@ router.get('/:code/departures', async (req, res) => {
 router.get('/:code/arrivals', async (req, res) => {
   try {
     const code = req.params.code.toUpperCase();
+    // Three classes of arrival shown:
+    //   1. 'normal'     — flight whose arrival_airport is CODE (eventually
+    //                     lands here; may be Delayed)
+    //   2. 'turnback'   — tech_air flight whose dep_airport is CODE; aircraft
+    //                     turned back and is landing here mid-disruption
+    //   3. 'diversion'  — medical-diverted flight whose diversion_airport
+    //                     is CODE
     const result = await pool.query(`
       SELECT f.id, f.flight_number, f.departure_time, f.arrival_time, f.status,
              f.delay_reason, f.delay_minutes, f.diversion_airport_code,
              COALESCE(r.departure_airport, ws.departure_airport) AS origin,
+             COALESCE(r.arrival_airport,   ws.arrival_airport)   AS scheduled_dest,
              ap_orig.name AS origin_name,
              al.name AS airline_name, al.airline_code,
-             at.model AS aircraft_model, al.logo_filename
+             at.model AS aircraft_model, al.logo_filename,
+             CASE
+               WHEN COALESCE(r.arrival_airport, ws.arrival_airport) = $1 THEN 'normal'
+               WHEN COALESCE(r.departure_airport, ws.departure_airport) = $1
+                    AND f.delay_reason = 'technical_air' THEN 'turnback'
+               WHEN f.diversion_airport_code = $1 THEN 'diversion'
+               ELSE 'normal'
+             END AS view_type
       FROM flights f
       LEFT JOIN routes r        ON f.route_id = r.id
       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
@@ -325,10 +354,17 @@ router.get('/:code/arrivals', async (req, res) => {
       JOIN airlines al    ON f.airline_id = al.id
       JOIN aircraft ac    ON f.aircraft_id = ac.id
       JOIN aircraft_types at ON ac.aircraft_type_id = at.id
-      WHERE COALESCE(r.arrival_airport, ws.arrival_airport) = $1
-        AND f.arrival_time >= NOW() - INTERVAL '1 minute'
-        AND f.arrival_time <= NOW() + INTERVAL '3 days'
-        AND f.status != 'cancelled'
+      WHERE f.status != 'cancelled' AND (
+            (COALESCE(r.arrival_airport, ws.arrival_airport) = $1
+              AND f.arrival_time >= NOW() - INTERVAL '1 minute'
+              AND f.arrival_time <= NOW() + INTERVAL '3 days')
+         OR (COALESCE(r.departure_airport, ws.departure_airport) = $1
+              AND f.delay_reason = 'technical_air'
+              AND f.status = 'in-flight')
+         OR (f.diversion_airport_code = $1
+              AND f.delay_reason = 'medical'
+              AND f.status IN ('boarding','in-flight'))
+        )
       ORDER BY f.arrival_time ASC
       LIMIT 30
     `, [code]);
@@ -336,11 +372,13 @@ router.get('/:code/arrivals', async (req, res) => {
       id: r.id, flight_number: r.flight_number,
       departure_time: r.departure_time, arrival_time: r.arrival_time,
       status: r.status, origin: r.origin, origin_name: r.origin_name,
+      scheduled_dest: r.scheduled_dest,
       airline_name: r.airline_name, airline_code: r.airline_code,
       aircraft_model: r.aircraft_model, logo_filename: r.logo_filename ?? null,
       delay_reason: r.delay_reason,
       delay_minutes: r.delay_minutes,
       diversion_airport_code: r.diversion_airport_code,
+      view_type: r.view_type,
     }));
     res.json({ flights });
   } catch (error) {

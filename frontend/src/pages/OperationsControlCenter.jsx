@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import TopBar from '../components/TopBar.jsx';
 import Toast from '../components/Toast.jsx';
 import Loader from '../components/Loader.jsx';
+import LiveFlightMap from '../components/LiveFlightMap.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -29,10 +30,196 @@ const OUTCOME_LABEL = {
   diverted:    'Diverted',
 };
 
-export default function OperationsControlCenter({ airline, onBack, backLabel = 'Flight Operations', onNavigateToAircraft, onNavigateToAirport }) {
-  const [tab, setTab] = useState('config');
+// ── Customer feedback message pools ──────────────────────────────────────────
+const FEEDBACK_POOLS = {
+  bev: {
+    0: [
+      "Not a single drink was offered. Truly unacceptable.",
+      "No beverages at all on this flight. Hard to believe.",
+      "I had nothing to drink the entire flight.",
+      "Zero drink options. Won't be flying this airline again.",
+    ],
+    1: [
+      "Only one drink option on a flight this long — disappointing.",
+      "A bit more variety in drinks would go a long way.",
+      "One beverage choice felt very limited for this route.",
+      "Expected more drink options. Felt like a budget experience.",
+    ],
+    2: [
+      "Decent selection, but still missing something for this distance.",
+      "Two drinks is okay, but a flight this long deserves more.",
+      "Could use one more beverage option on a route like this.",
+      "Almost there on drinks — just one option short.",
+    ],
+  },
+  food: {
+    0: [
+      "Not a single thing to eat. Absolutely nothing.",
+      "No food whatsoever on this flight. Unbelievable.",
+      "I was starving the entire journey. No food at all.",
+      "Zero food offered. This is not okay.",
+    ],
+    1: [
+      "One meal for this distance? Still hungry when we landed.",
+      "Expected a second meal on such a long flight.",
+      "A single snack doesn't cut it for a flight this long.",
+      "One meal is simply not enough. Left the plane hungry.",
+    ],
+    2: [
+      "Two meals helped, but a flight this long really needs more.",
+      "Almost enough food — could use one more service.",
+      "Good effort on food, but we needed one more meal.",
+      "Third meal service would have made a real difference here.",
+    ],
+  },
+  amenity: [
+    "No amenity kit at all. Felt very bare-bones.",
+    "Would have appreciated at least a toothbrush on this flight.",
+    "No amenity kit in this cabin class? Feels cheap.",
+    "A small amenity kit would've made this flight much more comfortable.",
+  ],
+  sleep: [
+    "Couldn't sleep a minute — a blanket would've helped enormously.",
+    "10 hours with no pillow or blanket. My back is wrecked.",
+    "No sleep kit on an overnight flight. Truly a miss.",
+    "A pillow and blanket should be standard on a flight this long.",
+  ],
+  ent: [
+    "Hours with nothing to watch. Felt like forever.",
+    "No entertainment system on this route? Hard to believe.",
+    "Stared at the seat in front of me the whole flight.",
+    "No IFE on a long-haul is simply not acceptable anymore.",
+  ],
+  lug: {
+    1: [
+      "Only cabin baggage included on this distance? Ridiculous.",
+      "Had to pay extra just to bring a normal suitcase.",
+      "No checked luggage included — felt very restrictive.",
+      "Expected at least a checked bag to be included on this route.",
+    ],
+    2: [
+      "The luggage allowance was too small for a trip this long.",
+      "Had to leave half my clothes at home due to luggage limits.",
+      "A larger bag allowance would be appreciated on this route.",
+      "Luggage restrictions made packing for this trip a nightmare.",
+    ],
+  },
+  seat_eco: [
+    "Sat upright for 10 hours. Never again.",
+    "An upright seat on this distance is genuinely painful.",
+    "My back is completely destroyed. Upgrade the seats.",
+    "Could not sleep at all in this seat. Far too uncomfortable.",
+  ],
+  seat_biz: [
+    "Expected a lie-flat in business on this route. Very disappointing.",
+    "Business class should mean a proper flat bed on long haul.",
+    "Paid business class prices for what felt like a premium economy seat.",
+    "No lie-flat in business on this distance is hard to justify.",
+  ],
+  seat_fir: [
+    "First class without a suite on this route felt underwhelming.",
+    "Expected full suite privacy in first class. Didn't get it.",
+    "A suite is the minimum expectation in first on this distance.",
+    "First class should mean a suite. This fell short.",
+  ],
+  maint: [
+    "The seat was broken the entire flight.",
+    "Everything felt worn out and poorly maintained.",
+    "Multiple things weren't working properly. Felt unsafe.",
+    "The cabin looked and felt like it hadn't been serviced in years.",
+  ],
+};
+
+function seededRand(seed) {
+  let s = seed >>> 0;
+  s = Math.imul(s ^ (s >>> 16), 0x45d9f3b) >>> 0;
+  s = Math.imul(s ^ (s >>> 16), 0x45d9f3b) >>> 0;
+  s = (s ^ (s >>> 16)) >>> 0;
+  return () => { s = (Math.imul(1664525, s) + 1013904223) >>> 0; return s / 0x100000000; };
+}
+
+const CABIN_SHORT = { economy: 'E', business: 'B', first: 'F' };
+const RULE_CABIN = { seat_eco: ['economy'], seat_biz: ['business'], seat_fir: ['first'] };
+
+function getFeedbackMessages(violations, flightId) {
+  if (!violations || violations.length === 0) return [];
+  const rand = seededRand(flightId || 0);
+  const pick = (arr) => arr[Math.floor(rand() * arr.length)];
+  const messages = [];
+  for (const v of violations.slice(0, 3)) {
+    let pool = null;
+    const { rule, have, cabins } = v;
+    if (rule === 'bev')  pool = FEEDBACK_POOLS.bev[Math.min(have ?? 0, 2)];
+    else if (rule === 'food') pool = FEEDBACK_POOLS.food[Math.min(have ?? 0, 2)];
+    else if (rule === 'lug')  pool = FEEDBACK_POOLS.lug[Math.min(Math.max(have ?? 1, 1), 2)];
+    else if (FEEDBACK_POOLS[rule] && Array.isArray(FEEDBACK_POOLS[rule])) pool = FEEDBACK_POOLS[rule];
+    if (pool && pool.length > 0) {
+      const resolvedCabins = RULE_CABIN[rule] || cabins || [];
+      messages.push({ msg: pick(pool), cabins: resolvedCabins });
+    }
+  }
+  return messages;
+}
+
+function FlightCard({ flight, onNavigateToAirport, onNavigateToAircraft }) {
+  const now   = Date.now();
+  const dep   = new Date(flight.departure_time).getTime();
+  const arr   = new Date(flight.arrival_time).getTime();
+  const total = arr - dep;
+  const pct   = total > 0 ? Math.max(0, Math.min(100, ((now - dep) / total) * 100)) : 0;
+  const remMs = Math.max(0, arr - now);
+  const remH  = Math.floor(remMs / 3600000);
+  const remM  = Math.floor((remMs % 3600000) / 60000);
+  const timeStr = remMs > 0 ? `${remH}h ${String(remM).padStart(2, '0')}m remaining` : 'Landing';
+  const isDiverted = flight.delay_reason === 'medical' && flight.diversion_airport_code;
+
+  return (
+    <div className="occ-card">
+      <div className="occ-card-hd">
+        <span className="occ-card-reg">{flight.flight_number}</span>
+        <span className="occ-card-type">{flight.aircraft_type}</span>
+        {isDiverted && (
+          <span style={{ marginLeft: 'auto', fontSize: '0.68rem', fontWeight: 700, color: '#fff', background: '#f97316', padding: '2px 8px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            Diverted → {flight.diversion_airport_code}
+          </span>
+        )}
+      </div>
+      <div className="occ-fp-wrap">
+        <div className="occ-fp-route">
+          <div className="occ-fp-apt">
+            <button className="occ-apt-link occ-fp-code" onClick={() => onNavigateToAirport?.(flight.departure_airport)}>
+              {flight.departure_airport}
+            </button>
+            {flight.departure_name && <span className="occ-fp-apt-name">{flight.departure_name}</span>}
+          </div>
+          <div className="occ-fp-apt occ-fp-apt-r">
+            <button className="occ-apt-link occ-fp-code" onClick={() => onNavigateToAirport?.(flight.arrival_airport)}>
+              {flight.arrival_airport}
+            </button>
+            {flight.arrival_name && <span className="occ-fp-apt-name">{flight.arrival_name}</span>}
+          </div>
+        </div>
+        <div className="occ-fp-bar">
+          <div className="occ-fp-line" />
+          <span className="occ-fp-plane" style={{ left: `calc(${pct}% - 9px)` }}>✈</span>
+        </div>
+        <div className="occ-fp-meta">
+          <button className="occ-fp-reg" onClick={() => onNavigateToAircraft?.(flight.aircraft_id)}>
+            {flight.aircraft_registration}
+          </button>
+          <span className="occ-fp-time">{timeStr}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function OperationsControlCenter({ airline, onBack, backLabel = 'Flight Operations', onBalanceUpdate, onNavigateToAircraft, onNavigateToAirport }) {
+  const [tab, setTab] = useState('active');
   const [data, setData] = useState(null);
   const [report, setReport] = useState(null);
+  const [flights, setFlights] = useState([]);
+  const [clientFeedback, setClientFeedback] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -59,13 +246,37 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
     } catch (e) { setError(e.message); }
   }, [auth]);
 
+  const fetchFlights = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/flights`, { headers: auth });
+      const d = await res.json();
+      setFlights(d.flights || []);
+      const airlineRes = await fetch(`${API_URL}/api/airline`, { headers: auth });
+      const airlineData = await airlineRes.json();
+      if (airlineData.airline && onBalanceUpdate && airline && airlineData.airline.balance !== airline.balance) {
+        onBalanceUpdate(airlineData.airline.balance);
+      }
+    } catch { /* silent */ }
+  }, [auth, onBalanceUpdate, airline]);
+
+  const fetchClientFeedback = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/flights/client-feedback`, { headers: auth });
+      const d = await res.json();
+      setClientFeedback(d.items || []);
+    } catch { /* silent */ }
+  }, [auth]);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
-      await Promise.all([fetchConfig(), fetchReport()]);
+      await Promise.all([fetchConfig(), fetchReport(), fetchFlights(), fetchClientFeedback()]);
       setLoading(false);
     })();
-  }, [fetchConfig, fetchReport]);
+    const flightsInterval = setInterval(fetchFlights, 10000);
+    const fbInterval = setInterval(fetchClientFeedback, 60000);
+    return () => { clearInterval(flightsInterval); clearInterval(fbInterval); };
+  }, [fetchConfig, fetchReport, fetchFlights, fetchClientFeedback]);
 
   const patch = async (url, body, successMsg) => {
     setSaving(true); setError(''); setSuccess('');
@@ -119,6 +330,8 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
   const stabPct = stability != null ? (stability * 100).toFixed(1) + '%' : '—';
   const stabColor = stability == null ? '#2C2C2C' : stability >= 0.95 ? '#16a34a' : stability >= 0.85 ? '#eab308' : '#dc2626';
 
+  const activeFlights = flights.filter(fl => fl.status === 'in-flight');
+
   return (
     <div className="app">
       <div className="page-hero" style={{ backgroundImage: "url('/header-images/Headerimage_OCC.png')" }}>
@@ -132,114 +345,283 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         <TopBar onBack={onBack} balance={airline?.balance} airline={airline} backLabel={backLabel} />
         <Toast error={error} success={success} onClearError={() => setError('')} onClearSuccess={() => setSuccess('')} />
 
-        {/* ── 4 KPI Cards ── */}
-        <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
-          <KPI label="Weekly OCC Cost" value={fmtMoney(weeklyTotal)} />
-          <KPI label="Stability" value={stabPct} valColor={stabColor} sub={`of ${f.finalized || 0} finalized flights`} />
-          <KPI label="Cancellations" value={(f.cancelled || 0).toLocaleString()} sub="Last 7 days" />
-          <KPI label="Disruption Cost" value={fmtMoney(t.disruption_cost)} sub="Last 7 days" />
+        {/* ── Live Map (top) ── */}
+        <div className="info-card" style={{ padding: 0, overflow: 'hidden', marginBottom: '1rem' }}>
+          <div className="card-header-bar" style={{ margin: 0, borderRadius: '8px 8px 0 0' }}>
+            <span className="card-header-bar-title">Live Map</span>
+          </div>
+          <LiveFlightMap />
         </div>
 
         {/* ── Tab bar ── */}
         <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '2px solid #E0E0E0' }}>
-          <TabBtn active={tab === 'config'} onClick={() => setTab('config')}>Configuration</TabBtn>
-          <TabBtn active={tab === 'report'} onClick={() => setTab('report')}>Weekly Report</TabBtn>
+          <TabBtn active={tab === 'active'}   onClick={() => setTab('active')}>Active Flights ({activeFlights.length})</TabBtn>
+          <TabBtn active={tab === 'delays'}   onClick={() => setTab('delays')}>Delays</TabBtn>
+          <TabBtn active={tab === 'feedback'} onClick={() => setTab('feedback')}>Customer Feedback</TabBtn>
         </div>
 
-        {tab === 'config' && (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-            gap: '16px',
-          }}>
-
-            {/* Maintenance Programs (most important — gates Tech Air rate) */}
-            <ConfigCard
-              title="Maintenance Program"
-              image="/occ/occ_maintenance.png"
-              subtitle="Reduces Technical delay rates for the entire fleet."
-              footnote={fleetCount > 0
-                ? `Per aircraft × ${fleetCount} → ${fmtMoney(weeklyMaint)} / week`
-                : 'No aircraft yet'}
-            >
-              <OptionStack>
-                {Object.entries(cat.maintenance_programs || {}).map(([k, cfg]) => (
-                  <OptionCard
-                    key={k}
-                    selected={data.maintenance_program === k}
-                    label={PROGRAM_LABEL[k] || k}
-                    cost={cfg.weeklyCost}
-                    costSuffix="per aircraft"
-                    detail={cfg.technicalReduction > 0
-                      ? `-${(cfg.technicalReduction * 100).toFixed(1)}% on technical delays`
-                      : 'No reduction'}
-                    disabled={saving}
-                    onClick={() => patch('/api/occ/maintenance', { program: k }, `Maintenance set to ${PROGRAM_LABEL[k]}`)}
+        {tab === 'active' && (
+          <div className="info-card">
+            <div className="card-header-bar">
+              <span className="card-header-bar-title">Active Flights ({activeFlights.length})</span>
+            </div>
+            {activeFlights.length === 0 ? (
+              <div className="occ-empty">No flights currently in the air.</div>
+            ) : (
+              <div className="occ-grid">
+                {activeFlights.map(fl => (
+                  <FlightCard
+                    key={fl.id}
+                    flight={fl}
+                    onNavigateToAirport={onNavigateToAirport}
+                    onNavigateToAircraft={onNavigateToAircraft}
                   />
                 ))}
-              </OptionStack>
-            </ConfigCard>
-
-            {/* Ground Handling */}
-            <ConfigCard
-              title="Ground Handling Level"
-              image="/occ/occ_ground.png"
-              subtitle="Reduces Ground Ops delay rate at every hub."
-              footnote={hubCount > 0
-                ? `Per hub × ${hubCount} → ${fmtMoney(weeklyGh)} / week`
-                : 'No hubs yet'}
-            >
-              <OptionStack>
-                {Object.entries(cat.ground_handling_levels || {}).map(([k, cfg]) => (
-                  <OptionCard
-                    key={k}
-                    selected={data.ground_handling_level === k}
-                    label={GH_LABEL[k] || k}
-                    cost={cfg.weeklyCost}
-                    costSuffix="per hub"
-                    detail={cfg.groundOpsReduction > 0
-                      ? `-${(cfg.groundOpsReduction * 100).toFixed(1)}% on ground ops delays`
-                      : 'No reduction'}
-                    disabled={saving}
-                    onClick={() => patch('/api/occ/ground-handling', { level: k }, `Ground handling set to ${GH_LABEL[k]}`)}
-                  />
-                ))}
-              </OptionStack>
-            </ConfigCard>
-
-            {/* Hotel Partnership */}
-            <ConfigCard
-              title="Hotel Partnership"
-              image="/occ/occ_hotel.png"
-              subtitle="Lowers hotel cost per pax when cancellations strand passengers at a non-hub."
-              footnote="Flat fee — applies airline-wide"
-            >
-              <OptionStack>
-                {Object.entries(cat.hotel_partnerships || {}).map(([k, cfg]) => (
-                  <OptionCard
-                    key={k}
-                    selected={data.hotel_partnership === k}
-                    label={HP_LABEL[k] || k}
-                    cost={cfg.weeklyCost}
-                    detail={`$${cfg.hotelCostPerPax}/pax on cancel`}
-                    disabled={saving}
-                    onClick={() => patch('/api/occ/hotel-partnership', { partnership: k }, `Hotel partnership set to ${HP_LABEL[k]}`)}
-                  />
-                ))}
-              </OptionStack>
-            </ConfigCard>
-
+              </div>
+            )}
           </div>
         )}
 
-        {tab === 'report' && report && (
-          <ReportView
-            report={report}
-            onNavigateToAircraft={onNavigateToAircraft}
-            onNavigateToAirport={onNavigateToAirport}
-          />
+        {tab === 'delays' && (
+          <>
+            {/* 4 KPI Cards */}
+            <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
+              <KPI label="Weekly OCC Cost"  value={fmtMoney(weeklyTotal)} />
+              <KPI label="Stability"        value={stabPct} valColor={stabColor} sub={`of ${f.finalized || 0} finalized flights`} />
+              <KPI label="Cancellations"    value={(f.cancelled || 0).toLocaleString()} sub="Last 7 days" />
+              <KPI label="Disruption Cost"  value={fmtMoney(t.disruption_cost)} sub="Last 7 days" />
+            </div>
+
+            {/* Configuration cards */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+              gap: '16px',
+              marginBottom: '20px',
+            }}>
+              <ConfigCard
+                title="Maintenance Program"
+                image="/occ/occ_maintenance.png"
+                subtitle="Reduces Technical delay rates for the entire fleet."
+                footnote={fleetCount > 0
+                  ? `Per aircraft × ${fleetCount} → ${fmtMoney(weeklyMaint)} / week`
+                  : 'No aircraft yet'}
+              >
+                <OptionStack>
+                  {Object.entries(cat.maintenance_programs || {}).map(([k, cfg]) => (
+                    <OptionCard
+                      key={k}
+                      selected={data.maintenance_program === k}
+                      label={PROGRAM_LABEL[k] || k}
+                      cost={cfg.weeklyCost}
+                      costSuffix="per aircraft"
+                      detail={cfg.technicalReduction > 0
+                        ? `-${(cfg.technicalReduction * 100).toFixed(1)}% on technical delays`
+                        : 'No reduction'}
+                      disabled={saving}
+                      onClick={() => patch('/api/occ/maintenance', { program: k }, `Maintenance set to ${PROGRAM_LABEL[k]}`)}
+                    />
+                  ))}
+                </OptionStack>
+              </ConfigCard>
+
+              <ConfigCard
+                title="Ground Handling Level"
+                image="/occ/occ_ground.png"
+                subtitle="Reduces Ground Ops delay rate at every hub."
+                footnote={hubCount > 0
+                  ? `Per hub × ${hubCount} → ${fmtMoney(weeklyGh)} / week`
+                  : 'No hubs yet'}
+              >
+                <OptionStack>
+                  {Object.entries(cat.ground_handling_levels || {}).map(([k, cfg]) => (
+                    <OptionCard
+                      key={k}
+                      selected={data.ground_handling_level === k}
+                      label={GH_LABEL[k] || k}
+                      cost={cfg.weeklyCost}
+                      costSuffix="per hub"
+                      detail={cfg.groundOpsReduction > 0
+                        ? `-${(cfg.groundOpsReduction * 100).toFixed(1)}% on ground ops delays`
+                        : 'No reduction'}
+                      disabled={saving}
+                      onClick={() => patch('/api/occ/ground-handling', { level: k }, `Ground handling set to ${GH_LABEL[k]}`)}
+                    />
+                  ))}
+                </OptionStack>
+              </ConfigCard>
+
+              <ConfigCard
+                title="Hotel Partnership"
+                image="/occ/occ_hotel.png"
+                subtitle="Lowers hotel cost per pax when cancellations strand passengers at a non-hub."
+                footnote="Flat fee — applies airline-wide"
+              >
+                <OptionStack>
+                  {Object.entries(cat.hotel_partnerships || {}).map(([k, cfg]) => (
+                    <OptionCard
+                      key={k}
+                      selected={data.hotel_partnership === k}
+                      label={HP_LABEL[k] || k}
+                      cost={cfg.weeklyCost}
+                      detail={`$${cfg.hotelCostPerPax}/pax on cancel`}
+                      disabled={saving}
+                      onClick={() => patch('/api/occ/hotel-partnership', { partnership: k }, `Hotel partnership set to ${HP_LABEL[k]}`)}
+                    />
+                  ))}
+                </OptionStack>
+              </ConfigCard>
+            </div>
+
+            {/* Weekly Report */}
+            {report && (
+              <ReportView
+                report={report}
+                onNavigateToAircraft={onNavigateToAircraft}
+                onNavigateToAirport={onNavigateToAirport}
+              />
+            )}
+          </>
+        )}
+
+        {tab === 'feedback' && (
+          <div className="info-card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ background: '#2C2C2C', padding: '14px 20px', borderRadius: '8px 8px 0 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span className="card-header-bar-title" style={{ color: '#fff' }}>Customer Feedback</span>
+              {clientFeedback.length > 0 && (
+                <span style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.5)' }}>Last 24 h</span>
+              )}
+            </div>
+            {clientFeedback.length === 0 ? (
+              <div className="occ-empty">No feedback in the last 24 hours.</div>
+            ) : (
+              <div className="occ-fb-list">
+                {clientFeedback.map(fb => {
+                  const entries = getFeedbackMessages(fb.violated_rules, fb.id);
+                  return (
+                    <button
+                      key={fb.id}
+                      className="occ-fb-item"
+                      onClick={() => onNavigateToAircraft?.(fb.aircraft_id)}
+                    >
+                      <div className="occ-fb-hd">
+                        <span className="occ-fb-fn">{fb.flight_number}</span>
+                        <span className="occ-fb-route">{fb.departure_airport} → {fb.arrival_airport}</span>
+                        <span className="occ-fb-reg">{fb.registration}</span>
+                      </div>
+                      {entries.map(({ msg, cabins }, i) => (
+                        <div key={i} className="occ-fb-msg-row">
+                          {cabins.length > 0 && (
+                            <span className="occ-fb-badges">
+                              {cabins.map(c => (
+                                <span key={c} className={`occ-fb-badge occ-fb-badge--${c}`}>{CABIN_SHORT[c] ?? c}</span>
+                              ))}
+                            </span>
+                          )}
+                          <span className="occ-fb-msg">"{msg}"</span>
+                        </div>
+                      ))}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
       </div>
+
+      <style>{`
+        .occ-empty { color: #999; font-size: 0.88rem; font-style: italic; padding: 1.5rem 1.1rem; }
+        .occ-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+          gap: 0.85rem;
+          padding: 1rem 1.1rem;
+        }
+
+        .occ-card { background: white; border-radius: 8px; border: 1px solid #EEEEEE; overflow: hidden; }
+        .occ-card-hd {
+          background: #F5F5F5; padding: 0.55rem 1rem;
+          display: flex; align-items: baseline; gap: 0.6rem;
+          border-bottom: 1px solid #EEEEEE;
+        }
+        .occ-card-reg { font-family: monospace; font-size: 1rem; font-weight: 900; color: #2C2C2C; letter-spacing: 0.04em; }
+        .occ-card-type { font-size: 0.68rem; color: #888; font-weight: 500; }
+
+        .occ-fp-wrap { padding: 12px 16px 14px; }
+        .occ-fp-route { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; }
+        .occ-fp-apt { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; }
+        .occ-fp-apt-r { align-items: flex-end; text-align: right; }
+        .occ-fp-code {
+          font-family: monospace; font-size: 1.25rem; font-weight: 900; color: #2C2C2C;
+          line-height: 1; background: none; border: none; padding: 0; cursor: pointer;
+          text-decoration: underline; text-decoration-color: rgba(0,0,0,0.25); text-underline-offset: 2px;
+        }
+        .occ-fp-code:hover { color: #555; }
+        .occ-fp-apt-name { font-size: 10px; color: #999; line-height: 1.2; max-width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .occ-fp-bar { position: relative; height: 24px; display: flex; align-items: center; margin-bottom: 8px; }
+        .occ-fp-line { position: absolute; left: 0; right: 0; height: 2px; background: #E0E0E0; }
+        .occ-fp-line::before, .occ-fp-line::after {
+          content: ''; position: absolute; top: 50%; transform: translateY(-50%);
+          width: 5px; height: 5px; border-radius: 50%; background: #2C2C2C;
+        }
+        .occ-fp-line::before { left: 0; }
+        .occ-fp-line::after  { right: 0; }
+        .occ-fp-plane { position: absolute; font-size: 16px; line-height: 1; top: 50%; transform: translateY(-50%); z-index: 1; }
+        .occ-fp-meta { display: flex; align-items: center; gap: 8px; }
+        .occ-fp-reg {
+          font-family: monospace; font-size: 0.75rem; font-weight: 700; color: #2C2C2C;
+          background: none; border: none; padding: 0; cursor: pointer;
+          text-decoration: underline; text-decoration-color: rgba(0,0,0,0.25); text-underline-offset: 2px;
+        }
+        .occ-fp-reg:hover { color: #555; }
+        .occ-fp-time { font-size: 0.75rem; color: #888; margin-left: auto; }
+        .occ-apt-link {
+          background: none; border: none; padding: 0; cursor: pointer; color: #2C2C2C; font-weight: 600;
+          text-decoration: underline; text-decoration-color: rgba(0,0,0,0.25);
+          text-underline-offset: 2px; font-family: inherit;
+        }
+        .occ-apt-link:hover { color: #555; }
+
+        .occ-fb-list { display: flex; flex-direction: column; }
+        .occ-fb-item {
+          width: 100%; background: none; border: none; border-bottom: 1px solid #F2F2F2;
+          padding: 10px 16px; cursor: pointer; text-align: left;
+          transition: background 0.15s;
+        }
+        .occ-fb-item:last-child { border-bottom: none; }
+        .occ-fb-item:hover { background: #FEF2F2; }
+        .occ-fb-hd { display: flex; align-items: baseline; gap: 6px; margin-bottom: 4px; }
+        .occ-fb-fn { font-family: monospace; font-size: 0.78rem; font-weight: 800; color: #2C2C2C; }
+        .occ-fb-route { font-size: 0.72rem; color: #888; flex: 1; }
+        .occ-fb-reg { font-family: monospace; font-size: 0.68rem; color: #BBB; }
+        .occ-fb-msg-row {
+          display: flex; align-items: baseline; gap: 5px; margin-top: 2px;
+        }
+        .occ-fb-badges { display: flex; gap: 3px; flex-shrink: 0; align-items: center; }
+        .occ-fb-badge {
+          display: inline-block; font-size: 0.6rem; font-weight: 800;
+          padding: 1px 4px; border-radius: 3px; letter-spacing: 0.04em;
+          font-family: monospace; line-height: 1.5;
+        }
+        .occ-fb-badge--economy         { background: #E8F4FD; color: #1565C0; border: 1px solid #BBDEFB; }
+        .occ-fb-badge--business        { background: #1C3A6B; color: #E3F2FD; border: 1px solid #1565C0; }
+        .occ-fb-badge--first           { background: #FFF8E1; color: #7B5E00; border: 1px solid #FFE082; }
+        .occ-fb-badge--premium_economy { background: #EDE7F6; color: #4527A0; border: 1px solid #D1C4E9; }
+        .occ-fb-msg {
+          font-size: 0.75rem; color: #7F1D1D; font-style: italic; line-height: 1.4;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+
+        @media (max-width: 480px) {
+          .occ-grid { grid-template-columns: 1fr; padding: 0.75rem; gap: 0.65rem; }
+          .occ-fp-route { gap: 4px; }
+          .occ-fp-code { font-size: 1.1rem; }
+          .occ-fp-apt-name { max-width: 80px; font-size: 9px; }
+          .occ-fb-msg { white-space: normal; }
+          .occ-fb-hd { flex-wrap: wrap; }
+        }
+      `}</style>
     </div>
   );
 }
@@ -268,9 +650,6 @@ function TabBtn({ active, onClick, children }) {
   );
 }
 
-// info-card with the standard dark header bar + a 600x250 OCC banner image
-// flush underneath. The image keeps its aspect ratio (no cropping) by using
-// an <img> sized to the card width.
 function ConfigCard({ title, image, subtitle, footnote, children }) {
   return (
     <div className="info-card" style={{ marginBottom: 0, display: 'flex', flexDirection: 'column' }}>
@@ -286,7 +665,6 @@ function ConfigCard({ title, image, subtitle, footnote, children }) {
             width: 'calc(100% + 56px)',
             height: 'auto',
             margin: '-20px -28px 16px',
-            // 600x250 source → preserve 12:5 aspect ratio
           }}
         />
       )}
@@ -299,10 +677,6 @@ function ConfigCard({ title, image, subtitle, footnote, children }) {
       )}
     </div>
   );
-}
-
-function OptionGrid({ children }) {
-  return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>{children}</div>;
 }
 
 function OptionStack({ children }) {
@@ -346,7 +720,6 @@ function ReportView({ report, onNavigateToAircraft, onNavigateToAirport }) {
 
   return (
     <>
-      {/* Two-column: Summary + Cost & Impact */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '20px' }}>
         <div className="info-card" style={{ marginBottom: 0 }}>
           <div className="card-header-bar">
@@ -440,7 +813,8 @@ function ReportView({ report, onNavigateToAircraft, onNavigateToAirport }) {
 
 const linkBtn = {
   background: 'transparent', border: 'none', padding: 0, font: 'inherit',
-  color: '#2563eb', cursor: 'pointer', textDecoration: 'underline',
+  color: '#2C2C2C', cursor: 'pointer', textDecoration: 'underline',
+  textDecorationColor: 'rgba(0,0,0,0.25)', textUnderlineOffset: '2px',
 };
 
 // ── Event helpers ──────────────────────────────────────────────────────────

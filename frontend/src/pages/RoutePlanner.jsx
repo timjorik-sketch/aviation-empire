@@ -444,8 +444,8 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
         .fn-prefix { display:inline-block; padding:0.5rem 0.75rem; background:#F5F5F5; border:1px solid #E0E0E0; border-right:none; border-radius:6px 0 0 6px; font-weight:700; color:#2C2C2C; font-family:monospace; }
         .fn-input { padding:0.5rem 0.75rem; border:1px solid #E0E0E0; border-radius:0 6px 6px 0; font-family:monospace; font-size:1rem; width:90px; }
         .fn-input:focus { outline:none; border-color:#2C2C2C; }
-        .rp-airport-link { background:none; border:none; padding:0; color:#2563eb; cursor:pointer; font-weight:700; font-size:inherit; font-family:inherit; text-decoration:underline; text-decoration-style:dotted; text-underline-offset:2px; }
-        .rp-airport-link:hover { color:#1d4ed8; }
+        .rp-airport-link { background:none; border:none; padding:0; color:#2C2C2C; cursor:pointer; font-weight:700; font-size:inherit; font-family:inherit; text-decoration:underline; text-decoration-color:rgba(0,0,0,0.25); text-underline-offset:2px; }
+        .rp-airport-link:hover { color:#555; }
         .price-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem; }
         .rp-create-grid { display:flex; flex-direction:column; gap:1.5rem; margin-bottom:1.5rem; }
         .rp-map-card { background:white; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.08); overflow:hidden; }

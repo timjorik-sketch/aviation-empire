@@ -104,6 +104,28 @@ function formatHours(min) {
   return rem === 0 ? `${h}h` : `${h}h${rem}m`;
 }
 
+const DELAY_REASON_LABEL = {
+  technical_air:   'Technical (Air)',
+  technical_ground:'Technical (Ground)',
+  ground_ops:      'Ground Ops',
+  atc:             'ATC',
+  medical:         'Medical',
+  wrong_location:  'Wrong Location',
+  cascade:         'Cascade',
+  medical_cascade: 'Medical Cascade',
+};
+
+function getDelayDescription(f) {
+  if (!f.delay_reason) return null;
+  const parts = [DELAY_REASON_LABEL[f.delay_reason] || f.delay_reason];
+  if (f.delay_minutes) parts.push(`+${formatHours(f.delay_minutes)}`);
+  if (f.diversion_airport_code) parts.push(`via ${f.diversion_airport_code}`);
+  if (f.delay_reason === 'technical_air' && f.status === 'cancelled') {
+    parts.push(`turned back to ${f.departure_airport}`);
+  }
+  return parts.join(' · ');
+}
+
 function minutesToHM(min) {
   const h = Math.floor(min / 60), m = min % 60;
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
@@ -2295,6 +2317,16 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                         <tr>
                           <td style={{ color: '#444' }}>Points</td>
                           <td style={{ textAlign: 'right', color: '#444' }}>+{xp} XP</td>
+                        </tr>
+                      );
+                    })()}
+                    {(() => {
+                      const delayDesc = getDelayDescription(f);
+                      if (!delayDesc) return null;
+                      return (
+                        <tr>
+                          <td style={{ color: '#444' }}>Delay</td>
+                          <td style={{ textAlign: 'right', color: '#f97316', fontWeight: 600 }}>{delayDesc}</td>
                         </tr>
                       );
                     })()}

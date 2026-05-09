@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef } from 'react';
 import { useNav } from './NavContext.jsx';
 
 const NAV_ITEMS = [
@@ -46,6 +47,19 @@ function sectionFor(page) {
 
 export default function TopBar({ onBack, backLabel = 'Back', balance: balanceProp }) {
   const nav = useNav();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const shellRef = useRef(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onClickOutside = (e) => {
+      if (shellRef.current && !shellRef.current.contains(e.target)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [menuOpen]);
 
   const currentPage   = nav?.currentPage;
   const navigate      = nav?.navigate || (() => {});
@@ -54,18 +68,40 @@ export default function TopBar({ onBack, backLabel = 'Back', balance: balancePro
   const activeSection = sectionFor(currentPage);
   const subTabs       = SUB_TABS[activeSection];
 
+  const handleNav = (target) => {
+    navigate(target);
+    setMenuOpen(false);
+  };
+
   return (
-    <div className="topnav-shell">
+    <div className="topnav-shell" ref={shellRef}>
       <div className="topnav">
         {nav && (
-          <nav className="topnav-items">
+          <button
+            className="topnav-burger"
+            onClick={() => setMenuOpen(o => !o)}
+            aria-label="Toggle navigation menu"
+            aria-expanded={menuOpen}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
+              {menuOpen ? (
+                <path d="M18 6L6 18M6 6l12 12" />
+              ) : (
+                <path d="M3 6h18M3 12h18M3 18h18" />
+              )}
+            </svg>
+          </button>
+        )}
+
+        {nav && (
+          <nav className={`topnav-items${menuOpen ? ' topnav-items--open' : ''}`}>
             {NAV_ITEMS.map(item => {
               const isActive = item.section === activeSection;
               return (
                 <button
                   key={item.key}
                   className={`topnav-item${isActive ? ' topnav-item--active' : ''}`}
-                  onClick={() => navigate(item.target)}
+                  onClick={() => handleNav(item.target)}
                 >
                   {item.label}
                 </button>
@@ -154,6 +190,21 @@ export default function TopBar({ onBack, backLabel = 'Back', balance: balancePro
         }
         .topnav-back:hover { background: #F5F5F5; border-color: #C8C8C8; }
 
+        .topnav-burger {
+          display: none;
+          align-items: center;
+          justify-content: center;
+          padding: 0.4rem 0.55rem;
+          background: #fff;
+          border: 1px solid #E0E0E0;
+          border-radius: 6px;
+          color: #2C2C2C;
+          cursor: pointer;
+          line-height: 0;
+          transition: background 0.15s, border-color 0.15s;
+        }
+        .topnav-burger:hover { background: #F5F5F5; border-color: #C8C8C8; }
+
         .topnav-item {
           background: transparent;
           border: none;
@@ -210,9 +261,33 @@ export default function TopBar({ onBack, backLabel = 'Back', balance: balancePro
         }
 
         @media (max-width: 720px) {
-          .topnav { flex-wrap: wrap; gap: 0.5rem; padding: 0.5rem 0.6rem; }
-          .topnav-items { gap: 0.1rem; }
-          .topnav-item { padding: 0.4rem 0.55rem; font-size: 0.85rem; }
+          .topnav {
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            padding: 0.5rem 0.6rem;
+            justify-content: space-between;
+          }
+          .topnav-burger { display: inline-flex; }
+
+          .topnav-items {
+            display: none;
+            flex: 0 0 100%;
+            order: 99;
+            flex-direction: column;
+            gap: 0;
+            padding-top: 0.4rem;
+            margin-top: 0.4rem;
+            border-top: 1px solid #F0F0F0;
+          }
+          .topnav-items--open { display: flex; }
+          .topnav-item {
+            width: 100%;
+            text-align: left;
+            border-radius: 6px;
+            padding: 0.7rem 0.8rem;
+            font-size: 0.95rem;
+          }
+
           .topnav-balance { padding: 0.3rem 0.55rem; }
           .topnav-balance-label { display: none; }
         }

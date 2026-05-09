@@ -30,7 +30,6 @@ import FleetPage from './pages/FleetPage';
 import AircraftDetail from './pages/AircraftDetail';
 import AircraftMarketplace from './pages/AircraftMarketplace';
 import RoutePlanner from './pages/RoutePlanner';
-import FlightOperations from './pages/FlightOperations';
 import FlightSchedule from './pages/FlightSchedule';
 import Finances from './pages/Finances';
 import ServiceProfiles from './pages/ServiceProfiles';
@@ -450,7 +449,6 @@ function App() {
   const PAGE_LABELS = {
     dashboard: 'Dashboard',
     fleet: 'Fleet',
-    flights: 'Flight Operations',
     'flight-schedule': 'Flight Schedule',
     finances: 'Finances',
     routes: 'Route Planning',
@@ -542,18 +540,6 @@ function App() {
       />
     );
   }
-  if (currentPage === 'flights') {
-    return wrap(
-      <FlightOperations
-        airline={activeAirline}
-        onBalanceUpdate={handleBalanceUpdate}
-        onBack={() => setCurrentPage('dashboard')}
-        onNavigateToAirport={(code) => navigateToAirport(code, 'flights')}
-        onNavigateToAircraft={(id) => { setSelectedAircraftId(id); setCurrentPage('aircraft-detail'); }}
-        onNavigate={(page) => navigate(page)}
-      />
-    );
-  }
   if (currentPage === 'flight-schedule') {
     return wrap(
       <FlightSchedule
@@ -579,7 +565,7 @@ function App() {
         airline={activeAirline}
         onBalanceUpdate={handleBalanceUpdate}
         onBack={() => setCurrentPage(previousPage)}
-        backLabel={PAGE_LABELS[previousPage] || 'Flight Operations'}
+        backLabel={PAGE_LABELS[previousPage] || 'Dashboard'}
         onNavigateToAirport={(code) => navigateToAirport(code, 'ops-control')}
         onNavigateToAircraft={(id) => { setPreviousPage('ops-control'); setSelectedAircraftId(id); setCurrentPage('aircraft-detail'); }}
       />
@@ -589,7 +575,7 @@ function App() {
     return wrap(<HubsDestinations airline={activeAirline} onBack={() => setCurrentPage(hubsBackPage)} backLabel={PAGE_LABELS[hubsBackPage] || 'Dashboard'} onNavigateToAirport={(code) => navigateToAirport(code, 'hubs')} onBalanceUpdate={handleBalanceUpdate} onNavigate={(page) => navigate(page)} />);
   }
   if (currentPage === 'airport-overview') {
-    return wrap(<AirportOverview airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Flight Operations'} onNavigateToAirport={(code) => navigateToAirport(code, 'airport-overview')} onBalanceUpdate={handleBalanceUpdate} savedState={airportOverviewState} />);
+    return wrap(<AirportOverview airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Dashboard'} onNavigateToAirport={(code) => navigateToAirport(code, 'airport-overview')} onBalanceUpdate={handleBalanceUpdate} savedState={airportOverviewState} />);
   }
   if (currentPage === 'personnel') {
     return wrap(<Personnel airline={activeAirline} onBack={() => setCurrentPage('dashboard')} />);
@@ -1063,16 +1049,21 @@ function App() {
                 </div>
 
                 {/* Operations card */}
-                {opsStats && opsStats.flights && opsStats.flights.finalized > 0 && (() => {
+                {opsStats && opsStats.flights && (() => {
                   const f = opsStats.flights || {};
                   const t = opsStats.totals || {};
+                  const active = f.active || 0;
+                  const scheduledToday = f.scheduled_today || 0;
+                  const finalized = f.finalized || 0;
+                  if (active === 0 && scheduledToday === 0 && finalized === 0) return null;
                   const stab = f.stability;
                   const stabPct = stab != null ? (stab * 100).toFixed(1) + '%' : '—';
                   const stabColor = stab == null ? '#aaa' : stab >= 0.95 ? '#22c55e' : stab >= 0.85 ? '#eab308' : '#dc2626';
+                  const showWeekly = finalized > 0;
                   return (
                     <div className="hp-sidebar-card">
                       <div className="hp-sidebar-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span>Operations — 7d</span>
+                        <span>Operations</span>
                         <button
                           onClick={() => navigate('ops-control')}
                           style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.3)', color: 'rgba(255,255,255,0.7)', padding: '0.22rem 0.65rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', letterSpacing: '0.03em' }}
@@ -1084,17 +1075,37 @@ function App() {
                         <table className="hp-info-table">
                           <tbody>
                             <tr>
-                              <td className="hp-it-label">Stability</td>
-                              <td className="hp-it-val" style={{ color: stabColor }}>{stabPct}</td>
+                              <td className="hp-it-label">Active Flights</td>
+                              <td className="hp-it-val">{active}</td>
                             </tr>
-                            <tr>
-                              <td className="hp-it-label">Cancellations</td>
-                              <td className="hp-it-val">{f.cancelled || 0}</td>
+                            <tr className={showWeekly ? '' : 'hp-it-last'}>
+                              <td className="hp-it-label">Scheduled Flights Today</td>
+                              <td className="hp-it-val">{scheduledToday}</td>
                             </tr>
-                            <tr className="hp-it-last">
-                              <td className="hp-it-label">Disruption Cost</td>
-                              <td className="hp-it-val">${(t.disruption_cost || 0).toLocaleString()}</td>
-                            </tr>
+                            {showWeekly && (
+                              <>
+                                <tr className="hp-it-divider">
+                                  <td colSpan={2} className="hp-it-section-label">
+                                    <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <span>Delays and Cancellations</span>
+                                      <span>7 Days</span>
+                                    </span>
+                                  </td>
+                                </tr>
+                                <tr>
+                                  <td className="hp-it-label">Stability</td>
+                                  <td className="hp-it-val" style={{ color: stabColor }}>{stabPct}</td>
+                                </tr>
+                                <tr>
+                                  <td className="hp-it-label">Cancellations</td>
+                                  <td className="hp-it-val">{f.cancelled || 0}</td>
+                                </tr>
+                                <tr className="hp-it-last">
+                                  <td className="hp-it-label">Disruption Cost</td>
+                                  <td className="hp-it-val">${(t.disruption_cost || 0).toLocaleString()}</td>
+                                </tr>
+                              </>
+                            )}
                           </tbody>
                         </table>
                       </div>
@@ -1104,8 +1115,14 @@ function App() {
 
                 {/* Fleet card */}
                 <div className="hp-sidebar-card">
-                  <div className="hp-sidebar-title">
+                  <div className="hp-sidebar-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span>Fleet ({activeAirline.fleet_count})</span>
+                    <button
+                      onClick={() => navigate('fleet')}
+                      style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.3)', color: 'rgba(255,255,255,0.7)', padding: '0.22rem 0.65rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', letterSpacing: '0.03em' }}
+                    >
+                      MANAGE
+                    </button>
                   </div>
                   {fleetSummary.length === 0 ? (
                     <div style={{ padding: '2.5rem 1.1rem', textAlign: 'center', color: '#AAAAAA', fontSize: '0.85rem', fontStyle: 'italic' }}>

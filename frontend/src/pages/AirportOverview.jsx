@@ -26,7 +26,7 @@ const CATEGORY_COLORS = {
   8: '#ef4444',
 };
 
-export default function AirportOverview({ airline, onBack, backLabel = 'Flight Operations', onNavigateToAirport, onBalanceUpdate, savedState }) {
+export default function AirportOverview({ airline, onBack, backLabel = 'Dashboard', onNavigateToAirport, onBalanceUpdate, savedState }) {
   const saved = savedState?.current;
   const [airports, setAirports] = useState(saved?.airports || []);
   const [loading, setLoading]   = useState(!saved?.airports);

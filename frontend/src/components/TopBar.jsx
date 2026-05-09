@@ -4,7 +4,7 @@ import { useNav } from './NavContext.jsx';
 const NAV_ITEMS = [
   { key: 'dashboard',  label: 'Dashboard',  section: 'dashboard',  target: 'dashboard' },
   { key: 'fleet',      label: 'Fleet',      section: 'fleet',      target: 'fleet' },
-  { key: 'operations', label: 'Operations', section: 'operations', target: 'flights' },
+  { key: 'operations', label: 'Operations', section: 'operations', target: 'ops-control' },
   { key: 'network',    label: 'Network',    section: 'network',    target: 'hubs' },
   { key: 'finances',   label: 'Finances',   section: 'finances',   target: 'finances' },
   { key: 'staff',      label: 'Staff',      section: 'staff',      target: 'personnel' },
@@ -13,7 +13,7 @@ const NAV_ITEMS = [
 const SECTION_PAGES = {
   dashboard:  ['dashboard'],
   fleet:      ['fleet', 'cabin-profiles', 'marketplace', 'aircraft-detail'],
-  operations: ['flights', 'flight-schedule', 'service-profiles', 'ops-control'],
+  operations: ['ops-control', 'flight-schedule', 'service-profiles'],
   network:    ['hubs', 'routes', 'airport-overview', 'airport', 'route-map'],
   finances:   ['finances'],
   staff:      ['personnel'],
@@ -26,10 +26,9 @@ const SUB_TABS = {
     { page: 'marketplace',    label: 'Marketplace' },
   ],
   operations: [
-    { page: 'flights',          label: 'Live Operations' },
+    { page: 'ops-control',      label: 'Operations Control Center' },
     { page: 'flight-schedule',  label: 'Schedule' },
     { page: 'service-profiles', label: 'Service Profiles' },
-    { page: 'ops-control',      label: 'OCC' },
   ],
   network: [
     { page: 'hubs',              label: 'Hubs & Destinations' },

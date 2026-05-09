@@ -214,7 +214,7 @@ function FlightCard({ flight, onNavigateToAirport, onNavigateToAircraft }) {
   );
 }
 
-export default function OperationsControlCenter({ airline, onBack, backLabel = 'Flight Operations', onBalanceUpdate, onNavigateToAircraft, onNavigateToAirport }) {
+export default function OperationsControlCenter({ airline, onBack, backLabel = 'Dashboard', onBalanceUpdate, onNavigateToAircraft, onNavigateToAirport }) {
   const [tab, setTab] = useState('active');
   const [data, setData] = useState(null);
   const [report, setReport] = useState(null);
@@ -224,6 +224,9 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [activePage, setActivePage] = useState(0);
+
+  const ACTIVE_PAGE_SIZE = 24;
 
   const token = localStorage.getItem('token');
   const auth = useMemo(() => ({ 'Authorization': `Bearer ${token}` }), [token]);
@@ -331,6 +334,10 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
   const stabColor = stability == null ? '#2C2C2C' : stability >= 0.95 ? '#16a34a' : stability >= 0.85 ? '#eab308' : '#dc2626';
 
   const activeFlights = flights.filter(fl => fl.status === 'in-flight');
+  const activePageCount = Math.max(1, Math.ceil(activeFlights.length / ACTIVE_PAGE_SIZE));
+  const safeActivePage  = Math.min(activePage, activePageCount - 1);
+  const activeFlightsPage = activeFlights.slice(safeActivePage * ACTIVE_PAGE_SIZE, (safeActivePage + 1) * ACTIVE_PAGE_SIZE);
+  const feedbackCount = clientFeedback.length;
 
   return (
     <div className="app">
@@ -357,7 +364,9 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '2px solid #E0E0E0' }}>
           <TabBtn active={tab === 'active'}   onClick={() => setTab('active')}>Active Flights ({activeFlights.length})</TabBtn>
           <TabBtn active={tab === 'delays'}   onClick={() => setTab('delays')}>Delays</TabBtn>
-          <TabBtn active={tab === 'feedback'} onClick={() => setTab('feedback')}>Customer Feedback</TabBtn>
+          <TabBtn active={tab === 'feedback'} onClick={() => setTab('feedback')}>
+            Customer Feedback{feedbackCount > 0 ? ` (${feedbackCount})` : ''}
+          </TabBtn>
         </div>
 
         {tab === 'active' && (
@@ -368,16 +377,27 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
             {activeFlights.length === 0 ? (
               <div className="occ-empty">No flights currently in the air.</div>
             ) : (
-              <div className="occ-grid">
-                {activeFlights.map(fl => (
-                  <FlightCard
-                    key={fl.id}
-                    flight={fl}
-                    onNavigateToAirport={onNavigateToAirport}
-                    onNavigateToAircraft={onNavigateToAircraft}
+              <>
+                <div className="occ-grid">
+                  {activeFlightsPage.map(fl => (
+                    <FlightCard
+                      key={fl.id}
+                      flight={fl}
+                      onNavigateToAirport={onNavigateToAirport}
+                      onNavigateToAircraft={onNavigateToAircraft}
+                    />
+                  ))}
+                </div>
+                {activePageCount > 1 && (
+                  <Pagination
+                    page={safeActivePage}
+                    pageCount={activePageCount}
+                    pageSize={ACTIVE_PAGE_SIZE}
+                    total={activeFlights.length}
+                    onChange={setActivePage}
                   />
-                ))}
-              </div>
+                )}
+              </>
             )}
           </div>
         )}
@@ -635,6 +655,62 @@ function KPI({ label, value, valColor = '#2C2C2C', sub }) {
       <div style={{ fontSize: '1.55rem', fontWeight: 700, color: valColor, lineHeight: 1.1 }}>{value}</div>
       {sub && <div style={{ marginTop: '6px', fontSize: '0.72rem', color: '#888', lineHeight: 1.3 }}>{sub}</div>}
     </div>
+  );
+}
+
+function Pagination({ page, pageCount, pageSize, total, onChange }) {
+  const from = page * pageSize + 1;
+  const to   = Math.min(total, (page + 1) * pageSize);
+
+  // Compact page list with ellipses (e.g., 1 … 4 5 6 … 12)
+  const pages = [];
+  const window = 1; // neighbors around current
+  for (let i = 0; i < pageCount; i++) {
+    if (i === 0 || i === pageCount - 1 || Math.abs(i - page) <= window) {
+      pages.push(i);
+    } else if (pages[pages.length - 1] !== '…') {
+      pages.push('…');
+    }
+  }
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      gap: 12, padding: '12px 1.1rem 1rem', borderTop: '1px solid #F0F0F0', flexWrap: 'wrap',
+    }}>
+      <div style={{ fontSize: '0.78rem', color: '#888' }}>
+        Showing <strong style={{ color: '#2C2C2C' }}>{from}–{to}</strong> of <strong style={{ color: '#2C2C2C' }}>{total}</strong>
+      </div>
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        <PageBtn disabled={page === 0} onClick={() => onChange(page - 1)} aria-label="Previous page">‹</PageBtn>
+        {pages.map((p, i) =>
+          p === '…'
+            ? <span key={`e${i}`} style={{ padding: '0 6px', color: '#BBB', fontSize: '0.85rem' }}>…</span>
+            : <PageBtn key={p} active={p === page} onClick={() => onChange(p)}>{p + 1}</PageBtn>
+        )}
+        <PageBtn disabled={page >= pageCount - 1} onClick={() => onChange(page + 1)} aria-label="Next page">›</PageBtn>
+      </div>
+    </div>
+  );
+}
+
+function PageBtn({ active, disabled, onClick, children, ...rest }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      {...rest}
+      style={{
+        minWidth: 30, height: 30, padding: '0 8px',
+        background: active ? '#2C2C2C' : '#fff',
+        color: active ? '#fff' : disabled ? '#CCC' : '#2C2C2C',
+        border: `1px solid ${active ? '#2C2C2C' : '#E0E0E0'}`,
+        borderRadius: 6,
+        fontSize: '0.82rem', fontWeight: 600,
+        cursor: disabled || active ? 'default' : 'pointer',
+        transition: 'all 0.15s',
+      }}
+    >{children}</button>
   );
 }
 

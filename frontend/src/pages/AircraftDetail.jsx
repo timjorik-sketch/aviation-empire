@@ -104,9 +104,9 @@ function formatHours(min) {
   return rem === 0 ? `${h}h` : `${h}h${rem}m`;
 }
 
-const DELAY_REASON_LABEL = {
-  technical_air:   'Technical (Air)',
-  technical_ground:'Technical (Ground)',
+const DELAY_REASON_SHORT = {
+  technical_air:   'Technical',
+  technical_ground:'Technical',
   ground_ops:      'Ground Ops',
   atc:             'ATC',
   medical:         'Medical',
@@ -115,15 +115,33 @@ const DELAY_REASON_LABEL = {
   medical_cascade: 'Medical Cascade',
 };
 
+// Compact "+X" or "+XhY" form for the delay amount.
+function formatDelayCompact(min) {
+  const m = Math.round(min || 0);
+  if (m <= 0) return '';
+  if (m < 60) return `+${m}`;
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  return rem === 0 ? `+${h}h` : `+${h}h${rem}`;
+}
+
+// Format used in the flight details popup. Shape:
+//   "+10 (Technical)"
+//   "+30 Diverted via TLS (Medical)"
+//   "+1h36 Diverted to LHR (Technical)"
 function getDelayDescription(f) {
   if (!f.delay_reason) return null;
-  const parts = [DELAY_REASON_LABEL[f.delay_reason] || f.delay_reason];
-  if (f.delay_minutes) parts.push(`+${formatHours(f.delay_minutes)}`);
-  if (f.diversion_airport_code) parts.push(`via ${f.diversion_airport_code}`);
-  if (f.delay_reason === 'technical_air' && f.status === 'cancelled') {
-    parts.push(`turned back to ${f.departure_airport}`);
+  const reason = DELAY_REASON_SHORT[f.delay_reason] || f.delay_reason;
+  const amount = formatDelayCompact(f.delay_minutes);
+
+  let diversion = '';
+  if (f.delay_reason === 'medical' && f.diversion_airport_code) {
+    diversion = ` Diverted via ${f.diversion_airport_code}`;
+  } else if (f.delay_reason === 'technical_air' && f.departure_airport) {
+    diversion = ` Diverted to ${f.departure_airport}`;
   }
-  return parts.join(' · ');
+
+  return `${amount}${diversion} (${reason})`.trim();
 }
 
 function minutesToHM(min) {
@@ -2252,8 +2270,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
           (f.booked_first    ?? 0) * (f.first_price    ?? f.economy_price ?? 0) * 1.2
         ) : 0;
 
+        const disruptionCost = f.disruption_cost ?? 0;
         const finRows = isCancelled ? [
           { label: 'Cancellation Penalty', value: cancelPenalty > 0 ? -cancelPenalty : null },
+          { label: 'Disruption Cost',     value: disruptionCost > 0 ? -disruptionCost : null },
         ] : [
           { label: 'Revenue',             value: totalRevDisplay,                  positive: true },
           { label: 'Fuel',                value: fuelCostDisplay > 0 ? -fuelCostDisplay : null },
@@ -2261,6 +2281,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
           { label: 'Landing Fee',         value: landingDisplay > 0 ? -landingDisplay : null },
           { label: 'Ground Handling',     value: groundDisplay > 0 ? -groundDisplay : null },
           { label: 'ATC / Navigation',    value: atcDisplay > 0 ? -atcDisplay : null },
+          { label: 'Disruption Cost',     value: disruptionCost > 0 ? -disruptionCost : null },
         ];
 
         return (

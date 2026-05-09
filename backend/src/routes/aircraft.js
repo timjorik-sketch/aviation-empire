@@ -1820,7 +1820,21 @@ router.get('/:id/flights', authMiddleware, async (req, res) => {
              ac_ref.airline_cabin_profile_id,
              f.satisfaction_score,
              f.violated_rules,
-             f.delay_minutes, f.delay_reason, f.diversion_airport_code, f.is_wet_leased
+             f.delay_minutes, f.delay_reason, f.diversion_airport_code, f.is_wet_leased,
+             COALESCE((
+               SELECT SUM(ABS(t.amount))::int
+               FROM transactions t
+               WHERE t.airline_id = f.airline_id
+                 AND t.amount < 0
+                 AND t.description LIKE '%- ' || f.flight_number || '%'
+                 AND (
+                   t.description LIKE 'Hotel%' OR
+                   t.description LIKE 'Cancellation%' OR
+                   t.description LIKE 'Technical Fix%' OR
+                   t.description LIKE 'Diversion Fees%' OR
+                   t.description LIKE 'Wet Lease %'
+                 )
+             ), 0) AS disruption_cost
       FROM flights f
       LEFT JOIN routes r ON f.route_id = r.id
       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
@@ -1868,6 +1882,7 @@ router.get('/:id/flights', authMiddleware, async (req, res) => {
       delay_reason: r.delay_reason,
       diversion_airport_code: r.diversion_airport_code,
       is_wet_leased: r.is_wet_leased,
+      disruption_cost: r.disruption_cost,
     }));
 
     const maintResult = await pool.query(`

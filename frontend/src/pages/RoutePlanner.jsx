@@ -411,6 +411,13 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
     acc[a.country].push(a);
     return acc;
   }, {});
+  const homeCountry = airports.find(a => a.effective_type === 'home_base')?.country || '';
+  const countrySort = (a, b) => {
+    if (a === homeCountry && b !== homeCountry) return -1;
+    if (b === homeCountry && a !== homeCountry) return 1;
+    return a.localeCompare(b);
+  };
+  const sortedAirportCountries = Object.keys(airportsByCountry).sort(countrySort);
   const formatPrice = (p) => p == null ? '—' : `$${Number(p).toLocaleString()}`;
 
   if (loading) {
@@ -554,7 +561,7 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
                     <select value={checkDepCountry} onChange={e => { setCheckDepCountry(e.target.value); setCheckDep(''); }}
                       style={{ width: '100%', padding: '0.5rem', borderRadius: 6, border: '1px solid #E0E0E0', fontSize: '0.9rem' }}>
                       <option value="">Country…</option>
-                      {Object.keys(allAirportsByCountry).sort((a, b) => a.localeCompare(b)).map(c => (
+                      {Object.keys(allAirportsByCountry).sort(countrySort).map(c => (
                         <option key={c} value={c}>{c}</option>
                       ))}
                     </select>
@@ -572,7 +579,7 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
                     <select value={checkArrCountry} onChange={e => { setCheckArrCountry(e.target.value); setCheckArr(''); }}
                       style={{ width: '100%', padding: '0.5rem', borderRadius: 6, border: '1px solid #E0E0E0', fontSize: '0.9rem' }}>
                       <option value="">Country…</option>
-                      {Object.keys(allAirportsByCountry).sort((a, b) => a.localeCompare(b)).map(c => (
+                      {Object.keys(allAirportsByCountry).sort(countrySort).map(c => (
                         <option key={c} value={c}>{c}</option>
                       ))}
                     </select>
@@ -633,9 +640,9 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
                   <select value={departureAirport} onChange={e => setDepartureAirport(e.target.value)} required
                     style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E0E0E0', fontSize: '0.9rem' }}>
                     <option value="">Select...</option>
-                    {Object.entries(airportsByCountry).map(([country, list]) => (
+                    {sortedAirportCountries.map(country => (
                       <optgroup key={country} label={country}>
-                        {list.map(a => (
+                        {airportsByCountry[country].map(a => (
                           <option key={a.iata_code} value={a.iata_code}>
                             {a.iata_code} – {a.name}{TIER_LABEL[a.effective_type] || ''}
                           </option>
@@ -649,9 +656,9 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
                   <select value={arrivalAirport} onChange={e => setArrivalAirport(e.target.value)} required
                     style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E0E0E0', fontSize: '0.9rem' }}>
                     <option value="">Select...</option>
-                    {Object.entries(airportsByCountry).map(([country, list]) => (
+                    {sortedAirportCountries.map(country => (
                       <optgroup key={country} label={country}>
-                        {list.map(a => (
+                        {airportsByCountry[country].map(a => (
                           <option key={a.iata_code} value={a.iata_code} disabled={a.iata_code === departureAirport}>
                             {a.iata_code} – {a.name}{TIER_LABEL[a.effective_type] || ''}
                           </option>

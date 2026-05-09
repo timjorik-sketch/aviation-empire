@@ -313,6 +313,11 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
     return () => { clearInterval(flightsInterval); clearInterval(fbInterval); };
   }, [fetchFlights, fetchClientFeedback]);
 
+  // Reset to first page whenever filters change so the user sees the head of
+  // the result set. Must stay above any conditional return to satisfy the
+  // Rules of Hooks.
+  useEffect(() => { setActivePage(0); }, [filterAircraftType, filterHaul, filterContinent]);
+
   const patch = async (url, body, successMsg) => {
     setSaving(true); setError(''); setSuccess('');
     try {
@@ -411,9 +416,6 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
   const safeActivePage  = Math.min(activePage, activePageCount - 1);
   const activeFlightsPage = filteredActive.slice(safeActivePage * ACTIVE_PAGE_SIZE, (safeActivePage + 1) * ACTIVE_PAGE_SIZE);
   const feedbackCount = clientFeedback.length;
-
-  // Reset to first page whenever filters change so the user sees the head of the result set.
-  useEffect(() => { setActivePage(0); }, [filterAircraftType, filterHaul, filterContinent]);
 
   return (
     <div className="app">

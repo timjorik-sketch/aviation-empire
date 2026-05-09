@@ -2335,11 +2335,11 @@ router.delete('/:id/cancel-listing', authMiddleware, async (req, res) => {
   }
 });
 
-// POST /api/aircraft/dev/clear-market — admin-only: wipe used aircraft market
+// POST /api/aircraft/dev/clear-market — admin-only: wipe system-generated listings only
 router.post('/dev/clear-market', authMiddleware, adminMiddleware, async (_req, res) => {
   try {
-    await pool.query('DELETE FROM used_aircraft_market');
-    res.json({ message: 'Market cleared' });
+    const result = await pool.query("DELETE FROM used_aircraft_market WHERE seller_type = 'system'");
+    res.json({ message: `Market cleared (${result.rowCount} system listings removed; player listings kept)` });
   } catch(e) {
     console.error('Clear market error:', e);
     res.status(500).json({ error: 'Server error' });

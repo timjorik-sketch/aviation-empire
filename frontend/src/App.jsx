@@ -577,6 +577,7 @@ function App() {
     return wrap(
       <OperationsControlCenter
         airline={activeAirline}
+        onBalanceUpdate={handleBalanceUpdate}
         onBack={() => setCurrentPage(previousPage)}
         backLabel={PAGE_LABELS[previousPage] || 'Flight Operations'}
         onNavigateToAirport={(code) => navigateToAirport(code, 'ops-control')}

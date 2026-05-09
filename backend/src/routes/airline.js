@@ -251,12 +251,22 @@ router.post('/',
 
       const { name, airline_code, home_airport_code } = req.body;
 
-      // Check how many airlines this user already has
-      const countResult = await pool.query('SELECT COUNT(*) FROM airlines WHERE user_id = $1', [req.userId]);
-      const count = parseInt(countResult.rows[0].count);
+      // Check how many airlines this user already has + their max level
+      const countResult = await pool.query(
+        'SELECT COUNT(*)::int AS count, COALESCE(MAX(level), 0)::int AS max_level FROM airlines WHERE user_id = $1',
+        [req.userId]
+      );
+      const count = countResult.rows[0].count;
+      const maxLevel = countResult.rows[0].max_level;
 
       if (count >= 3) {
         return res.status(400).json({ error: 'Maximum of 3 airlines per user' });
+      }
+      if (count === 1 && maxLevel < 10) {
+        return res.status(400).json({ error: 'Your airline must reach level 10 before you can found a second airline' });
+      }
+      if (count === 2 && maxLevel < 15) {
+        return res.status(400).json({ error: 'One of your airlines must reach level 15 before you can found a third airline' });
       }
 
       // Check if airline code is taken

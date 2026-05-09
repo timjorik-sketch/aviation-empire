@@ -1275,12 +1275,38 @@ function App() {
                       {al.is_active && <span className="hp-al-card-badge">Active</span>}
                     </div>
                   ))}
-                  {airlines.length < 3 && (
-                    <div className="hp-create-card" onClick={() => setShowCreateForm(true)}>
-                      <span className="hp-create-icon">+</span>
-                      <span>Create New Airline</span>
-                    </div>
-                  )}
+                  {airlines.length < 3 && (() => {
+                    const maxLevel = airlines.length === 0
+                      ? 0
+                      : Math.max(...airlines.map(a => a.level || 1));
+                    let lockedHint = null;
+                    if (airlines.length === 1 && maxLevel < 10) {
+                      lockedHint = `Your airline must reach level 10 to found a second airline (currently level ${maxLevel}).`;
+                    } else if (airlines.length === 2 && maxLevel < 15) {
+                      lockedHint = `One of your airlines must reach level 15 to found a third airline (highest currently level ${maxLevel}).`;
+                    }
+                    if (lockedHint) {
+                      return (
+                        <div
+                          className="hp-create-card"
+                          style={{ opacity: 0.55, cursor: 'not-allowed', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}
+                          aria-disabled="true"
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span className="hp-create-icon" style={{ opacity: 0.7 }}>+</span>
+                            <span>Create New Airline</span>
+                          </div>
+                          <div style={{ fontSize: 12, color: '#666', marginLeft: 28 }}>{lockedHint}</div>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="hp-create-card" onClick={() => setShowCreateForm(true)}>
+                        <span className="hp-create-icon">+</span>
+                        <span>Create New Airline</span>
+                      </div>
+                    );
+                  })()}
                 </>
               ) : (
                 <CreateAirlineForm

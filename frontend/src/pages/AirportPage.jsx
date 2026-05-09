@@ -136,28 +136,22 @@ function getArrivalStatus(flight, now) {
 }
 
 function StatusDots({ cls, label }) {
-  const isDiverted   = cls === 'ap-st-delayed';     // major delay / tech_air / medical
-  const isMinorDelay = cls === 'ap-st-delayed-m';   // minor delay
-  const isYellow     = cls === 'ap-st-ontime';      // landed (static)
-  // Anything that's still in motion blinks: boarding, taxiing, on-time-b,
-  // and delayed/diverted flights (which are actively running late).
-  // 'landed' is the only "settled" state and stays static.
-  const isBlinking   = cls === 'ap-st-boarding' || cls === 'ap-st-ontime-b'
-                    || isDiverted || isMinorDelay;
-  const dotColor   = isDiverted ? '#f97316'
-                   : isMinorDelay ? '#facc15'
+  const isDelayed = cls === 'ap-st-delayed';   // orange — Delayed or Diverted label
+  const isYellow  = cls === 'ap-st-ontime';    // landed (static)
+  // Anything still in motion blinks. Landed is the only settled state.
+  const isBlinking = cls === 'ap-st-boarding' || cls === 'ap-st-ontime-b' || isDelayed;
+  const dotColor   = isDelayed ? '#f97316'
                    : isYellow ? '#facc15'
                    : isBlinking ? '#facc15'
                    : 'rgba(255,255,255,0.25)';
-  const textColor  = isDiverted ? '#f97316'
-                   : isMinorDelay ? '#facc15'
+  const textColor  = isDelayed ? '#f97316'
                    : isYellow ? '#facc15'
                    : isBlinking ? '#facc15'
                    : 'rgba(255,255,255,0.45)';
   return (
     <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
       {label && (
-        <span style={{ fontSize: '0.72rem', color: textColor, fontWeight: isDiverted ? 700 : 500, whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: '0.72rem', color: textColor, fontWeight: isDelayed ? 700 : 500, whiteSpace: 'nowrap' }}>
           {label}
         </span>
       )}

@@ -1110,7 +1110,8 @@ router.get('/:id/schedule', authMiddleware, async (req, res) => {
       SELECT a.id, a.registration, a.name, a.home_airport, a.condition,
              t.manufacturer, t.model, t.full_name, t.max_passengers, t.range_km, t.id as type_id,
              a.is_active, t.image_filename,
-             a.airline_cabin_profile_id, t.wake_turbulence_category
+             a.airline_cabin_profile_id, t.wake_turbulence_category,
+             t.min_runway_takeoff_m, t.min_runway_landing_m
       FROM aircraft a
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
       WHERE a.id = $1 AND a.airline_id = $2
@@ -1125,12 +1126,19 @@ router.get('/:id/schedule', authMiddleware, async (req, res) => {
       max_passengers: acRow.max_passengers, range_km: acRow.range_km, type_id: acRow.type_id,
       is_active: acRow.is_active ?? 0, image_filename: acRow.image_filename,
       airline_cabin_profile_id: acRow.airline_cabin_profile_id ?? null,
-      wake_turbulence_category: acRow.wake_turbulence_category ?? 'M'
+      wake_turbulence_category: acRow.wake_turbulence_category ?? 'M',
+      min_runway_takeoff_m: acRow.min_runway_takeoff_m ?? 0,
+      min_runway_landing_m: acRow.min_runway_landing_m ?? 0,
     };
     const routesResult = await pool.query(`
       SELECT r.id, r.flight_number, r.departure_airport, r.arrival_airport, r.distance_km,
-             r.economy_price, r.business_price, r.first_price, r.service_profile_id
-      FROM routes r WHERE r.airline_id = $1 ORDER BY r.flight_number
+             r.economy_price, r.business_price, r.first_price, r.service_profile_id,
+             dep.runway_length_m AS dep_runway_m,
+             arr.runway_length_m AS arr_runway_m
+      FROM routes r
+      LEFT JOIN airports dep ON dep.iata_code = r.departure_airport
+      LEFT JOIN airports arr ON arr.iata_code = r.arrival_airport
+      WHERE r.airline_id = $1 ORDER BY r.flight_number
     `, [airlineId]);
     const routes = routesResult.rows.map(row => ({
       id: row.id, flight_number: row.flight_number,
@@ -1138,7 +1146,9 @@ router.get('/:id/schedule', authMiddleware, async (req, res) => {
       distance_km: row.distance_km,
       economy_price: row.economy_price, business_price: row.business_price, first_price: row.first_price,
       service_profile_id: row.service_profile_id,
-      estimated_duration: calculateFlightDuration(row.distance_km)
+      estimated_duration: calculateFlightDuration(row.distance_km),
+      dep_runway_m: row.dep_runway_m ?? null,
+      arr_runway_m: row.arr_runway_m ?? null,
     }));
 
     const schedResult = await pool.query(`
@@ -1355,13 +1365,21 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
     const acResult = await pool.query(`
-      SELECT a.id, t.wake_turbulence_category, t.range_km, t.full_name, a.is_active
+      SELECT a.id, t.wake_turbulence_category, t.range_km, t.full_name, a.is_active,
+             t.min_runway_takeoff_m, t.min_runway_landing_m
       FROM aircraft a
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
       WHERE a.id = $1 AND a.airline_id = $2
     `, [aircraftId, airlineId]);
     if (!acResult.rows[0]) return res.status(404).json({ error: 'Aircraft not found' });
-    const { wake_turbulence_category: wakeCategory, range_km: aircraftRange, full_name: aircraftName, is_active: isActive } = acResult.rows[0];
+    const {
+      wake_turbulence_category: wakeCategory,
+      range_km: aircraftRange,
+      full_name: aircraftName,
+      is_active: isActive,
+      min_runway_takeoff_m: acTakeoffM,
+      min_runway_landing_m: acLandingM,
+    } = acResult.rows[0];
 
     if (isActive) {
       return res.status(400).json({ error: 'Aircraft must be inactive to edit schedule. Deactivate the aircraft first.' });
@@ -1392,6 +1410,20 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
       [uniqueRouteIds, airlineId]
     );
     for (const r of routeResult.rows) routeCache.set(r.id, r);
+
+    // Load runway lengths for every airport touched by these routes so we can
+    // reject schedules where the aircraft can't take off or land.
+    const airportRunways = new Map();
+    const uniqueAirports = [
+      ...new Set(routeResult.rows.flatMap(r => [r.departure_airport, r.arrival_airport])),
+    ];
+    if (uniqueAirports.length) {
+      const apResult = await pool.query(
+        `SELECT iata_code, runway_length_m FROM airports WHERE iata_code = ANY($1)`,
+        [uniqueAirports]
+      );
+      for (const r of apResult.rows) airportRunways.set(r.iata_code, r.runway_length_m);
+    }
 
     // (Audit C2 used to load airport categories here; flat $0–$20k range
     // doesn't need them anymore, but the rest of the schedule logic stays.)
@@ -1432,6 +1464,33 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
         return res.status(400).json({
           error: `Route exceeds aircraft range`,
           detail: { flight_number: route.flight_number, route_distance_km: route.distance_km, aircraft_name: aircraftName, aircraft_range_km: aircraftRange }
+        });
+      }
+
+      const depRwy = airportRunways.get(route.departure_airport) ?? 0;
+      const arrRwy = airportRunways.get(route.arrival_airport) ?? 0;
+      if (acTakeoffM && depRwy < acTakeoffM) {
+        return res.status(400).json({
+          error: `Departure runway too short`,
+          detail: {
+            flight_number: route.flight_number,
+            airport: route.departure_airport,
+            runway_length_m: depRwy,
+            required_m: acTakeoffM,
+            aircraft_name: aircraftName,
+          },
+        });
+      }
+      if (acLandingM && arrRwy < acLandingM) {
+        return res.status(400).json({
+          error: `Arrival runway too short`,
+          detail: {
+            flight_number: route.flight_number,
+            airport: route.arrival_airport,
+            runway_length_m: arrRwy,
+            required_m: acLandingM,
+            aircraft_name: aircraftName,
+          },
         });
       }
 
@@ -1533,12 +1592,19 @@ router.patch('/:id/schedule/:entryId', authMiddleware, async (req, res) => {
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
     const acResult = await pool.query(`
-      SELECT a.id, a.is_active, t.wake_turbulence_category
+      SELECT a.id, a.is_active, t.wake_turbulence_category,
+             t.full_name, t.min_runway_takeoff_m, t.min_runway_landing_m
       FROM aircraft a JOIN aircraft_types t ON a.aircraft_type_id = t.id
       WHERE a.id = $1 AND a.airline_id = $2
     `, [aircraftId, airlineId]);
     if (!acResult.rows[0]) return res.status(404).json({ error: 'Aircraft not found' });
-    const { is_active: isOpForEdit, wake_turbulence_category: wakeCategory } = acResult.rows[0];
+    const {
+      is_active: isOpForEdit,
+      wake_turbulence_category: wakeCategory,
+      full_name: aircraftName,
+      min_runway_takeoff_m: acTakeoffM,
+      min_runway_landing_m: acLandingM,
+    } = acResult.rows[0];
 
     if (isOpForEdit) {
       return res.status(400).json({ error: 'Aircraft must be inactive to edit schedule. Deactivate the aircraft first.' });
@@ -1548,6 +1614,44 @@ router.patch('/:id/schedule/:entryId', authMiddleware, async (req, res) => {
     if (!entryResult.rows[0]) return res.status(404).json({ error: 'Schedule entry not found' });
     const existing = entryResult.rows[0];
     const existingRouteId = existing.route_id;
+
+    if (existingRouteId) {
+      const rwyCheck = await pool.query(`
+        SELECT r.flight_number, r.departure_airport, r.arrival_airport,
+               dep.runway_length_m AS dep_rwy, arr.runway_length_m AS arr_rwy
+        FROM routes r
+        LEFT JOIN airports dep ON dep.iata_code = r.departure_airport
+        LEFT JOIN airports arr ON arr.iata_code = r.arrival_airport
+        WHERE r.id = $1
+      `, [existingRouteId]);
+      const rc = rwyCheck.rows[0];
+      if (rc) {
+        if (acTakeoffM && (rc.dep_rwy ?? 0) < acTakeoffM) {
+          return res.status(400).json({
+            error: `Departure runway too short`,
+            detail: {
+              flight_number: rc.flight_number,
+              airport: rc.departure_airport,
+              runway_length_m: rc.dep_rwy ?? 0,
+              required_m: acTakeoffM,
+              aircraft_name: aircraftName,
+            },
+          });
+        }
+        if (acLandingM && (rc.arr_rwy ?? 0) < acLandingM) {
+          return res.status(400).json({
+            error: `Arrival runway too short`,
+            detail: {
+              flight_number: rc.flight_number,
+              airport: rc.arrival_airport,
+              runway_length_m: rc.arr_rwy ?? 0,
+              required_m: acLandingM,
+              aircraft_name: aircraftName,
+            },
+          });
+        }
+      }
+    }
 
     const { day_of_week, departure_time, economy_price, business_price, first_price, service_profile_id } = req.body;
     const dow = day_of_week !== undefined ? parseInt(day_of_week) : null;

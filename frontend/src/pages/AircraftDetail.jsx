@@ -790,6 +790,8 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     if (!sRouteId || !sEcoPrice) { setError('Please fill in route and economy price'); return; }
     const re = rangeError(sRouteId);
     if (re) { setError(re); return; }
+    const rwy = runwayError(sRouteId);
+    if (rwy) { setError(rwy); return; }
     setSubmitting(true); setError(''); setSuccess('');
     try {
       const days    = resolveDays(sDay);
@@ -817,6 +819,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     if (reOut) { setError(reOut); return; }
     const reIn = rangeError(inRouteId);
     if (reIn) { setError(reIn); return; }
+    const rwyOut = runwayError(outRouteId);
+    if (rwyOut) { setError(rwyOut); return; }
+    const rwyIn = runwayError(inRouteId);
+    if (rwyIn) { setError(rwyIn); return; }
     setSubmitting(true); setError(''); setSuccess('');
     try {
       const payload = seriesPreview.map(pf => ({
@@ -1162,6 +1168,21 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     const r = routes.find(r => r.id === parseInt(routeId));
     if (!r || r.distance_km <= aircraftRange) return null;
     return `Route ${r.flight_number} exceeds aircraft range.\nRoute distance: ${(r.distance_km ?? '?').toLocaleString()} km\n${aircraft.full_name} max range: ${aircraftRange.toLocaleString()} km\n\nPlease select a different route or aircraft.`;
+  };
+
+  const runwayError = (routeId) => {
+    if (!routeId || !aircraft) return null;
+    const r = routes.find(r => r.id === parseInt(routeId));
+    if (!r) return null;
+    const need_to = aircraft.min_runway_takeoff_m ?? 0;
+    const need_ld = aircraft.min_runway_landing_m ?? 0;
+    if (need_to && r.dep_runway_m != null && r.dep_runway_m < need_to) {
+      return `Route ${r.flight_number}: ${r.departure_airport} runway too short for take-off.\nAvailable: ${r.dep_runway_m.toLocaleString()} m\n${aircraft.full_name} requires: ${need_to.toLocaleString()} m\n\nPlease select a different route or aircraft.`;
+    }
+    if (need_ld && r.arr_runway_m != null && r.arr_runway_m < need_ld) {
+      return `Route ${r.flight_number}: ${r.arrival_airport} runway too short for landing.\nAvailable: ${r.arr_runway_m.toLocaleString()} m\n${aircraft.full_name} requires: ${need_ld.toLocaleString()} m\n\nPlease select a different route or aircraft.`;
+    }
+    return null;
   };
 
   const formatFlightTime = (iso) => {

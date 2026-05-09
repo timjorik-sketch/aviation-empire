@@ -436,6 +436,9 @@ async function initDatabase() {
     `ALTER TABLE flights ADD COLUMN IF NOT EXISTS diversion_airport_code TEXT`,
     `ALTER TABLE flights ADD COLUMN IF NOT EXISTS is_wet_leased BOOLEAN DEFAULT FALSE`,
     `ALTER TABLE flights ADD COLUMN IF NOT EXISTS turnback_fraction REAL`,
+    // Delay system writes status='delayed'; widen the legacy CHECK to allow it.
+    `ALTER TABLE flights DROP CONSTRAINT IF EXISTS flights_status_check`,
+    `ALTER TABLE flights ADD CONSTRAINT flights_status_check CHECK (status IN ('scheduled', 'boarding', 'in-flight', 'completed', 'cancelled', 'delayed'))`,
   ];
   await runStatements(alterCols, 'alter cols');
 

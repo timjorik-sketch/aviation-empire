@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS flights (
   ticket_price REAL NOT NULL,
   total_seats INTEGER NOT NULL,
   seats_sold INTEGER DEFAULT 0,
-  status TEXT DEFAULT 'scheduled' CHECK(status IN ('scheduled', 'boarding', 'in-flight', 'completed', 'cancelled')),
+  status TEXT DEFAULT 'scheduled' CHECK(status IN ('scheduled', 'boarding', 'in-flight', 'completed', 'cancelled', 'delayed')),
   revenue REAL DEFAULT 0,
   atc_fee REAL DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

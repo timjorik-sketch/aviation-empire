@@ -387,7 +387,7 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
                                   <tr><td>Range</td><td>{ac.range_km.toLocaleString()} km</td></tr>
                                   <tr><td>Cruise Speed</td><td>{ac.cruise_speed_kmh} km/h</td></tr>
                                   <tr><td>Fuel Burn</td><td>{ac.fuel_consumption_per_km != null ? `${ac.fuel_consumption_per_km.toFixed(1)} kg/km` : '—'}</td></tr>
-                                  <tr><td>Min. Runway</td><td>{ac.min_runway_landing_m.toLocaleString()} m</td></tr>
+                                  <tr><td>Min. Runway</td><td>{Math.max(ac.min_runway_takeoff_m ?? 0, ac.min_runway_landing_m ?? 0).toLocaleString()} m</td></tr>
                                   <tr><td>Wake Turbulence</td><td>{ac.wake_turbulence_category} – {WAKE_LABELS[ac.wake_turbulence_category]}</td></tr>
                                   <tr><td>Category</td><td>{getCategory(ac)}</td></tr>
                                   <tr><td>Required Level</td><td>{ac.required_level}</td></tr>

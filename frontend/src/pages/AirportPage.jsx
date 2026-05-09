@@ -690,7 +690,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
                                 )}
                                 <span>{ac.full_name}</span>
                               </td>
-                              <td className="ap-ct-r">{ac.min_runway_landing_m.toLocaleString()} m</td>
+                              <td className="ap-ct-r">{(ac.min_runway_required_m ?? Math.max(ac.min_runway_takeoff_m ?? 0, ac.min_runway_landing_m ?? 0)).toLocaleString()} m</td>
                             </tr>
                           ))}
                         </>

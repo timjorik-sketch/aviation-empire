@@ -203,16 +203,20 @@ router.get('/:code/capable-aircraft', async (req, res) => {
 
     const result = await pool.query(`
       SELECT id, manufacturer, model, full_name, max_passengers, range_km,
-             min_runway_landing_m, wake_turbulence_category, image_filename
+             min_runway_takeoff_m, min_runway_landing_m,
+             GREATEST(min_runway_takeoff_m, min_runway_landing_m) AS min_runway_required_m,
+             wake_turbulence_category, image_filename
       FROM aircraft_types
-      WHERE min_runway_landing_m <= $1
+      WHERE GREATEST(min_runway_takeoff_m, min_runway_landing_m) <= $1
       ORDER BY manufacturer ASC, display_order ASC, full_name ASC
     `, [runway]);
 
     const aircraft = result.rows.map(r => ({
       id: r.id, manufacturer: r.manufacturer, model: r.model, full_name: r.full_name,
       max_passengers: r.max_passengers, range_km: r.range_km,
+      min_runway_takeoff_m: r.min_runway_takeoff_m,
       min_runway_landing_m: r.min_runway_landing_m,
+      min_runway_required_m: r.min_runway_required_m,
       wake_turbulence_category: r.wake_turbulence_category,
       image_filename: r.image_filename
     }));
@@ -240,7 +244,7 @@ router.get('/:code/hover', async (req, res) => {
     if (ap.runway_length_m) {
       const acResult = await pool.query(`
         SELECT full_name, max_passengers, image_filename, wake_turbulence_category
-        FROM aircraft_types WHERE min_runway_landing_m <= $1
+        FROM aircraft_types WHERE GREATEST(min_runway_takeoff_m, min_runway_landing_m) <= $1
         ORDER BY manufacturer ASC, display_order ASC, full_name ASC
       `, [ap.runway_length_m]);
       aircraft = acResult.rows.map(r => ({

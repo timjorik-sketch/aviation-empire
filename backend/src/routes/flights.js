@@ -1572,10 +1572,10 @@ async function processFlights() {
       const arrIsHub = hubCodes.has(f.arr_airport);
 
       // ── Aircraft can't operate this flight: wrong location OR in repair ──
-      // 'cascade' is reserved for flights eagerly cancelled inside a known
-      // upstream disruption window (Tech Air / Medical). When we discover
-      // at boarding time that the aircraft simply isn't where the schedule
-      // expected it, we tag it 'wrong_location' instead.
+      // All cancels caused by the aircraft being unavailable share the same
+      // root cause from the player's perspective and are tagged
+      // 'wrong_location' — whether discovered at boarding time or eagerly
+      // cancelled inside an upstream disruption window.
       const inRepair      = f.unavailable_until && new Date(f.unavailable_until) > now;
       const wrongLocation = f.current_location !== null && f.current_location !== f.dep_airport;
       if (wrongLocation || inRepair) {
@@ -1754,8 +1754,10 @@ async function processFlights() {
 
         // Eager-cancel every scheduled flight of this aircraft whose
         // departure_time falls inside the disruption window (now → new arrival).
-        // After the disrupted flight lands, the aircraft is at the original
-        // destination; subsequent location mismatches cascade-cancel naturally.
+        // These ARE cascade effects of a known upstream Tech Air event, so
+        // we tag them 'cascade'. Later location mismatches that aren't tied
+        // to such a window are caught by the boarding-hook fallback above
+        // and tagged 'wrong_location'.
         await cancelNextRotations({
           aircraftId: f.aircraft_id,
           airlineId: f.airline_id,

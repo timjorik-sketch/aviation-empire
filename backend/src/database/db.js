@@ -1068,6 +1068,37 @@ async function initDatabase() {
     await safeQuery('INSERT INTO fuel_prices (price_per_liter) VALUES ($1)', [0.72], 'fuel seed');
   }
 
+  // ── ONE-TIME RETAG: legacy 'cascade' rows that were really 'wrong_location'.
+  // Before the boarding-hook fallback was split out, every aircraft-not-at-dep
+  // cancellation was tagged 'cascade'. Re-tag rows that are NOT within 24h
+  // after a 'technical_air' event on the same aircraft — those are the genuine
+  // wrong_location cases (no upstream disruption window to attribute them to).
+  // Idempotent: nothing matches once a row is already 'wrong_location'.
+  await safeQuery(`
+    UPDATE flight_delay_events fde
+    SET event_type = 'wrong_location'
+    WHERE fde.event_type = 'cascade'
+      AND NOT EXISTS (
+        SELECT 1 FROM flight_delay_events ta
+        WHERE ta.aircraft_id = fde.aircraft_id
+          AND ta.event_type = 'technical_air'
+          AND ta.created_at <= fde.created_at
+          AND ta.created_at >= fde.created_at - INTERVAL '24 hours'
+      )
+  `, null, 'cascade→wrong_location retag (events)');
+
+  await safeQuery(`
+    UPDATE flights f
+    SET delay_reason = 'wrong_location'
+    WHERE f.delay_reason = 'cascade'
+      AND f.status = 'cancelled'
+      AND EXISTS (
+        SELECT 1 FROM flight_delay_events fde
+        WHERE fde.flight_id = f.id
+          AND fde.event_type = 'wrong_location'
+      )
+  `, null, 'cascade→wrong_location retag (flights)');
+
   // ── CLEANUP: drop legacy/unused tables ───────────────────────────────────────
   await safeQuery(`ALTER TABLE flights DROP CONSTRAINT IF EXISTS flights_service_profile_id_fkey`, null, 'drop sp fkey');
   await safeQuery(`DROP TABLE IF EXISTS service_profiles`, null, 'drop service_profiles');

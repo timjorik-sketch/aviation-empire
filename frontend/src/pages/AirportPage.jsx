@@ -136,10 +136,14 @@ function getArrivalStatus(flight, now) {
 }
 
 function StatusDots({ cls, label }) {
-  const isBlinking   = cls === 'ap-st-boarding' || cls === 'ap-st-ontime-b';
-  const isYellow     = cls === 'ap-st-ontime';
   const isDiverted   = cls === 'ap-st-delayed';     // major delay / tech_air / medical
   const isMinorDelay = cls === 'ap-st-delayed-m';   // minor delay
+  const isYellow     = cls === 'ap-st-ontime';      // landed (static)
+  // Anything that's still in motion blinks: boarding, taxiing, on-time-b,
+  // and delayed/diverted flights (which are actively running late).
+  // 'landed' is the only "settled" state and stays static.
+  const isBlinking   = cls === 'ap-st-boarding' || cls === 'ap-st-ontime-b'
+                    || isDiverted || isMinorDelay;
   const dotColor   = isDiverted ? '#f97316'
                    : isMinorDelay ? '#facc15'
                    : isYellow ? '#facc15'

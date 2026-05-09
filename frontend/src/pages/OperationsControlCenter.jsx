@@ -162,6 +162,15 @@ function getFeedbackMessages(violations, flightId) {
   return messages;
 }
 
+function formatDelayLabel(min) {
+  if (!min) return '';
+  const m = Math.round(min);
+  if (m < 60) return `+${m}m`;
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  return rem === 0 ? `+${h}h` : `+${h}h${rem}m`;
+}
+
 function FlightCard({ flight, onNavigateToAirport, onNavigateToAircraft }) {
   const now   = Date.now();
   const dep   = new Date(flight.departure_time).getTime();
@@ -173,6 +182,8 @@ function FlightCard({ flight, onNavigateToAirport, onNavigateToAircraft }) {
   const remM  = Math.floor((remMs % 3600000) / 60000);
   const timeStr = remMs > 0 ? `${remH}h ${String(remM).padStart(2, '0')}m remaining` : 'Landing';
   const isDiverted = flight.delay_reason === 'medical' && flight.diversion_airport_code;
+  const isDelayed  = !isDiverted && flight.delay_reason && (flight.delay_minutes || 0) > 0;
+  const badgeStyle = { marginLeft: 'auto', fontSize: '0.68rem', fontWeight: 700, color: '#fff', background: '#f97316', padding: '2px 8px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '0.04em' };
 
   return (
     <div className="occ-card">
@@ -180,8 +191,13 @@ function FlightCard({ flight, onNavigateToAirport, onNavigateToAircraft }) {
         <span className="occ-card-reg">{flight.flight_number}</span>
         <span className="occ-card-type">{flight.aircraft_type}</span>
         {isDiverted && (
-          <span style={{ marginLeft: 'auto', fontSize: '0.68rem', fontWeight: 700, color: '#fff', background: '#f97316', padding: '2px 8px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+          <span style={badgeStyle}>
             Diverted → {flight.diversion_airport_code}
+          </span>
+        )}
+        {isDelayed && (
+          <span style={badgeStyle}>
+            Delayed {formatDelayLabel(flight.delay_minutes)}
           </span>
         )}
       </div>

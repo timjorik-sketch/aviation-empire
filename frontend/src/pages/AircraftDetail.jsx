@@ -3,6 +3,7 @@ import AirportLink from '../components/AirportLink.jsx';
 import TopBar from '../components/TopBar.jsx';
 import Toast from '../components/Toast.jsx';
 import { calculateCurrentValue, formatAircraftValue } from '../utils/aircraftValue.js';
+import { getEventFlavor } from '../utils/delayFlavor.js';
 import SatisfactionRating, { getSatColor, scoreToRating } from '../components/SatisfactionRating.jsx';
 import Loader from '../components/Loader.jsx';
 
@@ -125,13 +126,15 @@ function formatDelayCompact(min) {
   return rem === 0 ? `+${h}h` : `+${h}h${rem}`;
 }
 
-// Format used in the flight details popup. Shape:
-//   "+10 (Technical)"
-//   "+30 Diverted via TLS (Medical)"
-//   "+1h36 Diverted to LHR (Technical)"
+// Format used in the flight details popup. Replaces the bare reason in
+// parens with a flavored description (e.g. "AC unit malfunction" instead
+// of "Technical"). Falls back to the short reason if no flavor exists.
+//   "+10 (AC unit malfunction)"
+//   "+30 Diverted via TLS (Cardiac event passenger)"
+//   "+1h36 Diverted to LHR (Hydraulic fault in flight)"
 function getDelayDescription(f) {
   if (!f.delay_reason) return null;
-  const reason = DELAY_REASON_SHORT[f.delay_reason] || f.delay_reason;
+  const flavor = getEventFlavor(f.delay_reason, f.id) || DELAY_REASON_SHORT[f.delay_reason] || f.delay_reason;
   const amount = formatDelayCompact(f.delay_minutes);
 
   let diversion = '';
@@ -141,7 +144,7 @@ function getDelayDescription(f) {
     diversion = ` Diverted to ${f.departure_airport}`;
   }
 
-  return `${amount}${diversion} (${reason})`.trim();
+  return `${amount}${diversion} (${flavor})`.trim();
 }
 
 function minutesToHM(min) {
@@ -2297,6 +2300,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                   </div>
                   <div className="sf-modal-aptnames">
                     {f.dep_airport_name ?? f.departure_airport} → {f.arr_airport_name ?? f.arrival_airport}
+                    {f.flight_number && <> · {f.flight_number}</>}
                   </div>
                   {isCancelled && (
                     <div style={{ marginTop: 4 }}>
@@ -2314,7 +2318,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                 <div className="sf-section-hd">Flight</div>
                 <table className="sf-table">
                   <tbody>
-                    <tr><td style={{ color: '#444' }}>Flight</td><td style={{ textAlign: 'right', color: '#444' }}>{f.flight_number}</td></tr>
                     <tr><td style={{ color: '#444' }}>Departs</td><td style={{ textAlign: 'right', color: '#444' }}>{fmt(depTime)}</td></tr>
                     <tr><td style={{ color: '#444' }}>Arrives</td><td style={{ textAlign: 'right', color: '#444' }}>{fmt(arrTime)}</td></tr>
                     <tr><td style={{ color: '#444' }}>Duration</td><td style={{ textAlign: 'right', color: '#444' }}>{durationH}h {durationM}m</td></tr>
@@ -2471,10 +2474,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     </tr>
                   </tfoot>
                 </table>
-              </div>
-
-              <div className="sched-modal-footer">
-                <button className="sched-btn-cancel" onClick={() => setShowFlightModal(false)}>Close</button>
               </div>
             </div>
           </div>

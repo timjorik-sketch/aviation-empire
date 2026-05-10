@@ -3,6 +3,7 @@ import TopBar from '../components/TopBar.jsx';
 import Toast from '../components/Toast.jsx';
 import Loader from '../components/Loader.jsx';
 import LiveFlightMap from '../components/LiveFlightMap.jsx';
+import { getEventFlavor } from '../utils/delayFlavor.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -1108,7 +1109,18 @@ function ReportView({ report, onNavigateToAircraft, onNavigateToAirport }) {
                         </span>
                       ) : <span style={{ color: '#666' }}>—</span>}
                     </td>
-                    <td style={td}>{EVENT_LABEL[e.event_type] || e.event_type}</td>
+                    <td style={td}>
+                      {(() => {
+                        const flavor = getEventFlavor(e.event_type, e.id);
+                        const cat = EVENT_LABEL[e.event_type] || e.event_type;
+                        return flavor ? (
+                          <>
+                            <div>{flavor}</div>
+                            <div style={{ fontSize: '0.7rem', color: '#999', marginTop: 2 }}>{cat}</div>
+                          </>
+                        ) : cat;
+                      })()}
+                    </td>
                     <td style={td}>
                       <span style={{ color: outcomeColor(e), fontWeight: 600 }}>{formatOutcome(e)}</span>
                     </td>

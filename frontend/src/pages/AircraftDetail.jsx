@@ -2273,6 +2273,24 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
           (f.booked_first    ?? 0) * (f.first_price    ?? f.economy_price ?? 0) * 1.2
         ) : 0;
 
+        const flightXp = isCompleted ? (() => {
+          const distKm = f.distance_km || 0;
+          const loadFactor = f.total_seats > 0 ? (f.seats_sold ?? 0) / f.total_seats : 0;
+          const loadMult = loadFactor >= 1.0 ? 1.0
+            : loadFactor >= 0.95 ? 0.95
+            : loadFactor >= 0.90 ? 0.9
+            : loadFactor >= 0.85 ? 0.85
+            : loadFactor >= 0.80 ? 0.8
+            : loadFactor >= 0.75 ? 0.75
+            : loadFactor >= 0.70 ? 0.7
+            : loadFactor >= 0.60 ? 0.6
+            : loadFactor >= 0.50 ? 0.5
+            : loadFactor >= 0.40 ? 0.3
+            : loadFactor >= 0.20 ? 0.05
+            : 0.0;
+          return Math.floor(distKm / 20 * loadMult);
+        })() : null;
+
         const disruptionCost = f.disruption_cost ?? 0;
         const finRows = isCancelled ? [
           { label: 'Cancellation Penalty', value: cancelPenalty > 0 ? -cancelPenalty : null },
@@ -2297,10 +2315,8 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     <span className="sf-modal-apt">{f.departure_airport}</span>
                     <span className="sf-modal-arrow">→</span>
                     <span className="sf-modal-apt">{f.arrival_airport}</span>
-                  </div>
-                  <div className="sf-modal-aptnames">
-                    {f.dep_airport_name ?? f.departure_airport} → {f.arr_airport_name ?? f.arrival_airport}
-                    {f.flight_number && <> · {f.flight_number}</>}
+                    {f.flight_number && <span className="sf-modal-fn">{f.flight_number}</span>}
+                    {flightXp != null && <span className="sf-modal-xp">+{flightXp} XP</span>}
                   </div>
                   {isCancelled && (
                     <div style={{ marginTop: 4 }}>
@@ -2321,29 +2337,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     <tr><td style={{ color: '#444' }}>Departs</td><td style={{ textAlign: 'right', color: '#444' }}>{fmt(depTime)}</td></tr>
                     <tr><td style={{ color: '#444' }}>Arrives</td><td style={{ textAlign: 'right', color: '#444' }}>{fmt(arrTime)}</td></tr>
                     <tr><td style={{ color: '#444' }}>Duration</td><td style={{ textAlign: 'right', color: '#444' }}>{durationH}h {durationM}m</td></tr>
-                    {isCompleted && (() => {
-                      const distKm = f.distance_km || 0;
-                      const loadFactor = f.total_seats > 0 ? (f.seats_sold ?? 0) / f.total_seats : 0;
-                      const loadMult = loadFactor >= 1.0 ? 1.0
-                        : loadFactor >= 0.95 ? 0.95
-                        : loadFactor >= 0.90 ? 0.9
-                        : loadFactor >= 0.85 ? 0.85
-                        : loadFactor >= 0.80 ? 0.8
-                        : loadFactor >= 0.75 ? 0.75
-                        : loadFactor >= 0.70 ? 0.7
-                        : loadFactor >= 0.60 ? 0.6
-                        : loadFactor >= 0.50 ? 0.5
-                        : loadFactor >= 0.40 ? 0.3
-                        : loadFactor >= 0.20 ? 0.05
-                        : 0.0;
-                      const xp = Math.floor(distKm / 20 * loadMult);
-                      return (
-                        <tr>
-                          <td style={{ color: '#444' }}>Points</td>
-                          <td style={{ textAlign: 'right', color: '#444' }}>+{xp} XP</td>
-                        </tr>
-                      );
-                    })()}
                     {(() => {
                       const delayDesc = getDelayDescription(f);
                       if (!delayDesc) return null;
@@ -3300,6 +3293,7 @@ const styles = `
   .sf-modal-apt { font-size: 1.3rem; font-weight: 700; font-family: monospace; color: white; letter-spacing: 0.04em; }
   .sf-modal-arrow { font-size: 1.1rem; color: rgba(255,255,255,0.4); }
   .sf-modal-fn { font-size: 0.8rem; font-family: monospace; color: rgba(255,255,255,0.45); margin-left: 0.25rem; }
+  .sf-modal-xp { font-size: 0.7rem; font-weight: 700; font-family: monospace; color: #86efac; background: rgba(34,197,94,0.15); border: 1px solid rgba(34,197,94,0.35); border-radius: 4px; padding: 2px 7px; margin-left: 0.4rem; letter-spacing: 0.03em; }
   .sf-modal-aptnames { font-size: 0.78rem; color: rgba(255,255,255,0.5); margin-top: 2px; }
   .sf-modal-body { padding: 0 1.25rem 1rem; display: flex; flex-direction: column; gap: 0; }
   .sf-section-hd { margin: 0 -1.25rem 0.1rem; padding: 0.32rem 1.25rem; font-size: 0.67rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #999999; background: #F5F5F5; border-top: 1px solid #EEEEEE; border-bottom: 1px solid #EEEEEE; }

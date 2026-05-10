@@ -718,9 +718,6 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                                 </>
                               ) : viewMode === 'financials' ? (
                                 <>
-                                  <th className="sortable-th" onClick={() => handleSort('completed_flights')} style={{ textAlign: 'right' }} title="Completed flights in the last 7 days">
-                                    Flights (7d) <SortIcon col="completed_flights" />
-                                  </th>
                                   <th className="sortable-th" onClick={() => handleSort('load_factor')} style={{ textAlign: 'right' }} title="Average load factor over the last 7 days">
                                     Ø Load Factor (7d) <SortIcon col="load_factor" />
                                   </th>
@@ -848,9 +845,6 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                                     </>
                                   ) : viewMode === 'financials' ? (
                                     <>
-                                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                                        {ac.completed_flights || 0}
-                                      </td>
                                       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                                         {ac.completed_flights > 0
                                           ? `${(ac.avg_load_factor * 100).toFixed(1)}%`

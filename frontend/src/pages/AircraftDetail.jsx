@@ -2496,8 +2496,8 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     <span className="sf-modal-apt">{editEntry.departure_airport}</span>
                     <span className="sf-modal-arrow">→</span>
                     <span className="sf-modal-apt">{editEntry.arrival_airport}</span>
+                    {editEntry.flight_number && <span className="sf-modal-fn">{editEntry.flight_number}</span>}
                   </div>
-                  <div className="sf-modal-aptnames">{editEntry.flight_number}</div>
                 </div>
                 <button className="sched-modal-close" onClick={closeEditModal}>×</button>
               </div>

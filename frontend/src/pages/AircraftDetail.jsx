@@ -3289,11 +3289,11 @@ const styles = `
   .sf-modal .sched-modal-header { background: #2C2C2C; border-bottom: none; }
   .sf-modal .sched-modal-close { color: rgba(255,255,255,0.5); }
   .sf-modal .sched-modal-close:hover { color: white; }
-  .sf-modal-route { display: flex; align-items: center; gap: 0.5rem; }
+  .sf-modal-route { display: flex; align-items: baseline; gap: 0.5rem; }
   .sf-modal-apt { font-size: 1.3rem; font-weight: 700; font-family: monospace; color: white; letter-spacing: 0.04em; }
   .sf-modal-arrow { font-size: 1.1rem; color: rgba(255,255,255,0.4); }
   .sf-modal-fn { font-size: 0.8rem; font-family: monospace; color: rgba(255,255,255,0.45); margin-left: 0.25rem; }
-  .sf-modal-xp { font-size: 0.7rem; font-weight: 700; font-family: monospace; color: #86efac; background: rgba(34,197,94,0.15); border: 1px solid rgba(34,197,94,0.35); border-radius: 4px; padding: 2px 7px; margin-left: 0.4rem; letter-spacing: 0.03em; }
+  .sf-modal-xp { font-size: 0.7rem; font-weight: 700; font-family: monospace; color: white; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.25); border-radius: 4px; padding: 2px 7px; margin-left: 0.4rem; letter-spacing: 0.03em; }
   .sf-modal-aptnames { font-size: 0.78rem; color: rgba(255,255,255,0.5); margin-top: 2px; }
   .sf-modal-body { padding: 0 1.25rem 1rem; display: flex; flex-direction: column; gap: 0; }
   .sf-section-hd { margin: 0 -1.25rem 0.1rem; padding: 0.32rem 1.25rem; font-size: 0.67rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #999999; background: #F5F5F5; border-top: 1px solid #EEEEEE; border-bottom: 1px solid #EEEEEE; }

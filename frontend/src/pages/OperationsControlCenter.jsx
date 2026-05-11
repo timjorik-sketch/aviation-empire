@@ -454,9 +454,9 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
           <div className="card-header-bar" style={{ margin: 0, borderRadius: '8px 8px 0 0' }}>
             <span className="card-header-bar-title">Live Map</span>
             <button
-              className="hdr-btn hdr-btn--secondary"
               onClick={() => setMapStyle(s => s === 'dark' ? 'satellite' : 'dark')}
               title={mapStyle === 'dark' ? 'Switch to satellite view' : 'Switch to dark view'}
+              style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.3)', color: 'rgba(255,255,255,0.7)', padding: '0.22rem 0.65rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', letterSpacing: '0.03em' }}
             >
               {mapStyle === 'dark' ? 'Satellite' : 'Dark'}
             </button>

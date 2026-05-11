@@ -30,6 +30,28 @@ function bearing(lat1, lon1, lat2, lon2) {
   return (toDeg(Math.atan2(y, x)) + 360) % 360;
 }
 
+// Destination point given start, bearing (compass deg), and distance (km).
+function destPoint(lat, lon, bearingDeg, distanceKm) {
+  const R = 6371;
+  const δ = distanceKm / R;
+  const θ = bearingDeg * Math.PI / 180;
+  const φ1 = lat * Math.PI / 180;
+  const λ1 = lon * Math.PI / 180;
+  const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) + Math.cos(φ1) * Math.sin(δ) * Math.cos(θ));
+  const λ2 = λ1 + Math.atan2(
+    Math.sin(θ) * Math.sin(δ) * Math.cos(φ1),
+    Math.cos(δ) - Math.sin(φ1) * Math.sin(φ2),
+  );
+  return [φ2 * 180 / Math.PI, ((λ2 * 180 / Math.PI) + 540) % 360 - 180];
+}
+
+// 3-phase trajectory tuning: 8 min final + 8 min initial climb, each ~40 km long.
+// Skip the pattern for very short hops where there isn't room for a meaningful cruise leg.
+const CLIMB_MIN = 8;
+const APPROACH_MIN = 8;
+const FIX_DISTANCE_KM = 40;
+const MIN_FLIGHT_MIN_FOR_PATTERN = 20;
+
 function planeIcon(deg, color = '#26A9F0') {
   return L.divIcon({
     className: '',
@@ -65,6 +87,8 @@ export default function LiveFlightMap() {
 
       // Default position: linear progress along the great-circle.
       let arcIdx = Math.min(Math.floor(f.progress * 200), 198);
+      let lat = arc[arcIdx][0];
+      let lon = arc[arcIdx][1];
       let bear = bearing(arc[arcIdx][0], arc[arcIdx][1], arc[arcIdx + 1][0], arc[arcIdx + 1][1]);
       let phaseLabel = null;
 
@@ -87,22 +111,18 @@ export default function LiveFlightMap() {
         let arcFrac;
         let backward = false;
         if (elapsedMin < phaseEndA) {
-          // Phase A — forward to turnback point
           const local = elapsedMin / phaseEndA;
           arcFrac = local * X;
           phaseLabel = `Outbound · turnback at ${(X * 100).toFixed(0)}%`;
         } else if (elapsedMin < phaseEndB) {
-          // Phase B — backward to origin
           const local = (elapsedMin - phaseEndA) / (phaseEndB - phaseEndA);
           arcFrac = X - local * X;
           backward = true;
           phaseLabel = `Diverted — returning to ${f.origin_iata}`;
         } else if (elapsedMin < phaseEndC) {
-          // Phase C — repairing on the ground at origin
           arcFrac = 0;
           phaseLabel = `Repairing at ${f.origin_iata}`;
         } else if (elapsedMin < phaseEndD) {
-          // Phase D — forward to original destination
           const local = (elapsedMin - phaseEndC) / (phaseEndD - phaseEndC);
           arcFrac = local;
           phaseLabel = `Continuing to ${f.destination_iata}`;
@@ -111,11 +131,44 @@ export default function LiveFlightMap() {
           phaseLabel = 'Arriving';
         }
         arcIdx = Math.max(0, Math.min(Math.floor(arcFrac * 200), 198));
+        lat = arc[arcIdx][0];
+        lon = arc[arcIdx][1];
         bear = bearing(arc[arcIdx][0], arc[arcIdx][1], arc[arcIdx + 1][0], arc[arcIdx + 1][1]);
         if (backward) bear = (bear + 180) % 360;
-      }
+      } else if (
+        f.origin_heading != null && f.dest_heading != null &&
+        f.delay_reason !== 'medical' &&
+        (f.remaining_ms / (1 - f.progress)) >= MIN_FLIGHT_MIN_FOR_PATTERN * 60_000
+      ) {
+        // 3-phase trajectory: initial climb out runway heading, great-circle cruise
+        // between fix points, final approach lined up with destination runway.
+        const totalMs = f.remaining_ms / (1 - f.progress);
+        const elapsedMs = totalMs - f.remaining_ms;
+        const climbMs = CLIMB_MIN * 60_000;
+        const approachMs = APPROACH_MIN * 60_000;
 
-      const [lat, lon] = arc[arcIdx];
+        const depFix = destPoint(f.origin_lat, f.origin_lon, f.origin_heading, FIX_DISTANCE_KM);
+        const apprFix = destPoint(f.dest_lat, f.dest_lon, (f.dest_heading + 180) % 360, FIX_DISTANCE_KM);
+
+        if (elapsedMs < climbMs) {
+          const t = elapsedMs / climbMs;
+          lat = f.origin_lat + (depFix[0] - f.origin_lat) * t;
+          lon = f.origin_lon + (depFix[1] - f.origin_lon) * t;
+          bear = f.origin_heading;
+        } else if (f.remaining_ms < approachMs) {
+          const t = 1 - f.remaining_ms / approachMs;
+          lat = apprFix[0] + (f.dest_lat - apprFix[0]) * t;
+          lon = apprFix[1] + (f.dest_lon - apprFix[1]) * t;
+          bear = f.dest_heading;
+        } else {
+          const cruiseArc = greatCirclePoints(depFix[0], depFix[1], apprFix[0], apprFix[1], 200);
+          const cruiseT = (elapsedMs - climbMs) / (totalMs - climbMs - approachMs);
+          const idx = Math.max(0, Math.min(Math.floor(cruiseT * 200), 198));
+          lat = cruiseArc[idx][0];
+          lon = cruiseArc[idx][1];
+          bear = bearing(cruiseArc[idx][0], cruiseArc[idx][1], cruiseArc[idx + 1][0], cruiseArc[idx + 1][1]);
+        }
+      }
 
       // Orange highlight for any disrupted flight currently in the air
       const isDisrupted = f.delay_reason === 'medical' || f.delay_reason === 'technical_air';

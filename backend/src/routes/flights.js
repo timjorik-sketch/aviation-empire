@@ -332,6 +332,8 @@ router.get('/active', authMiddleware, async (req, res) => {
              COALESCE(r.arrival_airport,   ws.arrival_airport)   as dest_iata,
              dep.latitude as origin_lat, dep.longitude as origin_lon,
              arr.latitude as dest_lat, arr.longitude as dest_lon,
+             dep.runway_heading as origin_heading,
+             arr.runway_heading as dest_heading,
              ac.registration,
              f.delay_reason, f.diversion_airport_code,
              f.turnback_fraction, f.delay_minutes
@@ -373,6 +375,8 @@ router.get('/active', authMiddleware, async (req, res) => {
         origin_lon: row.origin_lon,
         dest_lat: row.dest_lat,
         dest_lon: row.dest_lon,
+        origin_heading: row.origin_heading,
+        dest_heading: row.dest_heading,
         progress,
         remaining_ms,
         delay_reason: row.delay_reason,

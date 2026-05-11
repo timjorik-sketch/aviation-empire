@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import pool from './postgres.js';
+import { RUNWAY_HEADINGS } from './runwayHeadings.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -413,6 +414,7 @@ async function initDatabase() {
     `ALTER TABLE airports ADD COLUMN IF NOT EXISTS runway_length_m INTEGER DEFAULT 2500`,
     `ALTER TABLE airports ADD COLUMN IF NOT EXISTS latitude REAL`,
     `ALTER TABLE airports ADD COLUMN IF NOT EXISTS longitude REAL`,
+    `ALTER TABLE airports ADD COLUMN IF NOT EXISTS runway_heading INTEGER`,
     // fuel_prices table
     `ALTER TABLE fuel_prices ADD COLUMN IF NOT EXISTS price_per_liter REAL`,
     `ALTER TABLE fuel_prices ADD COLUMN IF NOT EXISTS price_per_kg REAL`,
@@ -943,6 +945,19 @@ async function initDatabase() {
       `geo ${code}`
     );
   }
+
+  // ── RUNWAY HEADINGS (OurAirports public-domain data, ~5500 airports) ─────────
+  // Used by the live map to render approach/departure corridors. Bulk-update in a
+  // single query via jsonb_each_text — per-row loop would be ~5500 round-trips.
+  // Only fills NULL cells so manual corrections survive; reseed by clearing the column.
+  await safeQuery(
+    `UPDATE airports a
+       SET runway_heading = (h.value)::int
+       FROM jsonb_each_text($1::jsonb) h
+       WHERE a.iata_code = h.key AND a.runway_heading IS NULL`,
+    [JSON.stringify(RUNWAY_HEADINGS)],
+    'runway heading seed'
+  );
 
   // ── AIRPORT CATEGORY CORRECTIONS (runs after geo seed, before fee seed) ──────
   const airportCategoryFixes = [

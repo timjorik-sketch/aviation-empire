@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS airports (
   state TEXT,
   runway_length_m INTEGER DEFAULT 2500,
   latitude REAL,
-  longitude REAL
+  longitude REAL,
+  runway_heading INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS aircraft (

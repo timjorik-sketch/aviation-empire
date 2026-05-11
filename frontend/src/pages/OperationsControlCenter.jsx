@@ -249,6 +249,7 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
   const [acTypeOpen, setAcTypeOpen]   = useState(false);
   const [haulOpen, setHaulOpen]       = useState(false);
   const [continentOpen, setContinentOpen] = useState(false);
+  const [mapStyle, setMapStyle] = useState('dark');
 
   const ACTIVE_PAGE_SIZE = 15;
 
@@ -452,8 +453,15 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         <div className="info-card" style={{ padding: 0, overflow: 'hidden', marginBottom: '1rem' }}>
           <div className="card-header-bar" style={{ margin: 0, borderRadius: '8px 8px 0 0' }}>
             <span className="card-header-bar-title">Live Map</span>
+            <button
+              className="hdr-btn hdr-btn--secondary"
+              onClick={() => setMapStyle(s => s === 'dark' ? 'satellite' : 'dark')}
+              title={mapStyle === 'dark' ? 'Switch to satellite view' : 'Switch to dark view'}
+            >
+              {mapStyle === 'dark' ? 'Satellite' : 'Dark'}
+            </button>
           </div>
-          <LiveFlightMap />
+          <LiveFlightMap mapStyle={mapStyle} />
         </div>
 
         {/* ── Tab bar ── */}

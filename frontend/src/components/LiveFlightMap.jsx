@@ -61,11 +61,23 @@ function planeIcon(deg, color = '#26A9F0') {
   });
 }
 
-export default function LiveFlightMap() {
+const TILE_LAYERS = {
+  dark: {
+    url: 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
+    options: { attribution: '© OpenStreetMap contributors © CARTO', maxZoom: 19, subdomains: 'abcd' },
+  },
+  satellite: {
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    options: { attribution: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics', maxZoom: 19 },
+  },
+};
+
+export default function LiveFlightMap({ mapStyle = 'dark' }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const layerGroupRef = useRef(null);
   const overlayRef = useRef(null);
+  const tileLayerRef = useRef(null);
 
   // Draw markers for given flight list
   const drawFlights = useCallback((flights) => {
@@ -229,10 +241,8 @@ export default function LiveFlightMap() {
       zoomControl: true,
     });
 
-    L.tileLayer(
-      'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
-      { attribution: '© OpenStreetMap contributors © CARTO', maxZoom: 19, subdomains: 'abcd' }
-    ).addTo(map);
+    const initial = TILE_LAYERS[mapStyle] || TILE_LAYERS.dark;
+    tileLayerRef.current = L.tileLayer(initial.url, initial.options).addTo(map);
 
     const group = L.layerGroup().addTo(map);
     mapRef.current = map;
@@ -248,8 +258,20 @@ export default function LiveFlightMap() {
       map.remove();
       mapRef.current = null;
       layerGroupRef.current = null;
+      tileLayerRef.current = null;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Swap tile layer when mapStyle changes (without remounting the map)
+  useEffect(() => {
+    const map = mapRef.current;
+    const oldLayer = tileLayerRef.current;
+    if (!map || !oldLayer) return;
+    const cfg = TILE_LAYERS[mapStyle] || TILE_LAYERS.dark;
+    const next = L.tileLayer(cfg.url, cfg.options).addTo(map);
+    map.removeLayer(oldLayer);
+    tileLayerRef.current = next;
+  }, [mapStyle]);
 
   return (
     <div style={{ position: 'relative' }}>

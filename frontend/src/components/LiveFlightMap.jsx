@@ -232,24 +232,47 @@ export default function LiveFlightMap({ mapStyle = 'dark' }) {
       const remH = Math.floor(f.remaining_ms / 3600000);
       const remM = Math.floor((f.remaining_ms % 3600000) / 60000);
       const eta = `${remH}h ${String(remM).padStart(2, '0')}m remaining`;
+      const pct = Math.max(0, Math.min(100, f.progress * 100));
 
       let divNote = '';
       if (f.delay_reason === 'medical' && f.diversion_airport_code) {
-        divNote = `<div style="margin-top:4px;font-size:0.72rem;font-weight:700;color:#facc15;text-transform:uppercase;letter-spacing:0.04em">Diverted via ${f.diversion_airport_code}</div>`;
+        divNote = `<div style="margin-top:6px;font-size:0.68rem;font-weight:700;color:#a16207;background:rgba(234,179,8,0.18);border:1px solid rgba(234,179,8,0.4);padding:2px 6px;border-radius:3px;text-transform:uppercase;letter-spacing:0.04em;display:inline-block">Diverted → ${f.diversion_airport_code}</div>`;
       } else if (f.delay_reason === 'medical') {
-        divNote = `<div style="margin-top:4px;font-size:0.72rem;font-weight:700;color:#facc15;text-transform:uppercase;letter-spacing:0.04em">Medical diversion</div>`;
+        divNote = `<div style="margin-top:6px;font-size:0.68rem;font-weight:700;color:#a16207;background:rgba(234,179,8,0.18);border:1px solid rgba(234,179,8,0.4);padding:2px 6px;border-radius:3px;text-transform:uppercase;letter-spacing:0.04em;display:inline-block">Medical diversion</div>`;
       } else if (f.delay_reason === 'technical_air' && phaseLabel) {
-        divNote = `<div style="margin-top:4px;font-size:0.72rem;font-weight:700;color:#facc15;text-transform:uppercase;letter-spacing:0.04em">${phaseLabel}</div>`;
+        divNote = `<div style="margin-top:6px;font-size:0.68rem;font-weight:700;color:#a16207;background:rgba(234,179,8,0.18);border:1px solid rgba(234,179,8,0.4);padding:2px 6px;border-radius:3px;text-transform:uppercase;letter-spacing:0.04em;display:inline-block">${phaseLabel}</div>`;
       }
 
+      const aircraftTypeLabel = f.aircraft_type
+        ? `<span style="font-size:0.68rem;color:#888;font-weight:500">${f.aircraft_type}</span>`
+        : '';
+      const regLabel = f.registration
+        ? `<span style="font-family:monospace;font-size:0.72rem;color:#666">${f.registration}</span>`
+        : '<span></span>';
+
       marker.bindPopup(
-        `<div style="font-family:system-ui,sans-serif;line-height:1.7;min-width:140px">
-          <strong style="font-family:monospace;font-size:1rem">${f.flight_number}</strong><br>
-          <span style="font-family:monospace;font-weight:700">${f.origin_iata} → ${f.destination_iata}</span><br>
-          <span style="color:#888;font-size:0.85rem">${eta}</span>
+        `<div style="font-family:system-ui,sans-serif;min-width:200px;padding:2px 0">
+          <div style="display:flex;align-items:baseline;gap:8px;border-bottom:1px solid #EEE;padding-bottom:6px;margin-bottom:8px">
+            <strong style="font-family:monospace;font-size:1rem;font-weight:900;letter-spacing:0.04em;color:#2C2C2C">${f.flight_number}</strong>
+            ${aircraftTypeLabel}
+          </div>
+          <div style="display:flex;justify-content:space-between;font-family:monospace;font-size:0.95rem;font-weight:700;color:#2C2C2C;margin-bottom:6px">
+            <span>${f.origin_iata}</span>
+            <span>${f.destination_iata}</span>
+          </div>
+          <div style="position:relative;height:14px;margin:4px 0 8px;display:flex;align-items:center">
+            <div style="position:absolute;left:0;right:0;height:2px;background:#E0E0E0;border-radius:1px"></div>
+            <div style="position:absolute;left:0;width:6px;height:6px;border-radius:50%;background:#888;top:50%;transform:translateY(-50%)"></div>
+            <div style="position:absolute;right:0;width:6px;height:6px;border-radius:50%;background:#888;top:50%;transform:translateY(-50%)"></div>
+            <span style="position:absolute;left:calc(${pct}% - 7px);font-size:13px;line-height:1;color:${color};filter:drop-shadow(0 1px 1px rgba(0,0,0,0.3))">✈</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.75rem">
+            ${regLabel}
+            <span style="color:#888">${eta}</span>
+          </div>
           ${divNote}
         </div>`,
-        { maxWidth: 200 }
+        { maxWidth: 240 }
       );
       group.addLayer(marker);
     }

@@ -335,6 +335,7 @@ router.get('/active', authMiddleware, async (req, res) => {
              dep.runway_heading as origin_heading,
              arr.runway_heading as dest_heading,
              ac.registration,
+             at.full_name as aircraft_type,
              f.delay_reason, f.diversion_airport_code,
              f.turnback_fraction, f.delay_minutes
       FROM flights f
@@ -343,6 +344,7 @@ router.get('/active', authMiddleware, async (req, res) => {
       LEFT JOIN airports dep ON COALESCE(r.departure_airport, ws.departure_airport) = dep.iata_code
       LEFT JOIN airports arr ON COALESCE(r.arrival_airport,   ws.arrival_airport)   = arr.iata_code
       LEFT JOIN aircraft ac  ON f.aircraft_id = ac.id
+      LEFT JOIN aircraft_types at ON ac.aircraft_type_id = at.id
       WHERE f.airline_id = $1 AND f.status = 'in-flight'
     `, [airlineId]);
 
@@ -369,6 +371,7 @@ router.get('/active', authMiddleware, async (req, res) => {
       flights.push({
         flight_number: row.flight_number,
         registration: row.registration,
+        aircraft_type: row.aircraft_type,
         origin_iata: row.origin_iata,
         destination_iata: row.dest_iata,
         origin_lat: row.origin_lat,

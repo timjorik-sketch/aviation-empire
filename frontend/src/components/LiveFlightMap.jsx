@@ -264,7 +264,7 @@ export default function LiveFlightMap({ mapStyle = 'dark' }) {
             <div style="position:absolute;left:0;right:0;height:2px;background:#E0E0E0;border-radius:1px"></div>
             <div style="position:absolute;left:0;width:6px;height:6px;border-radius:50%;background:#888;top:50%;transform:translateY(-50%)"></div>
             <div style="position:absolute;right:0;width:6px;height:6px;border-radius:50%;background:#888;top:50%;transform:translateY(-50%)"></div>
-            <span style="position:absolute;left:calc(${pct}% - 7px);font-size:13px;line-height:1;color:${color};filter:drop-shadow(0 1px 1px rgba(0,0,0,0.3))">✈</span>
+            <span style="position:absolute;left:calc(${pct}% - 7px);font-size:13px;line-height:1;color:#2C2C2C">✈</span>
           </div>
           <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.75rem">
             ${regLabel}

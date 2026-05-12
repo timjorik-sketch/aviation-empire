@@ -172,9 +172,9 @@ function formatDelayLabel(min) {
   return rem === 0 ? `+${h}h` : `+${h}h${rem}m`;
 }
 
-// Compact one-line variant of FlightCard for the test list view below
-// the regular Active Flights grid. Keeps the same data + interactions but
-// trades the boxed layout for a denser horizontal row.
+// Compact one-line row for the Active Flights list view. Status (delay /
+// diversion) shows as a small colored dot after the flight number with a
+// hover tooltip — keeps the row a single line even for disrupted flights.
 function FlightListRow({ flight, onNavigateToAirport, onNavigateToAircraft }) {
   const now   = Date.now();
   const dep   = new Date(flight.departure_time).getTime();
@@ -184,14 +184,31 @@ function FlightListRow({ flight, onNavigateToAirport, onNavigateToAircraft }) {
   const remMs = Math.max(0, arr - now);
   const remH  = Math.floor(remMs / 3600000);
   const remM  = Math.floor((remMs % 3600000) / 60000);
-  const timeStr = remMs > 0 ? `${remH}h ${String(remM).padStart(2, '0')}m remaining` : 'Landing';
+  const timeStr = remMs > 0 ? `in ${remH}h ${String(remM).padStart(2, '0')}m` : 'Landing';
+
+  const distKm = flight.distance_km || 0;
+  const traveledKm = Math.round(distKm * (pct / 100));
+  const distStr = distKm > 0
+    ? `${traveledKm.toLocaleString()} / ${distKm.toLocaleString()} km`
+    : '';
+
   const isDiverted = flight.delay_reason === 'medical' && flight.diversion_airport_code;
   const isDelayed  = !isDiverted && flight.delay_reason && (flight.delay_minutes || 0) > 0;
+  const statusTitle = isDiverted
+    ? `Diverted via ${flight.diversion_airport_code}`
+    : isDelayed
+      ? `Delayed ${formatDelayLabel(flight.delay_minutes)}`
+      : '';
 
   return (
     <div className="occ-lr">
       <div className="occ-lr-id">
-        <span className="occ-lr-fn">{flight.flight_number}</span>
+        <div className="occ-lr-fn-row">
+          <span className="occ-lr-fn">{flight.flight_number}</span>
+          {statusTitle && (
+            <span className="occ-lr-dot" title={statusTitle} aria-label={statusTitle} />
+          )}
+        </div>
         <span className="occ-lr-type">{flight.aircraft_type}</span>
       </div>
       <button
@@ -210,6 +227,7 @@ function FlightListRow({ flight, onNavigateToAirport, onNavigateToAircraft }) {
       >
         {flight.arrival_airport}
       </button>
+      <span className="occ-lr-dist">{distStr}</span>
       <button
         className="occ-lr-reg"
         onClick={() => onNavigateToAircraft?.(flight.aircraft_id)}
@@ -217,73 +235,6 @@ function FlightListRow({ flight, onNavigateToAirport, onNavigateToAircraft }) {
         {flight.aircraft_registration}
       </button>
       <span className="occ-lr-time">{timeStr}</span>
-      {(isDiverted || isDelayed) && (
-        <span className="occ-lr-badge">
-          {isDiverted
-            ? `Diverted → ${flight.diversion_airport_code}`
-            : `Delayed ${formatDelayLabel(flight.delay_minutes)}`}
-        </span>
-      )}
-    </div>
-  );
-}
-
-function FlightCard({ flight, onNavigateToAirport, onNavigateToAircraft }) {
-  const now   = Date.now();
-  const dep   = new Date(flight.departure_time).getTime();
-  const arr   = new Date(flight.arrival_time).getTime();
-  const total = arr - dep;
-  const pct   = total > 0 ? Math.max(0, Math.min(100, ((now - dep) / total) * 100)) : 0;
-  const remMs = Math.max(0, arr - now);
-  const remH  = Math.floor(remMs / 3600000);
-  const remM  = Math.floor((remMs % 3600000) / 60000);
-  const timeStr = remMs > 0 ? `${remH}h ${String(remM).padStart(2, '0')}m remaining` : 'Landing';
-  const isDiverted = flight.delay_reason === 'medical' && flight.diversion_airport_code;
-  const isDelayed  = !isDiverted && flight.delay_reason && (flight.delay_minutes || 0) > 0;
-  const badgeStyle = { marginLeft: 'auto', fontSize: '0.68rem', fontWeight: 700, color: '#a16207', background: 'rgba(234,179,8,0.18)', border: '1px solid rgba(234,179,8,0.4)', padding: '2px 8px', borderRadius: 3, textTransform: 'uppercase', letterSpacing: '0.04em' };
-
-  return (
-    <div className="occ-card">
-      <div className="occ-card-hd">
-        <span className="occ-card-reg">{flight.flight_number}</span>
-        <span className="occ-card-type">{flight.aircraft_type}</span>
-        {isDiverted && (
-          <span style={badgeStyle}>
-            Diverted → {flight.diversion_airport_code}
-          </span>
-        )}
-        {isDelayed && (
-          <span style={badgeStyle}>
-            Delayed {formatDelayLabel(flight.delay_minutes)}
-          </span>
-        )}
-      </div>
-      <div className="occ-fp-wrap">
-        <div className="occ-fp-route">
-          <div className="occ-fp-apt">
-            <button className="occ-apt-link occ-fp-code" onClick={() => onNavigateToAirport?.(flight.departure_airport)}>
-              {flight.departure_airport}
-            </button>
-            {flight.departure_name && <span className="occ-fp-apt-name">{flight.departure_name}</span>}
-          </div>
-          <div className="occ-fp-apt occ-fp-apt-r">
-            <button className="occ-apt-link occ-fp-code" onClick={() => onNavigateToAirport?.(flight.arrival_airport)}>
-              {flight.arrival_airport}
-            </button>
-            {flight.arrival_name && <span className="occ-fp-apt-name">{flight.arrival_name}</span>}
-          </div>
-        </div>
-        <div className="occ-fp-bar">
-          <div className="occ-fp-line" />
-          <span className="occ-fp-plane" style={{ left: `calc(${pct}% - 9px)` }}>✈</span>
-        </div>
-        <div className="occ-fp-meta">
-          <button className="occ-fp-reg" onClick={() => onNavigateToAircraft?.(flight.aircraft_id)}>
-            {flight.aircraft_registration}
-          </button>
-          <span className="occ-fp-time">{timeStr}</span>
-        </div>
-      </div>
     </div>
   );
 }
@@ -625,67 +576,39 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
             </aside>
 
             {/* Content */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div className="info-card" style={{ marginBottom: 0 }}>
-                <div className="card-header-bar">
-                  <span className="card-header-bar-title">
-                    Active Flights ({filteredActive.length}{hasActiveFilters && filteredActive.length !== activeFlights.length ? ` of ${activeFlights.length}` : ''})
-                  </span>
-                </div>
-                {activeFlights.length === 0 ? (
-                  <div className="occ-empty">No flights currently in the air.</div>
-                ) : filteredActive.length === 0 ? (
-                  <div className="occ-empty">No flights match your filters.</div>
-                ) : (
-                  <>
-                    <div className="occ-grid">
-                      {activeFlightsPage.map(fl => (
-                        <FlightCard
-                          key={fl.id}
-                          flight={fl}
-                          onNavigateToAirport={onNavigateToAirport}
-                          onNavigateToAircraft={onNavigateToAircraft}
-                        />
-                      ))}
-                    </div>
-                    {activePageCount > 1 && (
-                      <Pagination
-                        page={safeActivePage}
-                        pageCount={activePageCount}
-                        pageSize={ACTIVE_PAGE_SIZE}
-                        total={filteredActive.length}
-                        onChange={setActivePage}
-                      />
-                    )}
-                  </>
-                )}
+            <div className="info-card" style={{ marginBottom: 0 }}>
+              <div className="card-header-bar">
+                <span className="card-header-bar-title">
+                  Active Flights ({filteredActive.length}{hasActiveFilters && filteredActive.length !== activeFlights.length ? ` of ${activeFlights.length}` : ''})
+                </span>
               </div>
-
-              {/* Compact list variant — test version, more rows per screen */}
-              <div className="info-card" style={{ marginBottom: 0 }}>
-                <div className="card-header-bar">
-                  <span className="card-header-bar-title">
-                    Active Flights — Compact List (Test)
-                    {filteredActive.length > 0 && ` (${filteredActive.length}${hasActiveFilters && filteredActive.length !== activeFlights.length ? ` of ${activeFlights.length}` : ''})`}
-                  </span>
-                </div>
-                {activeFlights.length === 0 ? (
-                  <div className="occ-empty">No flights currently in the air.</div>
-                ) : filteredActive.length === 0 ? (
-                  <div className="occ-empty">No flights match your filters.</div>
-                ) : (
+              {activeFlights.length === 0 ? (
+                <div className="occ-empty">No flights currently in the air.</div>
+              ) : filteredActive.length === 0 ? (
+                <div className="occ-empty">No flights match your filters.</div>
+              ) : (
+                <>
                   <div className="occ-list">
                     {activeFlightsPage.map(fl => (
                       <FlightListRow
-                        key={`lr-${fl.id}`}
+                        key={fl.id}
                         flight={fl}
                         onNavigateToAirport={onNavigateToAirport}
                         onNavigateToAircraft={onNavigateToAircraft}
                       />
                     ))}
                   </div>
-                )}
-              </div>
+                  {activePageCount > 1 && (
+                    <Pagination
+                      page={safeActivePage}
+                      pageCount={activePageCount}
+                      pageSize={ACTIVE_PAGE_SIZE}
+                      total={filteredActive.length}
+                      onChange={setActivePage}
+                    />
+                  )}
+                </>
+              )}
             </div>
           </div>
         )}
@@ -884,50 +807,7 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         }
 
         .occ-empty { color: #999; font-size: 0.88rem; font-style: italic; padding: 1.5rem 1.1rem; }
-        .occ-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-          gap: 0.85rem;
-          padding: 1rem 1.1rem;
-        }
 
-        .occ-card { background: white; border-radius: 8px; border: 1px solid #EEEEEE; overflow: hidden; }
-        .occ-card-hd {
-          background: #F5F5F5; padding: 0.55rem 1rem;
-          display: flex; align-items: baseline; gap: 0.6rem;
-          border-bottom: 1px solid #EEEEEE;
-        }
-        .occ-card-reg { font-family: monospace; font-size: 1rem; font-weight: 900; color: #2C2C2C; letter-spacing: 0.04em; }
-        .occ-card-type { font-size: 0.68rem; color: #888; font-weight: 500; }
-
-        .occ-fp-wrap { padding: 12px 16px 14px; }
-        .occ-fp-route { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; }
-        .occ-fp-apt { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; }
-        .occ-fp-apt-r { align-items: flex-end; text-align: right; }
-        .occ-fp-code {
-          font-family: monospace; font-size: 1.25rem; font-weight: 900; color: #2C2C2C;
-          line-height: 1; background: none; border: none; padding: 0; cursor: pointer;
-          text-decoration: underline; text-decoration-color: rgba(0,0,0,0.25); text-underline-offset: 2px;
-        }
-        .occ-fp-code:hover { color: #555; }
-        .occ-fp-apt-name { font-size: 10px; color: #999; line-height: 1.2; max-width: 100px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .occ-fp-bar { position: relative; height: 24px; display: flex; align-items: center; margin-bottom: 8px; }
-        .occ-fp-line { position: absolute; left: 0; right: 0; height: 2px; background: #E0E0E0; }
-        .occ-fp-line::before, .occ-fp-line::after {
-          content: ''; position: absolute; top: 50%; transform: translateY(-50%);
-          width: 5px; height: 5px; border-radius: 50%; background: #2C2C2C;
-        }
-        .occ-fp-line::before { left: 0; }
-        .occ-fp-line::after  { right: 0; }
-        .occ-fp-plane { position: absolute; font-size: 16px; line-height: 1; top: 50%; transform: translateY(-50%); z-index: 1; }
-        .occ-fp-meta { display: flex; align-items: center; gap: 8px; }
-        .occ-fp-reg {
-          font-family: monospace; font-size: 0.75rem; font-weight: 700; color: #2C2C2C;
-          background: none; border: none; padding: 0; cursor: pointer;
-          text-decoration: underline; text-decoration-color: rgba(0,0,0,0.25); text-underline-offset: 2px;
-        }
-        .occ-fp-reg:hover { color: #555; }
-        .occ-fp-time { font-size: 0.75rem; color: #888; margin-left: auto; }
         .occ-apt-link {
           background: none; border: none; padding: 0; cursor: pointer; color: #2C2C2C; font-weight: 600;
           text-decoration: underline; text-decoration-color: rgba(0,0,0,0.25);
@@ -935,17 +815,18 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         }
         .occ-apt-link:hover { color: #555; }
 
-        /* Compact list variant of Active Flights */
+        /* Compact list view of Active Flights */
         .occ-list { display: flex; flex-direction: column; }
         .occ-lr {
           display: grid;
           grid-template-columns:
-            minmax(160px, 1.2fr)  /* flight number + aircraft type */
+            minmax(150px, 1.2fr)  /* flight number + aircraft type */
             44px                  /* dep code */
-            minmax(140px, 2fr)    /* progress line */
+            minmax(120px, 2fr)    /* progress line */
             44px                  /* arr code */
-            minmax(72px, auto)    /* registration */
-            minmax(120px, auto);  /* remaining time */
+            minmax(110px, auto)   /* distance traveled / total */
+            minmax(70px,  auto)   /* registration */
+            minmax(80px,  auto);  /* remaining time */
           align-items: center;
           gap: 0.7rem;
           padding: 0.45rem 1.1rem;
@@ -954,7 +835,13 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         .occ-lr:last-child { border-bottom: none; }
         .occ-lr:hover { background: #FAFAFA; }
         .occ-lr-id { display: flex; flex-direction: column; min-width: 0; }
-        .occ-lr-fn { font-family: monospace; font-size: 0.85rem; font-weight: 800; color: #2C2C2C; letter-spacing: 0.04em; line-height: 1.2; }
+        .occ-lr-fn-row { display: flex; align-items: center; gap: 0.35rem; line-height: 1.2; }
+        .occ-lr-fn { font-family: monospace; font-size: 0.85rem; font-weight: 800; color: #2C2C2C; letter-spacing: 0.04em; }
+        .occ-lr-dot {
+          display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+          background: #facc15; border: 1px solid #a16207;
+          cursor: help;
+        }
         .occ-lr-type { font-size: 0.65rem; color: #999; font-weight: 500; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .occ-lr-code {
           font-family: monospace; font-size: 0.9rem; font-weight: 800; color: #2C2C2C;
@@ -969,6 +856,7 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         .occ-lr-line::before { left: 0; }
         .occ-lr-line::after  { right: 0; }
         .occ-lr-plane { position: absolute; font-size: 13px; line-height: 1; top: 50%; transform: translateY(-50%); color: #2C2C2C; z-index: 1; }
+        .occ-lr-dist { font-family: monospace; font-size: 0.72rem; color: #666; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
         .occ-lr-reg {
           font-family: monospace; font-size: 0.72rem; font-weight: 700; color: #2C2C2C;
           background: none; border: none; padding: 0; cursor: pointer;
@@ -976,20 +864,14 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
           text-align: left; white-space: nowrap;
         }
         .occ-lr-reg:hover { color: #555; }
-        .occ-lr-time { font-size: 0.72rem; color: #888; text-align: right; white-space: nowrap; }
-        .occ-lr-badge {
-          grid-column: 1 / -1; justify-self: start; margin-top: 2px;
-          font-size: 0.62rem; font-weight: 700; color: #a16207;
-          background: rgba(234,179,8,0.18); border: 1px solid rgba(234,179,8,0.4);
-          padding: 1px 6px; border-radius: 3px;
-          text-transform: uppercase; letter-spacing: 0.04em;
-        }
+        .occ-lr-time { font-size: 0.72rem; color: #888; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
         @media (max-width: 720px) {
           .occ-lr {
             grid-template-columns: 1fr 44px minmax(80px, 1fr) 44px;
             row-gap: 0.3rem;
           }
-          .occ-lr-reg { grid-column: 1 / 3; }
+          .occ-lr-dist { grid-column: 1 / 5; text-align: left; }
+          .occ-lr-reg  { grid-column: 1 / 3; }
           .occ-lr-time { grid-column: 3 / 5; }
         }
 
@@ -1024,10 +906,6 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         }
 
         @media (max-width: 480px) {
-          .occ-grid { grid-template-columns: 1fr; padding: 0.75rem; gap: 0.65rem; }
-          .occ-fp-route { gap: 4px; }
-          .occ-fp-code { font-size: 1.1rem; }
-          .occ-fp-apt-name { max-width: 80px; font-size: 9px; }
           .occ-fb-msg { white-space: normal; }
           .occ-fb-hd { flex-wrap: wrap; }
         }

@@ -96,24 +96,35 @@ export default function LiveFlightMap({ mapStyle = 'dark' }) {
     }
     if (overlay) overlay.style.display = 'none';
 
-    // Visual departure-stagger: when N flights share an origin airport and
-    // scheduled minute, they would all sit on top of each other. Spread them
-    // across the minute (deterministic by flight_number so a given flight
-    // always gets the same offset across refreshes). Backend data is untouched.
-    const slotOffsetMs = new Map();
-    const depGroups = new Map();
-    for (const f of flights) {
-      const minute = Math.floor(new Date(f.departure_time).getTime() / 60_000);
-      const key = `${f.origin_iata}|${minute}`;
-      if (!depGroups.has(key)) depGroups.set(key, []);
-      depGroups.get(key).push(f);
-    }
-    for (const g of depGroups.values()) {
-      if (g.length < 2) continue;
-      g.sort((a, b) => a.flight_number.localeCompare(b.flight_number));
-      const slot = 60_000 / g.length;
-      g.forEach((f, i) => slotOffsetMs.set(f.flight_number, i * slot));
-    }
+    // Visual stagger: when N flights share an airport and scheduled minute, they
+    // would all sit on top of each other. Spread them across the minute
+    // (deterministic by flight_number so a given flight always gets the same
+    // offset across refreshes). Two independent groupings — one by departure,
+    // one by arrival — so both ends of the flight visually de-stack. Backend
+    // data is untouched. The cruise phase smoothly blends between both offsets.
+    const buildStagger = (keyFn) => {
+      const groups = new Map();
+      for (const f of flights) {
+        const k = keyFn(f);
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(f);
+      }
+      const offsets = new Map();
+      for (const g of groups.values()) {
+        if (g.length < 2) continue;
+        g.sort((a, b) => a.flight_number.localeCompare(b.flight_number));
+        const slot = 60_000 / g.length;
+        g.forEach((f, i) => offsets.set(f.flight_number, i * slot));
+      }
+      return offsets;
+    };
+    const nowMs = Date.now();
+    const depOffsetMs = buildStagger(f =>
+      `${f.origin_iata}|${Math.floor(new Date(f.departure_time).getTime() / 60_000)}`
+    );
+    const arrOffsetMs = buildStagger(f =>
+      `${f.destination_iata}|${Math.floor((nowMs + f.remaining_ms) / 60_000)}`
+    );
 
     for (const f of flights) {
       const arc = greatCirclePoints(f.origin_lat, f.origin_lon, f.dest_lat, f.dest_lon, 200);
@@ -175,34 +186,38 @@ export default function LiveFlightMap({ mapStyle = 'dark' }) {
       ) {
         // 3-phase trajectory: initial climb out runway heading, great-circle cruise
         // between fix points, final approach lined up with destination runway.
+        // Two independent visual stagger offsets — climb uses depOffset, approach
+        // uses arrOffset, cruise smoothly drifts between them.
         const totalMs = f.remaining_ms / (1 - f.progress);
-        const offsetMs = slotOffsetMs.get(f.flight_number) || 0;
-        const elapsedMs = totalMs - f.remaining_ms - offsetMs;
-        const visualRemainingMs = f.remaining_ms + offsetMs;
+        const depOff = depOffsetMs.get(f.flight_number) || 0;
+        const arrOff = arrOffsetMs.get(f.flight_number) || 0;
+        const realElapsed = totalMs - f.remaining_ms;
         const climbMs = CLIMB_MIN * 60_000;
         const approachMs = APPROACH_MIN * 60_000;
+        const climbEnd = depOff + climbMs;
+        const approachStart = totalMs - approachMs + arrOff;
 
         const depFix = destPoint(f.origin_lat, f.origin_lon, f.origin_heading, CLIMB_DISTANCE_KM);
         const apprFix = destPoint(f.dest_lat, f.dest_lon, (f.dest_heading + 180) % 360, APPROACH_DISTANCE_KM);
 
-        if (elapsedMs < 0) {
+        if (realElapsed < depOff) {
           // Pre-stagger: real flight is airborne but visual is still parked.
           lat = f.origin_lat;
           lon = f.origin_lon;
           bear = f.origin_heading;
-        } else if (elapsedMs < climbMs) {
-          const t = elapsedMs / climbMs;
+        } else if (realElapsed < climbEnd) {
+          const t = (realElapsed - depOff) / climbMs;
           lat = f.origin_lat + (depFix[0] - f.origin_lat) * t;
           lon = f.origin_lon + (depFix[1] - f.origin_lon) * t;
           bear = f.origin_heading;
-        } else if (visualRemainingMs < approachMs) {
-          const t = 1 - visualRemainingMs / approachMs;
+        } else if (realElapsed >= approachStart) {
+          const t = Math.min(1, (realElapsed - approachStart) / approachMs);
           lat = apprFix[0] + (f.dest_lat - apprFix[0]) * t;
           lon = apprFix[1] + (f.dest_lon - apprFix[1]) * t;
           bear = f.dest_heading;
         } else {
           const cruiseArc = greatCirclePoints(depFix[0], depFix[1], apprFix[0], apprFix[1], 200);
-          const cruiseT = (elapsedMs - climbMs) / (totalMs - climbMs - approachMs);
+          const cruiseT = (realElapsed - climbEnd) / (approachStart - climbEnd);
           const idx = Math.max(0, Math.min(Math.floor(cruiseT * 200), 198));
           lat = cruiseArc[idx][0];
           lon = cruiseArc[idx][1];

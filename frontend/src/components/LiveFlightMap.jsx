@@ -45,11 +45,13 @@ function destPoint(lat, lon, bearingDeg, distanceKm) {
   return [φ2 * 180 / Math.PI, ((λ2 * 180 / Math.PI) + 540) % 360 - 180];
 }
 
-// 3-phase trajectory tuning: 8 min final + 8 min initial climb, each ~40 km long.
+// 3-phase trajectory tuning: short 5 km / 1 min initial climb (planes pop out of
+// the airport quickly), longer 40 km / 8 min final approach (visible alignment).
 // Skip the pattern for very short hops where there isn't room for a meaningful cruise leg.
-const CLIMB_MIN = 8;
+const CLIMB_MIN = 1;
 const APPROACH_MIN = 8;
-const FIX_DISTANCE_KM = 40;
+const CLIMB_DISTANCE_KM = 5;
+const APPROACH_DISTANCE_KM = 40;
 const MIN_FLIGHT_MIN_FOR_PATTERN = 20;
 
 function planeIcon(deg, color = '#26A9F0') {
@@ -159,8 +161,8 @@ export default function LiveFlightMap({ mapStyle = 'dark' }) {
         const climbMs = CLIMB_MIN * 60_000;
         const approachMs = APPROACH_MIN * 60_000;
 
-        const depFix = destPoint(f.origin_lat, f.origin_lon, f.origin_heading, FIX_DISTANCE_KM);
-        const apprFix = destPoint(f.dest_lat, f.dest_lon, (f.dest_heading + 180) % 360, FIX_DISTANCE_KM);
+        const depFix = destPoint(f.origin_lat, f.origin_lon, f.origin_heading, CLIMB_DISTANCE_KM);
+        const apprFix = destPoint(f.dest_lat, f.dest_lon, (f.dest_heading + 180) % 360, APPROACH_DISTANCE_KM);
 
         if (elapsedMs < climbMs) {
           const t = elapsedMs / climbMs;

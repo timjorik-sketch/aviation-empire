@@ -188,28 +188,25 @@ function FlightListRow({ flight, onNavigateToAirport, onNavigateToAircraft }) {
 
   const isDiverted = flight.delay_reason === 'medical' && flight.diversion_airport_code;
   const isDelayed  = !isDiverted && flight.delay_reason && (flight.delay_minutes || 0) > 0;
+  const isDisrupted = isDiverted || isDelayed;
   const statusTip = isDiverted
     ? `Diverted via ${flight.diversion_airport_code}`
     : isDelayed
       ? `Delayed ${formatDelayLabel(flight.delay_minutes)}`
-      : '';
+      : 'On time';
 
   return (
     <div className="occ-lr">
       <div className="occ-lr-id">
-        <div className="occ-lr-fn-row">
-          <span className="occ-lr-fn">{flight.flight_number}</span>
-          {statusTip && (
-            <span
-              className="occ-lr-dot"
-              data-tip={statusTip}
-              aria-label={statusTip}
-              role="img"
-            />
-          )}
-        </div>
+        <span className="occ-lr-fn">{flight.flight_number}</span>
         <span className="occ-lr-type">{flight.aircraft_type}</span>
       </div>
+      <span
+        className={`occ-lr-dot ${isDisrupted ? 'occ-lr-dot--warn' : 'occ-lr-dot--ok'}`}
+        data-tip={statusTip}
+        aria-label={statusTip}
+        role="img"
+      />
       <button
         className="occ-apt-link occ-lr-code"
         onClick={() => onNavigateToAirport?.(flight.departure_airport)}
@@ -233,8 +230,8 @@ function FlightListRow({ flight, onNavigateToAirport, onNavigateToAircraft }) {
         {flight.aircraft_registration}
       </button>
       <div className="occ-lr-time">
-        <span className="occ-lr-time-label">Time to Destination</span>
         <span className="occ-lr-time-value">{timeStr}</span>
+        <span className="occ-lr-time-label">Time to Destination</span>
       </div>
     </div>
   );
@@ -822,6 +819,7 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
           display: grid;
           grid-template-columns:
             minmax(150px, 1.2fr)  /* flight number + aircraft type */
+            16px                  /* status dot */
             44px                  /* dep code */
             minmax(140px, 2fr)    /* progress line */
             44px                  /* arr code */
@@ -835,19 +833,30 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         .occ-lr:last-child { border-bottom: none; }
         .occ-lr:hover { background: #FAFAFA; }
         .occ-lr-id { display: flex; flex-direction: column; min-width: 0; }
-        .occ-lr-fn-row { display: flex; align-items: center; gap: 0.5rem; line-height: 1.2; }
-        .occ-lr-fn { font-family: monospace; font-size: 0.85rem; font-weight: 800; color: #2C2C2C; letter-spacing: 0.04em; }
+        .occ-lr-fn { font-family: monospace; font-size: 0.85rem; font-weight: 800; color: #2C2C2C; letter-spacing: 0.04em; line-height: 1.2; }
         .occ-lr-dot {
           position: relative;
           display: inline-block;
           width: 10px; height: 10px;
           border-radius: 50%;
+          justify-self: center;
+        }
+        .occ-lr-dot--ok {
+          background: #22c55e;
+          box-shadow: 0 0 0 3px rgba(34,197,94,0.22);
+          animation: occ-lr-dot-pulse-green 1.6s ease-in-out infinite;
+        }
+        .occ-lr-dot--warn {
           background: #facc15;
           box-shadow: 0 0 0 3px rgba(234,179,8,0.22);
-          flex-shrink: 0;
-          animation: occ-lr-dot-pulse 1.6s ease-in-out infinite;
+          animation: occ-lr-dot-pulse-yellow 1.6s ease-in-out infinite;
         }
-        @keyframes occ-lr-dot-pulse {
+        @keyframes occ-lr-dot-pulse-green {
+          0%   { box-shadow: 0 0 0 3px rgba(34,197,94,0.4); }
+          50%  { box-shadow: 0 0 0 6px rgba(34,197,94,0.08); }
+          100% { box-shadow: 0 0 0 3px rgba(34,197,94,0.4); }
+        }
+        @keyframes occ-lr-dot-pulse-yellow {
           0%   { box-shadow: 0 0 0 3px rgba(234,179,8,0.4); }
           50%  { box-shadow: 0 0 0 6px rgba(234,179,8,0.08); }
           100% { box-shadow: 0 0 0 3px rgba(234,179,8,0.4); }
@@ -902,11 +911,11 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         .occ-lr-time-value { font-size: 0.82rem; font-weight: 700; color: #2C2C2C; font-variant-numeric: tabular-nums; }
         @media (max-width: 720px) {
           .occ-lr {
-            grid-template-columns: 1fr 44px minmax(80px, 1fr) 44px;
+            grid-template-columns: 14px 1fr 44px minmax(80px, 1fr) 44px;
             row-gap: 0.3rem;
           }
-          .occ-lr-reg  { grid-column: 1 / 3; }
-          .occ-lr-time { grid-column: 3 / 5; align-items: flex-end; }
+          .occ-lr-reg  { grid-column: 1 / 4; }
+          .occ-lr-time { grid-column: 4 / 6; align-items: flex-end; }
         }
 
         .occ-fb-list { display: flex; flex-direction: column; }

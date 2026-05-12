@@ -876,7 +876,7 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         }
         .occ-lr-dot:hover::after,
         .occ-lr-dot:hover::before { opacity: 1; }
-        .occ-lr-type { font-size: 0.65rem; color: #999; font-weight: 500; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .occ-lr-type { font-size: 0.58rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #999; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .occ-lr-code {
           font-family: monospace; font-size: 0.9rem; font-weight: 800; color: #2C2C2C;
           line-height: 1; padding: 0; text-align: center;

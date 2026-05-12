@@ -172,6 +172,62 @@ function formatDelayLabel(min) {
   return rem === 0 ? `+${h}h` : `+${h}h${rem}m`;
 }
 
+// Compact one-line variant of FlightCard for the test list view below
+// the regular Active Flights grid. Keeps the same data + interactions but
+// trades the boxed layout for a denser horizontal row.
+function FlightListRow({ flight, onNavigateToAirport, onNavigateToAircraft }) {
+  const now   = Date.now();
+  const dep   = new Date(flight.departure_time).getTime();
+  const arr   = new Date(flight.arrival_time).getTime();
+  const total = arr - dep;
+  const pct   = total > 0 ? Math.max(0, Math.min(100, ((now - dep) / total) * 100)) : 0;
+  const remMs = Math.max(0, arr - now);
+  const remH  = Math.floor(remMs / 3600000);
+  const remM  = Math.floor((remMs % 3600000) / 60000);
+  const timeStr = remMs > 0 ? `${remH}h ${String(remM).padStart(2, '0')}m remaining` : 'Landing';
+  const isDiverted = flight.delay_reason === 'medical' && flight.diversion_airport_code;
+  const isDelayed  = !isDiverted && flight.delay_reason && (flight.delay_minutes || 0) > 0;
+
+  return (
+    <div className="occ-lr">
+      <div className="occ-lr-id">
+        <span className="occ-lr-fn">{flight.flight_number}</span>
+        <span className="occ-lr-type">{flight.aircraft_type}</span>
+      </div>
+      <button
+        className="occ-apt-link occ-lr-code"
+        onClick={() => onNavigateToAirport?.(flight.departure_airport)}
+      >
+        {flight.departure_airport}
+      </button>
+      <div className="occ-lr-bar">
+        <div className="occ-lr-line" />
+        <span className="occ-lr-plane" style={{ left: `calc(${pct}% - 7px)` }}>✈</span>
+      </div>
+      <button
+        className="occ-apt-link occ-lr-code"
+        onClick={() => onNavigateToAirport?.(flight.arrival_airport)}
+      >
+        {flight.arrival_airport}
+      </button>
+      <button
+        className="occ-lr-reg"
+        onClick={() => onNavigateToAircraft?.(flight.aircraft_id)}
+      >
+        {flight.aircraft_registration}
+      </button>
+      <span className="occ-lr-time">{timeStr}</span>
+      {(isDiverted || isDelayed) && (
+        <span className="occ-lr-badge">
+          {isDiverted
+            ? `Diverted → ${flight.diversion_airport_code}`
+            : `Delayed ${formatDelayLabel(flight.delay_minutes)}`}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function FlightCard({ flight, onNavigateToAirport, onNavigateToAircraft }) {
   const now   = Date.now();
   const dep   = new Date(flight.departure_time).getTime();
@@ -569,39 +625,67 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
             </aside>
 
             {/* Content */}
-            <div className="info-card" style={{ marginBottom: 0 }}>
-              <div className="card-header-bar">
-                <span className="card-header-bar-title">
-                  Active Flights ({filteredActive.length}{hasActiveFilters && filteredActive.length !== activeFlights.length ? ` of ${activeFlights.length}` : ''})
-                </span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div className="info-card" style={{ marginBottom: 0 }}>
+                <div className="card-header-bar">
+                  <span className="card-header-bar-title">
+                    Active Flights ({filteredActive.length}{hasActiveFilters && filteredActive.length !== activeFlights.length ? ` of ${activeFlights.length}` : ''})
+                  </span>
+                </div>
+                {activeFlights.length === 0 ? (
+                  <div className="occ-empty">No flights currently in the air.</div>
+                ) : filteredActive.length === 0 ? (
+                  <div className="occ-empty">No flights match your filters.</div>
+                ) : (
+                  <>
+                    <div className="occ-grid">
+                      {activeFlightsPage.map(fl => (
+                        <FlightCard
+                          key={fl.id}
+                          flight={fl}
+                          onNavigateToAirport={onNavigateToAirport}
+                          onNavigateToAircraft={onNavigateToAircraft}
+                        />
+                      ))}
+                    </div>
+                    {activePageCount > 1 && (
+                      <Pagination
+                        page={safeActivePage}
+                        pageCount={activePageCount}
+                        pageSize={ACTIVE_PAGE_SIZE}
+                        total={filteredActive.length}
+                        onChange={setActivePage}
+                      />
+                    )}
+                  </>
+                )}
               </div>
-              {activeFlights.length === 0 ? (
-                <div className="occ-empty">No flights currently in the air.</div>
-              ) : filteredActive.length === 0 ? (
-                <div className="occ-empty">No flights match your filters.</div>
-              ) : (
-                <>
-                  <div className="occ-grid">
+
+              {/* Compact list variant — test version, more rows per screen */}
+              <div className="info-card" style={{ marginBottom: 0 }}>
+                <div className="card-header-bar">
+                  <span className="card-header-bar-title">
+                    Active Flights — Compact List (Test)
+                    {filteredActive.length > 0 && ` (${filteredActive.length}${hasActiveFilters && filteredActive.length !== activeFlights.length ? ` of ${activeFlights.length}` : ''})`}
+                  </span>
+                </div>
+                {activeFlights.length === 0 ? (
+                  <div className="occ-empty">No flights currently in the air.</div>
+                ) : filteredActive.length === 0 ? (
+                  <div className="occ-empty">No flights match your filters.</div>
+                ) : (
+                  <div className="occ-list">
                     {activeFlightsPage.map(fl => (
-                      <FlightCard
-                        key={fl.id}
+                      <FlightListRow
+                        key={`lr-${fl.id}`}
                         flight={fl}
                         onNavigateToAirport={onNavigateToAirport}
                         onNavigateToAircraft={onNavigateToAircraft}
                       />
                     ))}
                   </div>
-                  {activePageCount > 1 && (
-                    <Pagination
-                      page={safeActivePage}
-                      pageCount={activePageCount}
-                      pageSize={ACTIVE_PAGE_SIZE}
-                      total={filteredActive.length}
-                      onChange={setActivePage}
-                    />
-                  )}
-                </>
-              )}
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -850,6 +934,64 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
           text-underline-offset: 2px; font-family: inherit;
         }
         .occ-apt-link:hover { color: #555; }
+
+        /* Compact list variant of Active Flights */
+        .occ-list { display: flex; flex-direction: column; }
+        .occ-lr {
+          display: grid;
+          grid-template-columns:
+            minmax(160px, 1.2fr)  /* flight number + aircraft type */
+            44px                  /* dep code */
+            minmax(140px, 2fr)    /* progress line */
+            44px                  /* arr code */
+            minmax(72px, auto)    /* registration */
+            minmax(120px, auto);  /* remaining time */
+          align-items: center;
+          gap: 0.7rem;
+          padding: 0.45rem 1.1rem;
+          border-bottom: 1px solid #F2F2F2;
+        }
+        .occ-lr:last-child { border-bottom: none; }
+        .occ-lr:hover { background: #FAFAFA; }
+        .occ-lr-id { display: flex; flex-direction: column; min-width: 0; }
+        .occ-lr-fn { font-family: monospace; font-size: 0.85rem; font-weight: 800; color: #2C2C2C; letter-spacing: 0.04em; line-height: 1.2; }
+        .occ-lr-type { font-size: 0.65rem; color: #999; font-weight: 500; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .occ-lr-code {
+          font-family: monospace; font-size: 0.9rem; font-weight: 800; color: #2C2C2C;
+          line-height: 1; padding: 0; text-align: center;
+        }
+        .occ-lr-bar { position: relative; height: 16px; display: flex; align-items: center; }
+        .occ-lr-line { position: absolute; left: 0; right: 0; height: 2px; background: #E0E0E0; border-radius: 1px; }
+        .occ-lr-line::before, .occ-lr-line::after {
+          content: ''; position: absolute; top: 50%; transform: translateY(-50%);
+          width: 5px; height: 5px; border-radius: 50%; background: #2C2C2C;
+        }
+        .occ-lr-line::before { left: 0; }
+        .occ-lr-line::after  { right: 0; }
+        .occ-lr-plane { position: absolute; font-size: 13px; line-height: 1; top: 50%; transform: translateY(-50%); color: #2C2C2C; z-index: 1; }
+        .occ-lr-reg {
+          font-family: monospace; font-size: 0.72rem; font-weight: 700; color: #2C2C2C;
+          background: none; border: none; padding: 0; cursor: pointer;
+          text-decoration: underline; text-decoration-color: rgba(0,0,0,0.25); text-underline-offset: 2px;
+          text-align: left; white-space: nowrap;
+        }
+        .occ-lr-reg:hover { color: #555; }
+        .occ-lr-time { font-size: 0.72rem; color: #888; text-align: right; white-space: nowrap; }
+        .occ-lr-badge {
+          grid-column: 1 / -1; justify-self: start; margin-top: 2px;
+          font-size: 0.62rem; font-weight: 700; color: #a16207;
+          background: rgba(234,179,8,0.18); border: 1px solid rgba(234,179,8,0.4);
+          padding: 1px 6px; border-radius: 3px;
+          text-transform: uppercase; letter-spacing: 0.04em;
+        }
+        @media (max-width: 720px) {
+          .occ-lr {
+            grid-template-columns: 1fr 44px minmax(80px, 1fr) 44px;
+            row-gap: 0.3rem;
+          }
+          .occ-lr-reg { grid-column: 1 / 3; }
+          .occ-lr-time { grid-column: 3 / 5; }
+        }
 
         .occ-fb-list { display: flex; flex-direction: column; }
         .occ-fb-item {

@@ -1167,13 +1167,40 @@ async function cancelNextRotations({ aircraftId, airlineId, afterTime, untilTime
 
 // Process flights - update statuses and calculate revenue
 let _processingFlights = false;
+let _tickCount = 0;
 async function processFlights() {
-  if (_processingFlights) return;      // skip if previous cycle still running
+  if (_processingFlights) {
+    console.log('[FlightProc] tick skipped — previous cycle still running');
+    return;
+  }
   _processingFlights = true;
+  _tickCount++;
+  const tickStart = Date.now();
   try {
     await patchNullSatisfactionScores();
 
     const now = new Date();
+
+    // Heartbeat: log queue sizes once per minute so we can verify the
+    // processor is alive and see what's actually in the queue.
+    if (_tickCount % 6 === 1) {
+      try {
+        const r = await pool.query(`
+          SELECT
+            COUNT(*) FILTER (WHERE status = 'scheduled' AND departure_time <= NOW() + INTERVAL '15 minutes') AS due_scheduled,
+            COUNT(*) FILTER (WHERE status IN ('boarding','delayed') AND departure_time <= NOW())             AS due_boarding,
+            COUNT(*) FILTER (WHERE status = 'in-flight' AND arrival_time <= NOW())                          AS due_inflight,
+            COUNT(*) FILTER (WHERE status = 'in-flight')                                                    AS all_inflight,
+            COUNT(*) FILTER (WHERE status = 'boarding')                                                     AS all_boarding,
+            COUNT(*) FILTER (WHERE status = 'scheduled')                                                    AS all_scheduled
+          FROM flights
+        `);
+        const c = r.rows[0] || {};
+        console.log(`[FlightProc] tick ${_tickCount} heartbeat — due: sched=${c.due_scheduled} board=${c.due_boarding} inflight=${c.due_inflight} | all: sched=${c.all_scheduled} board=${c.all_boarding} inflight=${c.all_inflight}`);
+      } catch (err) {
+        console.error('[FlightProc] heartbeat query failed:', err.message);
+      }
+    }
 
     // ── Maintenance completion: restore condition to 100% ──────────────────
     const jsDay = now.getDay();

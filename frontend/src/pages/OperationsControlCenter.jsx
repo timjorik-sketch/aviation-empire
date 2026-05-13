@@ -929,8 +929,14 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
           .occ-lr-time { grid-column: 4;     grid-row: 1; align-items: flex-end; }
           .occ-lr-dot  { grid-column: 1;     grid-row: 2; justify-self: start; align-self: center; }
           .occ-lr > :nth-child(3) { grid-column: 2; grid-row: 2; align-self: center; }
-          .occ-lr-bar             { grid-column: 3; grid-row: 2; }
-          .occ-lr > :nth-child(5) { grid-column: 4; grid-row: 2; align-self: center; justify-self: start; }
+          /* Bar spans col 3 + col 4 so the line reaches the right edge;
+             padding-right reserves room for the ARR code which sits on top. */
+          .occ-lr-bar             { grid-column: 3 / 5; grid-row: 2; padding-right: 34px; box-sizing: border-box; }
+          .occ-lr > :nth-child(5) {
+            grid-column: 4; grid-row: 2;
+            align-self: center; justify-self: end;
+            z-index: 2;
+          }
           .occ-lr-type       { font-size: 0.62rem; }
           .occ-lr-time-label {
             font-size: 0.6rem;

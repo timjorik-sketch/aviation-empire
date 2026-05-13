@@ -1272,12 +1272,16 @@ async function processFlights() {
       if (fpResult.rows[0]) currentFuelPrice = fpResult.rows[0].price_per_liter;
 
       for (const f of departingFlights) {
-        const fuelKg = Math.round(f.distance_km * f.fuel_per_km);
-        const fuelCost = Math.round(fuelKg * currentFuelPrice);
-        await pool.query(
-          "UPDATE flights SET status = 'in-flight', fuel_cost = $1 WHERE id = $2",
-          [fuelCost, f.id]
-        );
+        try {
+          const fuelKg = Math.round(f.distance_km * f.fuel_per_km);
+          const fuelCost = Math.round(fuelKg * currentFuelPrice);
+          await pool.query(
+            "UPDATE flights SET status = 'in-flight', fuel_cost = $1 WHERE id = $2",
+            [fuelCost, f.id]
+          );
+        } catch (err) {
+          console.error(`[FlightProc] Failed to depart flight ${f.id} (${f.flight_number}):`, err);
+        }
       }
       console.log(`[FlightProc] ${departingFlights.length} flight(s) departed at $${currentFuelPrice.toFixed(2)}/kg fuel`);
     }
@@ -1577,6 +1581,7 @@ async function processFlights() {
     }
 
     for (const f of boardingCandidates) {
+     try {
       // Hub topology used by cascade-cancel (hotel decision) and Tech Air handler.
       const hubCodes = f.airline_id ? await hubsFor(f.airline_id) : new Set();
       const depIsHub = hubCodes.has(f.dep_airport);
@@ -1791,6 +1796,9 @@ async function processFlights() {
         console.log(`[Delay] ${f.flight_number} TECH-AIR ${isInbound ? 'INBOUND' : 'OUTBOUND'}: turnback=${(turnback*100).toFixed(0)}%, +${hHours}h${hMins}m delay, hotel $${hotelCost}, next 2 rotations cancelled`);
         continue;
       }
+     } catch (err) {
+       console.error(`[FlightProc] Failed to roll/board flight ${f.id} (${f.flight_number}):`, err);
+     }
     }
   } catch (error) {
     console.error('Process flights error:', error);

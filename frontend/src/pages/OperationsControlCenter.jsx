@@ -199,7 +199,12 @@ function FlightListRow({ flight, onNavigateToAirport, onNavigateToAircraft }) {
     <div className="occ-lr">
       <div className="occ-lr-id">
         <span className="occ-lr-fn">{flight.flight_number}</span>
-        <span className="occ-lr-type">{flight.aircraft_type}</span>
+        <button
+          className="occ-lr-type"
+          onClick={() => onNavigateToAircraft?.(flight.aircraft_id)}
+        >
+          {flight.aircraft_type}
+        </button>
       </div>
       <span
         className={`occ-lr-dot ${isDisrupted ? 'occ-lr-dot--warn' : 'occ-lr-dot--ok'}`}
@@ -222,12 +227,6 @@ function FlightListRow({ flight, onNavigateToAirport, onNavigateToAircraft }) {
         onClick={() => onNavigateToAirport?.(flight.arrival_airport)}
       >
         {flight.arrival_airport}
-      </button>
-      <button
-        className="occ-lr-reg"
-        onClick={() => onNavigateToAircraft?.(flight.aircraft_id)}
-      >
-        {flight.aircraft_registration}
       </button>
       <div className="occ-lr-time">
         <span className="occ-lr-time-value">{timeStr}</span>
@@ -818,12 +817,11 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         .occ-lr {
           display: grid;
           grid-template-columns:
-            minmax(150px, 1.2fr)  /* flight number + aircraft type */
+            minmax(150px, 1.2fr)  /* flight number + clickable aircraft type */
             16px                  /* status dot */
             44px                  /* dep code */
             minmax(140px, 2fr)    /* progress line */
             44px                  /* arr code */
-            minmax(80px,  auto)   /* registration */
             minmax(140px, auto);  /* time to destination */
           align-items: center;
           gap: 0.7rem;
@@ -885,7 +883,15 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         }
         .occ-lr-dot:hover::after,
         .occ-lr-dot:hover::before { opacity: 1; }
-        .occ-lr-type { font-size: 0.58rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #999; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .occ-lr-type {
+          background: none; border: none; padding: 0; cursor: pointer;
+          font-family: inherit; text-align: left;
+          font-size: 0.58rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+          color: #999; line-height: 1.2;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+          text-decoration: underline; text-decoration-color: rgba(0,0,0,0.18); text-underline-offset: 2px;
+        }
+        .occ-lr-type:hover { color: #555; }
         .occ-lr-code {
           font-family: monospace; font-size: 0.9rem; font-weight: 800; color: #2C2C2C;
           line-height: 1; padding: 0; text-align: center;
@@ -899,40 +905,39 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         .occ-lr-line::before { left: 0; }
         .occ-lr-line::after  { right: 0; }
         .occ-lr-plane { position: absolute; font-size: 13px; line-height: 1; top: 50%; transform: translateY(-50%); color: #2C2C2C; z-index: 1; }
-        .occ-lr-reg {
-          font-family: monospace; font-size: 0.72rem; font-weight: 700; color: #2C2C2C;
-          background: none; border: none; padding: 0; cursor: pointer;
-          text-decoration: underline; text-decoration-color: rgba(0,0,0,0.25); text-underline-offset: 2px;
-          text-align: left; white-space: nowrap;
-        }
-        .occ-lr-reg:hover { color: #555; }
         .occ-lr-time { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.2; min-width: 0; }
         .occ-lr-time-label { font-size: 0.58rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #999; }
         .occ-lr-time-value { font-size: 0.82rem; font-weight: 700; color: #2C2C2C; font-variant-numeric: tabular-nums; }
         @media (max-width: 720px) {
-          /* Mobile: 2-row layout per flight.
-             Row 1: dot | id stack ─────── | time stack (right)
-             Row 2: DEP | progress line  | ARR + reg (sharing col 4)
-             nth-child indexes refer to DOM order in FlightListRow:
+          /* Mobile: 2-row layout per flight. Status dot sits inline directly
+             in front of the DEP code (no dedicated dot column on row 1).
+             Row 1: ────── id stack ──────  │  time stack (wraps to 2 lines)
+             Row 2:  ●  DEP  ──── line ────  ARR
+             nth-child refers to DOM order in FlightListRow:
                1=.occ-lr-id  2=.occ-lr-dot  3=DEP btn  4=.occ-lr-bar
-               5=ARR btn     6=.occ-lr-reg  7=.occ-lr-time
+               5=ARR btn     6=.occ-lr-time
           */
           .occ-lr {
-            grid-template-columns: 22px 44px 1fr minmax(100px, auto);
+            grid-template-columns: 12px 44px 1fr 44px minmax(80px, auto);
             grid-template-rows: auto auto;
-            column-gap: 0.55rem;
+            column-gap: 0.4rem;
             row-gap: 0.55rem;
-            padding: 0.65rem 0.9rem;
+            padding: 0.65rem 0.85rem;
           }
-          .occ-lr-dot  { grid-column: 1;     grid-row: 1; align-self: center; }
-          .occ-lr-id   { grid-column: 2 / 4; grid-row: 1; }
-          .occ-lr-time { grid-column: 4;     grid-row: 1; align-items: flex-end; }
+          .occ-lr-id   { grid-column: 2 / 5; grid-row: 1; }
+          .occ-lr-time { grid-column: 5;     grid-row: 1; align-items: flex-end; }
+          .occ-lr-dot  { grid-column: 1;     grid-row: 2; align-self: center; }
           .occ-lr > :nth-child(3) { grid-column: 2; grid-row: 2; align-self: center; }
           .occ-lr-bar             { grid-column: 3; grid-row: 2; }
-          .occ-lr > :nth-child(5) { grid-column: 4; grid-row: 2; align-self: center; justify-self: start; }
-          .occ-lr-reg             { grid-column: 4; grid-row: 2; align-self: center; justify-self: end; text-align: right; }
-          .occ-lr-type        { font-size: 0.66rem; }
-          .occ-lr-time-label  { font-size: 0.66rem; }
+          .occ-lr > :nth-child(5) { grid-column: 4; grid-row: 2; align-self: center; }
+          .occ-lr-type       { font-size: 0.62rem; }
+          .occ-lr-time-label {
+            font-size: 0.6rem;
+            white-space: normal;
+            max-width: 90px;
+            text-align: right;
+            line-height: 1.15;
+          }
         }
 
         .occ-fb-list { display: flex; flex-direction: column; }

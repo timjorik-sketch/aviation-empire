@@ -1361,6 +1361,7 @@ async function processFlights() {
     }));
 
     for (const flight of completedFlights) {
+     try {
       const cateringCost = calcCateringCost(
         flight.distance_km,
         flight.booked_eco,
@@ -1497,6 +1498,9 @@ async function processFlights() {
       await pool.query('UPDATE airlines SET total_points = total_points + $1 WHERE id = $2', [xpEarned, flight.airline_id]);
       await checkLevelUp(flight.airline_id);
       console.log(`[XP] Flight ${flight.flight_number}: +${xpEarned} XP (dist=${flight.distance_km}km, load=${(loadFactor*100).toFixed(0)}%)`);
+     } catch (err) {
+       console.error(`[FlightProc] Failed to complete flight ${flight.id} (${flight.flight_number}):`, err);
+     }
     }
 
     // ── Complete transfer flights that have landed ──────────────────────────

@@ -220,7 +220,10 @@ function FlightListRow({ flight, onNavigateToAirport, onNavigateToAircraft }) {
       </button>
       <div className="occ-lr-bar">
         <div className="occ-lr-line" />
-        <span className="occ-lr-plane" style={{ left: `calc(${pct}% - 7px)` }}>✈</span>
+        <span
+          className="occ-lr-plane"
+          style={{ left: `calc(${pct}% - var(--line-right-inset, 0px) * ${pct / 100} - 7px)` }}
+        >✈</span>
       </div>
       <button
         className="occ-apt-link occ-lr-code"
@@ -930,10 +933,10 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
           .occ-lr-dot  { grid-column: 1;     grid-row: 2; justify-self: start; align-self: center; }
           .occ-lr > :nth-child(3) { grid-column: 2; grid-row: 2; align-self: center; }
           /* Bar spans col 3 + col 4 so the right edge aligns with ARR.
-             The line itself stops 34px short via inset so its end-dot lands
-             just before the ARR text (which is z-indexed on top in col 4). */
-          .occ-lr-bar             { grid-column: 3 / 5; grid-row: 2; }
-          .occ-lr-bar .occ-lr-line { right: 34px; }
+             --line-right-inset shortens the visible line and scales the
+             plane's left so it stops before the ARR text. */
+          .occ-lr-bar             { grid-column: 3 / 5; grid-row: 2; --line-right-inset: 34px; }
+          .occ-lr-bar .occ-lr-line { right: var(--line-right-inset, 0px); }
           .occ-lr > :nth-child(5) {
             grid-column: 4; grid-row: 2;
             align-self: center; justify-self: end;

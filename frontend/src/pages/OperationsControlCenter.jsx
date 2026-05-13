@@ -910,12 +910,29 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         .occ-lr-time-label { font-size: 0.58rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #999; }
         .occ-lr-time-value { font-size: 0.82rem; font-weight: 700; color: #2C2C2C; font-variant-numeric: tabular-nums; }
         @media (max-width: 720px) {
+          /* Mobile: 2-row layout per flight.
+             Row 1: dot | id stack | time stack
+             Row 2: DEP | progress line | ARR | registration
+             nth-child indexes refer to DOM order in FlightListRow:
+               1=.occ-lr-id  2=.occ-lr-dot  3=DEP btn  4=.occ-lr-bar
+               5=ARR btn     6=.occ-lr-reg  7=.occ-lr-time
+          */
           .occ-lr {
-            grid-template-columns: 14px 1fr 44px minmax(80px, 1fr) 44px;
-            row-gap: 0.3rem;
+            grid-template-columns: 22px 44px 1fr 44px minmax(90px, auto);
+            grid-template-rows: auto auto;
+            column-gap: 0.55rem;
+            row-gap: 0.55rem;
+            padding: 0.65rem 0.9rem;
           }
-          .occ-lr-reg  { grid-column: 1 / 4; }
-          .occ-lr-time { grid-column: 4 / 6; align-items: flex-end; }
+          .occ-lr-dot  { grid-column: 1; grid-row: 1; align-self: center; }
+          .occ-lr-id   { grid-column: 2 / 5; grid-row: 1; }
+          .occ-lr-time { grid-column: 5;     grid-row: 1; align-items: flex-end; }
+          .occ-lr > :nth-child(3) { grid-column: 2; grid-row: 2; }
+          .occ-lr-bar             { grid-column: 3; grid-row: 2; }
+          .occ-lr > :nth-child(5) { grid-column: 4; grid-row: 2; }
+          .occ-lr-reg             { grid-column: 5; grid-row: 2; text-align: left; }
+          .occ-lr-type        { font-size: 0.66rem; }
+          .occ-lr-time-label  { font-size: 0.66rem; }
         }
 
         .occ-fb-list { display: flex; flex-direction: column; }

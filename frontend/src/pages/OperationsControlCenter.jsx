@@ -909,32 +909,33 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         .occ-lr-time-label { font-size: 0.58rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #999; }
         .occ-lr-time-value { font-size: 0.82rem; font-weight: 700; color: #2C2C2C; font-variant-numeric: tabular-nums; }
         @media (max-width: 720px) {
-          /* Mobile: 2-row layout per flight. Status dot sits inline directly
-             in front of the DEP code (no dedicated dot column on row 1).
-             Row 1: ────── id stack ──────  │  time stack (wraps to 2 lines)
-             Row 2:  ●  DEP  ──── line ────  ARR
+          /* Mobile: 2-row layout per flight.
+             Row 1: id stack (left, starts at dot column)  │  time stack (right, narrow)
+             Row 2: ● │ DEP │ ────────── progress line ────────── │ ARR
+             The time-stack label wraps to 2 lines so col 4 can stay narrow,
+             which lets the progress line consume most of the row width.
              nth-child refers to DOM order in FlightListRow:
                1=.occ-lr-id  2=.occ-lr-dot  3=DEP btn  4=.occ-lr-bar
                5=ARR btn     6=.occ-lr-time
           */
           .occ-lr {
-            grid-template-columns: 12px 44px 1fr 44px minmax(80px, auto);
+            grid-template-columns: 12px 44px 1fr minmax(76px, auto);
             grid-template-rows: auto auto;
             column-gap: 0.4rem;
-            row-gap: 0.55rem;
+            row-gap: 0.5rem;
             padding: 0.65rem 0.85rem;
           }
-          .occ-lr-id   { grid-column: 2 / 5; grid-row: 1; }
-          .occ-lr-time { grid-column: 5;     grid-row: 1; align-items: flex-end; }
-          .occ-lr-dot  { grid-column: 1;     grid-row: 2; align-self: center; }
+          .occ-lr-id   { grid-column: 1 / 4; grid-row: 1; }
+          .occ-lr-time { grid-column: 4;     grid-row: 1; align-items: flex-end; }
+          .occ-lr-dot  { grid-column: 1;     grid-row: 2; justify-self: start; align-self: center; }
           .occ-lr > :nth-child(3) { grid-column: 2; grid-row: 2; align-self: center; }
           .occ-lr-bar             { grid-column: 3; grid-row: 2; }
-          .occ-lr > :nth-child(5) { grid-column: 4; grid-row: 2; align-self: center; }
+          .occ-lr > :nth-child(5) { grid-column: 4; grid-row: 2; align-self: center; justify-self: start; }
           .occ-lr-type       { font-size: 0.62rem; }
           .occ-lr-time-label {
             font-size: 0.6rem;
             white-space: normal;
-            max-width: 90px;
+            max-width: 76px;
             text-align: right;
             line-height: 1.15;
           }

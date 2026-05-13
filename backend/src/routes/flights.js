@@ -1567,6 +1567,7 @@ async function processFlights() {
     const boardingCandidatesResult = await pool.query(`
       SELECT
         f.id, f.flight_number, f.airline_id, f.aircraft_id,
+        f.departure_time, f.arrival_time,
         COALESCE(r.departure_airport, ws.departure_airport) AS dep_airport,
         COALESCE(r.arrival_airport,   ws.arrival_airport)   AS arr_airport,
         COALESCE(r.distance_km, ws_r.distance_km, 0)        AS distance_km,

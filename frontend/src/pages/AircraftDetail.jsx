@@ -2059,10 +2059,13 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                         </tr>
                       );
                     } else if (f._type === 'transfer') {
+                      const trDepMs = new Date(f.departure_time).getTime();
+                      const trArrMs = new Date(f.arrival_time).getTime();
+                      const trInFlight = f.status === 'scheduled' && trDepMs <= nowMs && nowMs < trArrMs;
                       const trSt = f.status === 'completed'
                         ? { label: 'Completed', cls: 'ontime', color: '#22c55e' }
-                        : f.status === 'in-progress'
-                        ? { label: 'In Transit', cls: 'boarding', color: '#eab308' }
+                        : trInFlight
+                        ? { label: 'In Flight', cls: 'boarding', color: '#eab308' }
                         : { label: 'Scheduled', cls: 'scheduled', color: '#9ca3af' };
                       const durMs2 = new Date(f.arrival_time) - new Date(f.departure_time);
                       const durH2  = Math.floor(durMs2 / 3600000);

@@ -150,21 +150,23 @@ export async function fillUsedMarket() {
   } catch(e) { console.error('fillUsedMarket error:', e); return 0; }
 }
 
-async function runAeroTradePurchases() {
+async function runAeroTradePurchases({ force = false } = {}) {
   try {
     const result = await pool.query(`
       SELECT id, seller_aircraft_id, seller_airline_id, current_value, registration,
              EXTRACT(EPOCH FROM (NOW() - listed_at)) / 86400 AS days_listed
       FROM used_aircraft_market
       WHERE seller_type = 'player'
-        AND listed_at <= NOW() - INTERVAL '2 days'
+        ${force ? '' : "AND listed_at <= NOW() - INTERVAL '2 days'"}
     `);
 
     let purchased = 0;
     for (const listing of result.rows) {
-      const days = parseFloat(listing.days_listed);
-      const prob = days < 4 ? 0.10 : days < 6 ? 0.20 : days < 8 ? 0.35 : days < 15 ? 0.50 : 0.75;
-      if (Math.random() >= prob) continue;
+      if (!force) {
+        const days = parseFloat(listing.days_listed);
+        const prob = days < 4 ? 0.10 : days < 6 ? 0.20 : days < 8 ? 0.35 : days < 15 ? 0.50 : 0.75;
+        if (Math.random() >= prob) continue;
+      }
 
       const { id: listingId, seller_aircraft_id: sellerAircraftId, seller_airline_id: sellerAirlineId,
               current_value: price, registration } = listing;
@@ -194,7 +196,8 @@ async function runAeroTradePurchases() {
       }
     }
     if (purchased > 0) console.log(`[AeroTrade] Purchased ${purchased} aircraft today`);
-  } catch(e) { console.error('AeroTrade purchase error:', e); }
+    return purchased;
+  } catch(e) { console.error('AeroTrade purchase error:', e); return 0; }
 }
 
 async function runMarketHourly() {
@@ -2396,6 +2399,20 @@ router.post('/dev/fill-market', authMiddleware, adminMiddleware, async (_req, re
     res.json({ message: added > 0 ? `${added} new listings added` : 'Nothing added — every type already has listings' });
   } catch(e) {
     console.error('Fill market error:', e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// POST /api/aircraft/dev/force-aerotrade — admin-only: immediately purchase ALL player listings,
+// bypassing the 2-day waiting period and probability roll
+router.post('/dev/force-aerotrade', authMiddleware, adminMiddleware, async (_req, res) => {
+  try {
+    const purchased = await runAeroTradePurchases({ force: true });
+    res.json({ message: purchased > 0
+      ? `AeroTrade purchased ${purchased} player listing${purchased === 1 ? '' : 's'}`
+      : 'No player listings available to purchase' });
+  } catch(e) {
+    console.error('Force AeroTrade error:', e);
     res.status(500).json({ error: 'Server error' });
   }
 });

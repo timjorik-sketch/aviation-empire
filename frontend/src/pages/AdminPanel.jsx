@@ -54,6 +54,18 @@ function MarketSection() {
           >
             {busy === 'clear' ? 'Clearing…' : 'Clear Market'}
           </button>
+          <button
+            onClick={() => run('/api/aircraft/dev/force-aerotrade', 'aerotrade')}
+            disabled={!!busy}
+            title="Bypasses the 2-day waiting period and immediately buys every player-listed aircraft"
+            style={{
+              background: '#0f766e', color: '#fff', border: 'none', borderRadius: 6,
+              padding: '10px 20px', fontWeight: 600, fontSize: 14, cursor: busy ? 'wait' : 'pointer',
+              opacity: busy ? 0.7 : 1,
+            }}
+          >
+            {busy === 'aerotrade' ? 'Purchasing…' : 'Force AeroTrade Purchase'}
+          </button>
         </div>
         {msg && (
           <div style={{

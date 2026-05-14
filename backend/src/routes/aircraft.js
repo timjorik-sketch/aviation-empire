@@ -395,10 +395,24 @@ router.get('/fleet', authMiddleware, async (req, res) => {
              a.is_listed_for_sale, t.min_runway_takeoff_m, t.min_runway_landing_m,
              a.delivery_at,
              (SELECT current_value FROM used_aircraft_market WHERE seller_aircraft_id = a.id LIMIT 1) as listed_price,
-             fin.completed_flights, fin.total_profit, fin.avg_profit, fin.avg_load_factor
+             fin.completed_flights, fin.total_profit, fin.avg_profit, fin.avg_load_factor,
+             tf.departure_airport AS transfer_dep,
+             tf.arrival_airport   AS transfer_arr,
+             tf.departure_time    AS transfer_dep_time,
+             tf.arrival_time      AS transfer_arr_time
       FROM aircraft a
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
       LEFT JOIN airline_cabin_profiles acp ON a.airline_cabin_profile_id = acp.id
+      LEFT JOIN LATERAL (
+        SELECT departure_airport, arrival_airport, departure_time, arrival_time
+        FROM transfer_flights
+        WHERE aircraft_id = a.id
+          AND status = 'scheduled'
+          AND departure_time <= NOW()
+          AND arrival_time   >  NOW()
+        ORDER BY departure_time DESC
+        LIMIT 1
+      ) tf ON true
       LEFT JOIN (
         SELECT
           aircraft_id,
@@ -448,6 +462,12 @@ router.get('/fleet', authMiddleware, async (req, res) => {
       total_profit: row.total_profit != null ? Number(row.total_profit) : 0,
       avg_profit: row.avg_profit != null ? Number(row.avg_profit) : 0,
       avg_load_factor: row.avg_load_factor != null ? Number(row.avg_load_factor) : 0,
+      active_transfer: row.transfer_dep ? {
+        departure_airport: row.transfer_dep,
+        arrival_airport: row.transfer_arr,
+        departure_time: row.transfer_dep_time,
+        arrival_time: row.transfer_arr_time,
+      } : null,
     }));
 
     res.json({ fleet });
@@ -764,6 +784,33 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
         departure_airport: cf.dep_code, departure_name: cf.name,
         arrival_airport: cf.arr_code, arrival_name: cf.name
       };
+    }
+
+    // Fall back to an in-progress transfer flight if no scheduled flight is currently active.
+    if (!current_flight) {
+      const trCfResult = await pool.query(`
+        SELECT tf.departure_airport AS dep_code, tf.arrival_airport AS arr_code,
+               tf.departure_time, tf.arrival_time,
+               dep.name AS dep_name, arr.name AS arr_name
+        FROM transfer_flights tf
+        LEFT JOIN airports dep ON dep.iata_code = tf.departure_airport
+        LEFT JOIN airports arr ON arr.iata_code = tf.arrival_airport
+        WHERE tf.aircraft_id = $1
+          AND tf.status = 'scheduled'
+          AND tf.departure_time <= NOW()
+          AND tf.arrival_time > NOW()
+        ORDER BY tf.departure_time DESC LIMIT 1
+      `, [aircraftId]);
+      if (trCfResult.rows[0]) {
+        const tcf = trCfResult.rows[0];
+        current_flight = {
+          flight_number: 'Transfer',
+          departure_time: tcf.departure_time, arrival_time: tcf.arrival_time,
+          departure_airport: tcf.dep_code, departure_name: tcf.dep_name,
+          arrival_airport: tcf.arr_code, arrival_name: tcf.arr_name,
+          is_transfer: true,
+        };
+      }
     }
 
     let current_location = null;
@@ -1952,12 +1999,15 @@ router.get('/:id/flights', authMiddleware, async (req, res) => {
       }
     }
 
+    // Transfer flights: show up to 7 days ahead (vs. 72 h for regular flights/maintenance)
+    // so mis-booked transfers further out in the week can still be cancelled.
+    const future7d = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const trResult = await pool.query(`
       SELECT id, departure_airport, arrival_airport, departure_time, arrival_time, status, cost
       FROM transfer_flights
       WHERE aircraft_id = $1 AND airline_id = $2
         AND arrival_time >= $3 AND departure_time <= $4
-    `, [aircraftId, airlineId, past24h, future72h]);
+    `, [aircraftId, airlineId, past24h, future7d]);
 
     for (const r of trResult.rows) {
       flights.push({

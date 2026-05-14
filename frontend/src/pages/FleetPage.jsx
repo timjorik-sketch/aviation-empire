@@ -142,6 +142,8 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
 
       const overview = fleet.map(ac => {
         const af = activeByReg[ac.registration] || null;
+        // Fall back to in-progress transfer flight when no regular flight is active.
+        const tf = !af && ac.active_transfer ? ac.active_transfer : null;
         return {
           id: ac.id,
           registration: ac.registration,
@@ -155,12 +157,12 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
           type_id: ac.type_id,
           cabin_profile_id: ac.airline_cabin_profile_id ?? null,
           cabin_profile_name: ac.airline_cabin_profile_name ?? null,
-          active_fn: af ? af.flight_number : null,
-          active_dep: af ? af.departure_airport : null,
-          active_arr: af ? af.arrival_airport : null,
-          active_flight_status: af ? af.status : null,
-          active_dep_time: af ? af.departure_time : null,
-          active_arr_time: af ? af.arrival_time : null,
+          active_fn: af ? af.flight_number : (tf ? 'Transfer' : null),
+          active_dep: af ? af.departure_airport : (tf ? tf.departure_airport : null),
+          active_arr: af ? af.arrival_airport : (tf ? tf.arrival_airport : null),
+          active_flight_status: af ? af.status : (tf ? 'in-flight' : null),
+          active_dep_time: af ? af.departure_time : (tf ? tf.departure_time : null),
+          active_arr_time: af ? af.arrival_time : (tf ? tf.arrival_time : null),
           new_price_usd: ac.new_price_usd,
           depreciation_age: ac.depreciation_age,
           depreciation_fh: ac.depreciation_fh,

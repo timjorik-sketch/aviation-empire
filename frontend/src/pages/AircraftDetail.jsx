@@ -1988,7 +1988,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       <div className="ad-grid-card" style={{ marginTop: '1rem' }}>
         <div className="ad-sidebar-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>Scheduled Flights</span>
-          <span style={{ fontSize: '0.68rem', fontWeight: 400, opacity: 0.65, letterSpacing: 0 }}>Next 72 h · auto-refresh</span>
+          <span style={{ fontSize: '0.68rem', fontWeight: 400, opacity: 0.65, letterSpacing: 0 }}>Next 72 h (transfers: 7 days) · auto-refresh</span>
         </div>
         {scheduledFlights.length === 0 ? (
           <div className="ad-grid-empty">

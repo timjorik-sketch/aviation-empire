@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import TopBar from '../components/TopBar.jsx';
 import Loader from '../components/Loader.jsx';
 
@@ -64,6 +64,8 @@ function buildScheduleRows(slots) {
 function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAircraft }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState('routes'); // 'routes' | 'distribution'
+  const [selectedAirport, setSelectedAirport] = useState(null);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -73,6 +75,49 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
+
+  // Distribution view: unique departure airports
+  const distAirports = useMemo(() => {
+    const map = new Map();
+    for (const e of entries) {
+      if (!map.has(e.departure_airport)) {
+        map.set(e.departure_airport, { iata: e.departure_airport, name: e.departure_name });
+      }
+    }
+    return [...map.values()].sort((a, b) => a.iata.localeCompare(b.iata));
+  }, [entries]);
+
+  // Default selectedAirport once entries load
+  useEffect(() => {
+    if (distAirports.length === 0) return;
+    if (selectedAirport && distAirports.some(a => a.iata === selectedAirport)) return;
+    const home = airline?.home_base;
+    const next = (home && distAirports.some(a => a.iata === home)) ? home : distAirports[0].iata;
+    setSelectedAirport(next);
+  }, [distAirports, selectedAirport, airline]);
+
+  // Distribution rows: one row per unique departure time at selected airport.
+  // Each row has 7 day columns; each cell holds a list of departures (arrival IATA + flight + aircraft).
+  const distRows = useMemo(() => {
+    if (!selectedAirport) return [];
+    const byTime = new Map(); // "HH:MM" -> { time, days: { 0..6: [{...}] } }
+    for (const e of entries) {
+      if (e.departure_airport !== selectedAirport) continue;
+      const t = fmt.time(e.departure_time);
+      if (!byTime.has(t)) byTime.set(t, { time: t, days: {} });
+      const row = byTime.get(t);
+      if (!row.days[e.day_of_week]) row.days[e.day_of_week] = [];
+      row.days[e.day_of_week].push({
+        id: e.id,
+        arrival_airport: e.arrival_airport,
+        arrival_name: e.arrival_name,
+        flight_number: e.flight_number,
+        aircraft_id: e.aircraft_id,
+        registration: e.registration,
+      });
+    }
+    return [...byTime.values()].sort((a, b) => a.time.localeCompare(b.time));
+  }, [entries, selectedAirport]);
 
   // Group by departure_airport → flight_number
   const grouped = entries.reduce((acc, e) => {
@@ -184,6 +229,132 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
 
         .fs-empty { color: #AAA; font-style: italic; font-size: 0.85rem; padding: 2rem 1.5rem; }
 
+        /* View mode pill (header) */
+        .fs-view-pill {
+          display: inline-flex;
+          background: rgba(0,0,0,0.18);
+          border: 1px solid rgba(255,255,255,0.25);
+          border-radius: 6px;
+          padding: 2px;
+          gap: 2px;
+          flex-shrink: 0;
+        }
+        .card-header-bar .fs-view-pill-btn {
+          padding: 0.3rem 0.9rem;
+          background: transparent;
+          border: none;
+          color: rgba(255,255,255,0.75);
+          border-radius: 4px;
+          font-size: 0.7rem;
+          font-weight: 600;
+          cursor: pointer;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          transition: background 0.15s, color 0.15s;
+          white-space: nowrap;
+        }
+        .card-header-bar .fs-view-pill-btn:hover:not(.fs-view-pill-btn--active) {
+          background: rgba(255,255,255,0.1);
+          color: white;
+        }
+        .card-header-bar .fs-view-pill-btn--active {
+          background: white;
+          color: #2C2C2C;
+        }
+
+        /* Distribution view */
+        .fs-dist-controls {
+          display: flex; align-items: center; justify-content: space-between;
+          gap: 16px;
+          padding: 14px 20px;
+          background: #FAFAFA;
+          border-bottom: 1px solid #E8E8E8;
+          flex-wrap: wrap;
+        }
+        .fs-dist-label {
+          display: flex; align-items: center; gap: 10px;
+          font-size: 0.72rem; color: #666; font-weight: 600;
+          text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        .fs-dist-select {
+          font-family: monospace; font-size: 0.85rem; font-weight: 600;
+          padding: 6px 10px;
+          background: white;
+          border: 1px solid #DDD;
+          border-radius: 6px;
+          color: #2C2C2C;
+          cursor: pointer;
+          min-width: 220px;
+        }
+        .fs-dist-select:focus { outline: none; border-color: #2C2C2C; }
+        .fs-dist-summary {
+          font-size: 0.72rem; color: #999;
+          font-variant-numeric: tabular-nums;
+        }
+
+        .fs-dist-grid {
+          display: flex; flex-direction: column;
+        }
+        .fs-dist-head,
+        .fs-dist-row {
+          display: grid;
+          grid-template-columns: 64px repeat(7, 1fr);
+          gap: 1px;
+          background: #EBEBEB;
+        }
+        .fs-dist-head {
+          position: sticky; top: 0; z-index: 1;
+        }
+        .fs-dist-head-time,
+        .fs-dist-head-day {
+          padding: 8px 6px;
+          background: #F0F0F0;
+          font-size: 0.68rem; font-weight: 700;
+          color: #888;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          text-align: center;
+        }
+        .fs-dist-head-time { text-align: left; padding-left: 12px; }
+
+        .fs-dist-time {
+          padding: 8px 12px;
+          background: #F7F7F7;
+          font-family: monospace; font-size: 0.82rem; font-weight: 700;
+          color: #2C2C2C;
+          letter-spacing: 0.02em;
+          display: flex; align-items: flex-start;
+          font-variant-numeric: tabular-nums;
+        }
+        .fs-dist-cell {
+          background: white;
+          padding: 6px;
+          display: flex; flex-wrap: wrap; gap: 3px;
+          min-height: 32px;
+          align-content: flex-start;
+        }
+        .fs-dist-pill {
+          font-family: monospace; font-size: 0.75rem; font-weight: 700;
+          letter-spacing: 0.02em;
+          background: #F2F2F2;
+          border: 1px solid #E0E0E0;
+          color: #2C2C2C;
+          border-radius: 4px;
+          padding: 2px 6px;
+          cursor: pointer;
+          transition: background 0.15s, border-color 0.15s;
+        }
+        .fs-dist-pill:hover { background: #2C2C2C; color: white; border-color: #2C2C2C; }
+
+        @media (max-width: 720px) {
+          .fs-dist-head,
+          .fs-dist-row { grid-template-columns: 54px repeat(7, 1fr); }
+          .fs-dist-time { padding: 6px 8px; font-size: 0.75rem; }
+          .fs-dist-cell { padding: 4px; min-height: 28px; }
+          .fs-dist-pill { font-size: 0.68rem; padding: 1px 4px; }
+          .fs-dist-head-time, .fs-dist-head-day { font-size: 0.62rem; padding: 6px 4px; }
+        }
+
         @media (max-width: 480px) {
           .fs-row {
             grid-template-columns: 60px 38px 1fr;
@@ -214,16 +385,96 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
 
         <div className="info-card" style={{ padding: 0, overflow: 'hidden' }}>
           <div className="card-header-bar" style={{ margin: 0 }}>
-            <span className="card-header-bar-title">{airline.name} — Flightplan</span>
-            <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.5)' }}>
-              {totalRoutes} routes · {airports.length} airports
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+              <span className="card-header-bar-title">{airline.name} — Flightplan</span>
+              <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.5)' }}>
+                {totalRoutes} routes · {airports.length} airports
+              </span>
+            </div>
+            <div className="fs-view-pill" role="tablist" aria-label="Flightplan view mode">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={viewMode === 'routes'}
+                className={`fs-view-pill-btn${viewMode === 'routes' ? ' fs-view-pill-btn--active' : ''}`}
+                onClick={() => setViewMode('routes')}
+              >
+                Routes
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={viewMode === 'distribution'}
+                className={`fs-view-pill-btn${viewMode === 'distribution' ? ' fs-view-pill-btn--active' : ''}`}
+                onClick={() => setViewMode('distribution')}
+              >
+                Time Distribution
+              </button>
+            </div>
           </div>
 
           {loading ? (
             <Loader />
           ) : entries.length === 0 ? (
             <div className="fs-empty">No flights scheduled. Assign routes in fleet management.</div>
+          ) : viewMode === 'distribution' ? (
+            <div className="fs-dist">
+              <div className="fs-dist-controls">
+                <label className="fs-dist-label">
+                  <span>Departure Airport</span>
+                  <select
+                    className="fs-dist-select"
+                    value={selectedAirport || ''}
+                    onChange={e => setSelectedAirport(e.target.value)}
+                  >
+                    {distAirports.map(ap => (
+                      <option key={ap.iata} value={ap.iata}>
+                        {ap.iata} — {ap.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <span className="fs-dist-summary">
+                  {distRows.length} departure time{distRows.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+
+              {distRows.length === 0 ? (
+                <div className="fs-empty">No departures from {selectedAirport}.</div>
+              ) : (
+                <div className="fs-dist-grid">
+                  <div className="fs-dist-head">
+                    <span className="fs-dist-head-time">Time</span>
+                    {DAY_LABELS.map(lbl => (
+                      <span key={lbl} className="fs-dist-head-day">{lbl}</span>
+                    ))}
+                  </div>
+                  {distRows.map(row => (
+                    <div key={row.time} className="fs-dist-row">
+                      <span className="fs-dist-time">{row.time}</span>
+                      {DAY_LABELS.map((_, di) => {
+                        const cell = row.days[di] || [];
+                        return (
+                          <div key={di} className="fs-dist-cell">
+                            {cell.map(f => (
+                              <button
+                                key={f.id}
+                                type="button"
+                                className="fs-dist-pill"
+                                title={`${f.flight_number} → ${f.arrival_airport} ${f.arrival_name} · ${fmt.reg(f.registration)}`}
+                                onClick={() => onNavigateToAirport?.(f.arrival_airport)}
+                              >
+                                {f.arrival_airport}
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           ) : (
             airports.map(ap => (
               <div key={ap.iata}>

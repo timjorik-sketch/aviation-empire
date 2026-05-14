@@ -15,11 +15,16 @@ const sslConfig = process.env.NODE_ENV === 'production'
   ? { rejectUnauthorized: process.env.PG_SSL_VERIFY === '1' }
   : false;
 
+// Supabase session-mode pooler caps clients at pool_size=15. Staying well
+// under that avoids EMAXCONNSESSION crashes during deploy handover (old +
+// new container briefly overlap) and leaves headroom for one-off admin
+// queries. Short idle timeout returns sockets to the pooler quickly so the
+// new container can start without waiting them out.
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: sslConfig,
-  max: 20,
-  idleTimeoutMillis: 30000,
+  max: 10,
+  idleTimeoutMillis: 5000,
   connectionTimeoutMillis: 10000,
 });
 

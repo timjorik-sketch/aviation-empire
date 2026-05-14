@@ -91,7 +91,7 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
   useEffect(() => {
     if (distAirports.length === 0) return;
     if (selectedAirport && distAirports.some(a => a.iata === selectedAirport)) return;
-    const home = airline?.home_base;
+    const home = airline?.home_airport_code;
     const next = (home && distAirports.some(a => a.iata === home)) ? home : distAirports[0].iata;
     setSelectedAirport(next);
   }, [distAirports, selectedAirport, airline]);

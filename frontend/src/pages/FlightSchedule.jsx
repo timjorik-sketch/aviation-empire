@@ -302,8 +302,13 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
           gap: 1px;
           background: #EBEBEB;
         }
+        .fs-dist-row {
+          border-bottom: 1px solid #EBEBEB;
+        }
+        .fs-dist-row:last-child { border-bottom: none; }
         .fs-dist-head {
           position: sticky; top: 0; z-index: 1;
+          border-bottom: 1px solid #DADADA;
         }
         .fs-dist-head-time,
         .fs-dist-head-day {

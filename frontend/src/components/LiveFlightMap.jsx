@@ -74,19 +74,43 @@ const TILE_LAYERS = {
   },
 };
 
-export default function LiveFlightMap({ mapStyle = 'dark' }) {
+// Must mirror OperationsControlCenter.HAUL_BUCKETS exactly so the map and
+// the Active Flights list count/filter the same way.
+function haulOf(km) {
+  const d = km || 0;
+  if (d < 1500) return 'short';
+  if (d < 4000) return 'medium';
+  return 'long';
+}
+
+export default function LiveFlightMap({
+  mapStyle = 'dark',
+  filterAircraftType = null,
+  filterHaul = null,
+  filterContinent = null,
+}) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const layerGroupRef = useRef(null);
   const overlayRef = useRef(null);
   const tileLayerRef = useRef(null);
+  // Cache of last-fetched flights so filter changes can re-draw immediately
+  // without waiting for the next 30s poll.
+  const flightsRef = useRef([]);
 
   // Draw markers for given flight list
-  const drawFlights = useCallback((flights) => {
+  const drawFlights = useCallback((rawFlights) => {
     const map = mapRef.current;
     const group = layerGroupRef.current;
     const overlay = overlayRef.current;
     if (!map || !group) return;
+
+    const flights = rawFlights.filter(f => {
+      if (filterAircraftType && f.aircraft_type !== filterAircraftType) return false;
+      if (filterHaul && haulOf(f.distance_km) !== filterHaul) return false;
+      if (filterContinent && f.arrival_continent !== filterContinent) return false;
+      return true;
+    });
 
     group.clearLayers();
 
@@ -276,9 +300,15 @@ export default function LiveFlightMap({ mapStyle = 'dark' }) {
       );
       group.addLayer(marker);
     }
-  }, []);
+  }, [filterAircraftType, filterHaul, filterContinent]);
 
-  // Fetch and update
+  // Keep a ref to the current drawFlights so the polling interval (set up once)
+  // always uses the latest filter values without needing to be re-created.
+  const drawRef = useRef(drawFlights);
+  useEffect(() => { drawRef.current = drawFlights; }, [drawFlights]);
+
+  // Fetch and update — stable identity so the polling interval keeps working
+  // across filter changes.
   const fetchAndDraw = useCallback(async () => {
     const token = localStorage.getItem('token');
     try {
@@ -286,10 +316,16 @@ export default function LiveFlightMap({ mapStyle = 'dark' }) {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      drawFlights(data.flights || []);
+      flightsRef.current = data.flights || [];
+      drawRef.current(flightsRef.current);
     } catch (err) {
       console.error('LiveFlightMap fetch error:', err);
     }
+  }, []);
+
+  // Re-draw immediately when filters change, using the most recent fetch.
+  useEffect(() => {
+    if (mapRef.current) drawFlights(flightsRef.current);
   }, [drawFlights]);
 
   useEffect(() => {

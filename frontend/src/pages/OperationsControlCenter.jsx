@@ -468,7 +468,12 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
               {mapStyle === 'dark' ? 'Satellite' : 'Dark'}
             </button>
           </div>
-          <LiveFlightMap mapStyle={mapStyle} />
+          <LiveFlightMap
+            mapStyle={mapStyle}
+            filterAircraftType={filterAircraftType}
+            filterHaul={filterHaul}
+            filterContinent={filterContinent}
+          />
         </div>
 
         {/* ── Tab bar ── */}

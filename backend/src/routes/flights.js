@@ -334,6 +334,8 @@ router.get('/active', authMiddleware, async (req, res) => {
              arr.latitude as dest_lat, arr.longitude as dest_lon,
              dep.runway_heading as origin_heading,
              arr.runway_heading as dest_heading,
+             arr.continent as arrival_continent,
+             COALESCE(r.distance_km, ws_r.distance_km) as distance_km,
              ac.registration,
              at.full_name as aircraft_type,
              f.delay_reason, f.diversion_airport_code,
@@ -341,6 +343,7 @@ router.get('/active', authMiddleware, async (req, res) => {
       FROM flights f
       LEFT JOIN routes r          ON f.route_id           = r.id
       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
+      LEFT JOIN routes ws_r ON ws.route_id = ws_r.id
       LEFT JOIN airports dep ON COALESCE(r.departure_airport, ws.departure_airport) = dep.iata_code
       LEFT JOIN airports arr ON COALESCE(r.arrival_airport,   ws.arrival_airport)   = arr.iata_code
       LEFT JOIN aircraft ac  ON f.aircraft_id = ac.id
@@ -380,6 +383,8 @@ router.get('/active', authMiddleware, async (req, res) => {
         dest_lon: row.dest_lon,
         origin_heading: row.origin_heading,
         dest_heading: row.dest_heading,
+        arrival_continent: row.arrival_continent,
+        distance_km: row.distance_km,
         progress,
         remaining_ms,
         delay_reason: row.delay_reason,

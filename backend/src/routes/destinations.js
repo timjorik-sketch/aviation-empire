@@ -50,6 +50,10 @@ router.get('/', authMiddleware, async (req, res) => {
               WHERE ac.airline_id = d.airline_id
               AND (ws.departure_airport = d.airport_code OR ws.arrival_airport = d.airport_code)
              ) AS weekly_flights,
+             (SELECT COUNT(*) FROM routes r
+              WHERE r.airline_id = d.airline_id
+              AND (r.departure_airport = d.airport_code OR r.arrival_airport = d.airport_code)
+             ) AS routes_count,
              COALESCE((SELECT ae.expansion_level FROM airport_expansions ae
               WHERE ae.airline_id = d.airline_id AND ae.airport_code = d.airport_code
              ), 0) AS expansion_level
@@ -68,6 +72,7 @@ router.get('/', authMiddleware, async (req, res) => {
 
     const destinations = result.rows.map(r => {
       const wf = parseInt(r.weekly_flights) || 0;
+      const rc = parseInt(r.routes_count) || 0;
       const dtype = r.destination_type;
       const expansionLevel = parseInt(r.expansion_level) || 0;
       const hasExpansion = expansionLevel > 0;
@@ -83,6 +88,7 @@ router.get('/', authMiddleware, async (req, res) => {
         effective_type: effectiveType(displayType),
         opened_at: r.opened_at, airport_name: r.name, country: r.country,
         continent: r.continent, category: r.category, weekly_flights: wf,
+        routes_count: rc,
         ground_staff: groundStaff, has_expansion: hasExpansion, expansion_level: expansionLevel,
         is_primary_hub: !!isPrimaryHub
       };

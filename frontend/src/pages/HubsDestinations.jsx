@@ -65,8 +65,6 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
   const [addSearch, setAddSearch] = useState('');
   const [opening, setOpening] = useState(null);
 
-  // ── Edit modal ─────────────────────────────────────────────────────────────
-  const [editDest, setEditDest] = useState(null);
   const [deleting, setDeleting] = useState(null);
 
   // ── Expansions ─────────────────────────────────────────────────────────────
@@ -347,6 +345,8 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
         av = a.country; bv = b.country;
       } else if (sortCol === 'weekly_flights') {
         av = a.weekly_flights; bv = b.weekly_flights;
+      } else if (sortCol === 'routes_count') {
+        av = a.routes_count ?? 0; bv = b.routes_count ?? 0;
       } else {
         av = a[sortCol] ?? ''; bv = b[sortCol] ?? '';
       }
@@ -645,7 +645,7 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
         }
         .ap-card-iata-link:hover { text-decoration-color: #2C2C2C; }
 
-        /* ── Edit modal ── */
+        /* ── Modal ── */
         .hd-modal-backdrop {
           position: fixed; inset: 0; background: rgba(0,0,0,0.4);
           display: flex; align-items: center; justify-content: center; z-index: 1000;
@@ -886,7 +886,6 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
                 hubCount={hubCount}
                 baseCount={baseCount}
                 onAddDestination={() => onNavigate?.('airport-overview')}
-                onEditDestination={setEditDest}
                 onDeleteDestination={handleDeleteDestination}
                 deleting={deleting}
                 onNavigateToAirport={onNavigateToAirport}
@@ -912,10 +911,6 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
           )}
         </div>
       </div>
-
-      {editDest && (
-        <EditDestinationModal destination={editDest} onClose={() => setEditDest(null)} onUpgrade={null} />
-      )}
 
       {/* ── New Secondary Hub Modal ─────────────────────────────── */}
       {showExpModal && (
@@ -1216,10 +1211,33 @@ function PrimaryHubCard({ primaryHubCode, destinations, airlineLevel, onOpenSetM
 
 // ── Destinations List ──────────────────────────────────────────────────────────
 
+function RoutesBadge({ count }) {
+  const has = count > 0;
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        minWidth: 28,
+        padding: '2px 8px',
+        borderRadius: 12,
+        fontSize: 12,
+        fontWeight: 600,
+        fontVariantNumeric: 'tabular-nums',
+        background: has ? '#dcfce7' : '#f3f4f6',
+        color: has ? '#15803d' : '#9ca3af',
+        border: has ? '1px solid #86efac' : '1px solid #e5e7eb',
+      }}
+      title={has ? `${count} route${count !== 1 ? 's' : ''} planned` : 'No routes planned'}
+    >
+      {has ? count : '—'}
+    </span>
+  );
+}
+
 function DestinationsList({
   destinations, loading, error, search, onSearchChange,
   sortArrow, onSort, totalCount, hubCount, baseCount,
-  onAddDestination, onEditDestination, onDeleteDestination, deleting,
+  onAddDestination, onDeleteDestination, deleting,
   onNavigateToAirport
 }) {
   return (
@@ -1267,6 +1285,9 @@ function DestinationsList({
                 <th onClick={() => onSort('airport')}>Airport {sortArrow('airport')}</th>
                 <th onClick={() => onSort('continent')}>Continent {sortArrow('continent')}</th>
                 <th onClick={() => onSort('country')}>Country {sortArrow('country')}</th>
+                <th onClick={() => onSort('routes_count')} style={{ textAlign: 'right' }}>
+                  Routes {sortArrow('routes_count')}
+                </th>
                 <th onClick={() => onSort('weekly_flights')} style={{ textAlign: 'right' }}>
                   Weekly Flights {sortArrow('weekly_flights')}
                 </th>
@@ -1298,6 +1319,9 @@ function DestinationsList({
                     </td>
                     <td>{d.continent || '—'}</td>
                     <td>{d.country}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      <RoutesBadge count={d.routes_count ?? 0} />
+                    </td>
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                       {d.weekly_flights}
                     </td>
@@ -1306,8 +1330,7 @@ function DestinationsList({
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                        <button className="hd-btn-sm" onClick={() => onEditDestination(d)}>Edit</button>
-                        {d.destination_type !== 'home_base' && !d.is_primary_hub && (
+                        {d.destination_type !== 'home_base' && !d.is_primary_hub ? (
                           <button
                             className="hd-btn-sm-danger"
                             disabled={deleting === d.airport_code}
@@ -1315,6 +1338,8 @@ function DestinationsList({
                           >
                             {deleting === d.airport_code ? '...' : 'Delete'}
                           </button>
+                        ) : (
+                          <span style={{ color: '#ccc' }}>—</span>
                         )}
                       </div>
                     </td>
@@ -1616,62 +1641,3 @@ function ManageHubModal({ hub, action, loading, error, onSetAction, onBuyNextLev
   );
 }
 
-// ── Edit Destination Modal ─────────────────────────────────────────────────────
-
-function EditDestinationModal({ destination: d, onClose }) {
-  const meta = TYPE_META[d.display_type || d.effective_type || d.destination_type] || TYPE_META.destination;
-  const openedDate = d.opened_at
-    ? new Date(d.opened_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
-    : '—';
-  const catLabel = CATEGORY_LABELS[d.category] || `Category ${d.category}`;
-
-  return (
-    <div className="hd-modal-backdrop" onClick={onClose}>
-      <div className="hd-modal" onClick={e => e.stopPropagation()}>
-        <h3>{d.airport_code} — {d.airport_name}</h3>
-        <div className="hd-modal-row">
-          <span className="hd-modal-label">Type</span>
-          <span className="hd-modal-value">
-            <span className="hd-type-badge" style={meta.dark ? undefined : { background: '#999' }}>{meta.label}</span>
-          </span>
-        </div>
-        <div className="hd-modal-row">
-          <span className="hd-modal-label">Country</span>
-          <span className="hd-modal-value">{d.country}</span>
-        </div>
-        <div className="hd-modal-row">
-          <span className="hd-modal-label">Continent</span>
-          <span className="hd-modal-value">{d.continent || '—'}</span>
-        </div>
-        <div className="hd-modal-row">
-          <span className="hd-modal-label">Category</span>
-          <span className="hd-modal-value">
-            <span className="hd-cat-badge">{d.category} – {catLabel}</span>
-          </span>
-        </div>
-        <div className="hd-modal-row">
-          <span className="hd-modal-label">Weekly Flights</span>
-          <span className="hd-modal-value">{d.weekly_flights}</span>
-        </div>
-        <div className="hd-modal-row">
-          <span className="hd-modal-label">Opened</span>
-          <span className="hd-modal-value">{openedDate}</span>
-        </div>
-        {d.destination_type === 'home_base' && (
-          <p style={{ fontSize: 13, color: '#888', marginTop: 12, marginBottom: 0 }}>
-            Homebase has unlimited departures by default.
-          </p>
-        )}
-        {d.is_primary_hub && d.destination_type !== 'home_base' && (
-          <p style={{ fontSize: 13, color: '#888', marginTop: 12, marginBottom: 0 }}>
-            Primary Hub has unlimited free departures. Dissolve it from the Primary Hub card to revert to a normal destination.
-          </p>
-        )}
-        <div className="hd-modal-actions">
-          <div />
-          <button className="hd-btn-primary" onClick={onClose}>Close</button>
-        </div>
-      </div>
-    </div>
-  );
-}

@@ -1281,7 +1281,7 @@ function DestinationsList({
             <thead>
               <tr>
                 <th onClick={() => onSort('destination_type')}>Status {sortArrow('destination_type')}</th>
-                <th onClick={() => onSort('category')}>Category {sortArrow('category')}</th>
+                <th onClick={() => onSort('category')}>Cat. {sortArrow('category')}</th>
                 <th onClick={() => onSort('airport')}>Airport {sortArrow('airport')}</th>
                 <th onClick={() => onSort('continent')}>Continent {sortArrow('continent')}</th>
                 <th onClick={() => onSort('country')}>Country {sortArrow('country')}</th>
@@ -1289,7 +1289,7 @@ function DestinationsList({
                   Routes {sortArrow('routes_count')}
                 </th>
                 <th onClick={() => onSort('weekly_flights')} style={{ textAlign: 'right' }}>
-                  Weekly Flights {sortArrow('weekly_flights')}
+                  Flights 7D {sortArrow('weekly_flights')}
                 </th>
                 <th style={{ textAlign: 'right' }}>Personnel</th>
                 <th style={{ textAlign: 'right' }}>Actions</th>

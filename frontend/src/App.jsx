@@ -533,6 +533,7 @@ function App() {
     return wrap(
       <RoutePlanner
         airline={activeAirline}
+        user={user}
         onBack={() => setCurrentPage(previousPage)}
         backLabel={PAGE_LABELS[previousPage] || 'Dashboard'}
         onNavigateToAirport={(code) => navigateToAirport(code, 'routes')}

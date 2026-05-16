@@ -60,7 +60,8 @@ function RatingDot({ rating }) {
   );
 }
 
-function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAirport, onNavigateToAircraft }) {
+function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNavigateToAirport, onNavigateToAircraft }) {
+  const isAdmin = !!user?.is_admin;
   const [routes, setRoutes] = useState([]);
   const [airports, setAirports] = useState([]);
   const [airlineCode, setAirlineCode] = useState('');
@@ -274,6 +275,35 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
     const distKm = haversineKm(depCoords.lat, depCoords.lng, arrCoords.lat, arrCoords.lng);
     return { distKm: Math.round(distKm), flightTime: formatFlightTime(distKm) };
   })() : null;
+
+  // Admin-only: fetch fair-market price for the selected airport pair and derive
+  // a player-set suggestion = largest multiple of 10 that stays ≤ 119% of market.
+  const [adminMarket, setAdminMarket] = useState(null); // { eco, biz, first }
+  useEffect(() => {
+    if (!isAdmin || !departureAirport || !arrivalAirport || departureAirport === arrivalAirport) {
+      setAdminMarket(null);
+      return;
+    }
+    const token = localStorage.getItem('token');
+    const ctrl = new AbortController();
+    fetch(`${API_URL}/api/admin/market-price?dep=${departureAirport}&arr=${arrivalAirport}`, {
+      headers: { Authorization: `Bearer ${token}` }, signal: ctrl.signal,
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setAdminMarket(d?.market || null))
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [isAdmin, departureAirport, arrivalAirport]);
+
+  const suggestPrice = (market) => {
+    if (!market || market <= 0) return null;
+    return Math.floor((market * 1.19) / 10) * 10;
+  };
+  const suggestion = adminMarket ? {
+    eco:   suggestPrice(adminMarket.eco),
+    biz:   suggestPrice(adminMarket.biz),
+    first: suggestPrice(adminMarket.first),
+  } : null;
 
   const fetchData = async () => {
     const token = localStorage.getItem('token');
@@ -741,19 +771,43 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
                   <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: '600', fontSize: '0.9rem', color: '#2C2C2C' }}>Economy ($)</label>
                   <input type="number" min="1" step="1" value={economyPrice} onChange={e => setEconomyPrice(e.target.value)}
                     required placeholder="e.g. 199"
+                    title={isAdmin && suggestion?.eco ? `Admin suggestion: $${suggestion.eco} (≤119% of market $${adminMarket.eco}, rounded to 10)` : undefined}
                     style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E0E0E0', fontSize: '0.9rem', boxSizing: 'border-box' }} />
+                  {isAdmin && suggestion?.eco && (
+                    <button type="button" onClick={() => setEconomyPrice(String(suggestion.eco))}
+                      title={`Market: $${adminMarket.eco} · 119% cap, rounded to 10`}
+                      style={{ marginTop: 4, padding: '2px 6px', fontSize: '0.72rem', background: '#eef2ff', color: '#4338ca', border: '1px solid #c7d2fe', borderRadius: 4, cursor: 'pointer' }}>
+                      Suggest ${suggestion.eco}
+                    </button>
+                  )}
                 </div>
                 <div>
                   <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: '600', fontSize: '0.9rem', color: '#2C2C2C' }}>Business ($) <span style={{ fontWeight: 400, color: '#999' }}>(opt.)</span></label>
                   <input type="number" min="1" step="1" value={businessPrice} onChange={e => setBusinessPrice(e.target.value)}
                     placeholder="e.g. 599"
+                    title={isAdmin && suggestion?.biz ? `Admin suggestion: $${suggestion.biz} (≤119% of market $${adminMarket.biz}, rounded to 10)` : undefined}
                     style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E0E0E0', fontSize: '0.9rem', boxSizing: 'border-box' }} />
+                  {isAdmin && suggestion?.biz && (
+                    <button type="button" onClick={() => setBusinessPrice(String(suggestion.biz))}
+                      title={`Market: $${adminMarket.biz} · 119% cap, rounded to 10`}
+                      style={{ marginTop: 4, padding: '2px 6px', fontSize: '0.72rem', background: '#eef2ff', color: '#4338ca', border: '1px solid #c7d2fe', borderRadius: 4, cursor: 'pointer' }}>
+                      Suggest ${suggestion.biz}
+                    </button>
+                  )}
                 </div>
                 <div>
                   <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: '600', fontSize: '0.9rem', color: '#2C2C2C' }}>First ($) <span style={{ fontWeight: 400, color: '#999' }}>(opt.)</span></label>
                   <input type="number" min="1" step="1" value={firstPrice} onChange={e => setFirstPrice(e.target.value)}
                     placeholder="e.g. 1299"
+                    title={isAdmin && suggestion?.first ? `Admin suggestion: $${suggestion.first} (≤119% of market $${adminMarket.first}, rounded to 10)` : undefined}
                     style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E0E0E0', fontSize: '0.9rem', boxSizing: 'border-box' }} />
+                  {isAdmin && suggestion?.first && (
+                    <button type="button" onClick={() => setFirstPrice(String(suggestion.first))}
+                      title={`Market: $${adminMarket.first} · 119% cap, rounded to 10`}
+                      style={{ marginTop: 4, padding: '2px 6px', fontSize: '0.72rem', background: '#eef2ff', color: '#4338ca', border: '1px solid #c7d2fe', borderRadius: 4, cursor: 'pointer' }}>
+                      Suggest ${suggestion.first}
+                    </button>
+                  )}
                 </div>
               </div>
 

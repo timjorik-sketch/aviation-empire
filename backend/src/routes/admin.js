@@ -4,6 +4,14 @@ import authMiddleware from '../middleware/auth.js';
 import adminMiddleware from '../middleware/admin.js';
 import { logEvent, reqInfo } from '../utils/auditLog.js';
 import { XP_THRESHOLDS } from './flights.js';
+import { calcMarketPrices } from '../utils/marketPricing.js';
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371, toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
 const router = express.Router();
 
@@ -393,6 +401,36 @@ router.delete('/invite-codes/:id', async (req, res) => {
     res.json({ message: 'Revoked' });
   } catch (e) {
     console.error('Revoke code error:', e);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Admin: market price reference for an airport pair. Returns the fair-market
+// eco/biz/first prices plus the distance. Players never see this — game design
+// keeps the model hidden — but admins use it to set test-routes intentionally
+// near the 119% ceiling.
+router.get('/market-price', async (req, res) => {
+  try {
+    const dep = String(req.query.dep || '').toUpperCase();
+    const arr = String(req.query.arr || '').toUpperCase();
+    if (!/^[A-Z]{3}$/.test(dep) || !/^[A-Z]{3}$/.test(arr) || dep === arr) {
+      return res.status(400).json({ error: 'dep and arr must be distinct 3-letter IATA codes' });
+    }
+    const result = await pool.query(
+      'SELECT iata_code, latitude, longitude, category FROM airports WHERE iata_code = ANY($1)',
+      [[dep, arr]]
+    );
+    const byCode = Object.fromEntries(result.rows.map(r => [r.iata_code, r]));
+    const d = byCode[dep], a = byCode[arr];
+    if (!d || !a) return res.status(404).json({ error: 'Airport not found' });
+    if (d.latitude == null || a.latitude == null) {
+      return res.status(400).json({ error: 'Airport coordinates missing' });
+    }
+    const distKm = Math.round(haversineKm(d.latitude, d.longitude, a.latitude, a.longitude));
+    const prices = calcMarketPrices(distKm, d.category, a.category);
+    res.json({ dep, arr, distance_km: distKm, market: prices });
+  } catch (e) {
+    console.error('Market price error:', e);
     res.status(500).json({ error: 'Server error' });
   }
 });

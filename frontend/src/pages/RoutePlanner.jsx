@@ -201,6 +201,34 @@ function RoutePlanner({ airline, onBack, backLabel = 'Dashboard', onNavigateToAi
 
   useEffect(() => { fetchData(); }, []);
 
+  // Next available flight-number suffix = max(existing 4-digit suffixes) + 1
+  const nextSuffix = (() => {
+    let max = 0;
+    for (const r of routes) {
+      const s = String(r.flight_number || '').slice(-4);
+      if (/^\d{4}$/.test(s)) {
+        const n = parseInt(s, 10);
+        if (n > max) max = n;
+      }
+    }
+    return String(Math.min(max + 1, 9999)).padStart(4, '0');
+  })();
+
+  // Auto-fill outbound suggestion when routes are loaded and the field is empty
+  useEffect(() => {
+    if (!flightNumberSuffix && routes.length) setFlightNumberSuffix(nextSuffix);
+  }, [routes]);
+
+  // Auto-fill return suggestion when toggled on and the field is empty
+  useEffect(() => {
+    if (createReturn && !returnFlightNumberSuffix) {
+      const base = /^\d{4}$/.test(flightNumberSuffix)
+        ? parseInt(flightNumberSuffix, 10)
+        : parseInt(nextSuffix, 10);
+      setReturnFlightNumberSuffix(String(Math.min(base + 1, 9999)).padStart(4, '0'));
+    }
+  }, [createReturn]);
+
   // Tick every second — only when analyses box is expanded AND has pending entries
   const [now, setNow] = useState(Date.now());
   useEffect(() => {

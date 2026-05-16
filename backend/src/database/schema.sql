@@ -2792,6 +2792,11 @@ INSERT OR IGNORE INTO airports (iata_code, name, country, registration_prefix, c
 INSERT OR IGNORE INTO airports (iata_code, name, country, registration_prefix, category, continent, runway_length_m, latitude, longitude) VALUES
 ('GAN', 'Gan International Airport', 'Maldives', '8Q', 3, 'Asia', 3000, -0.6933, 73.1556);
 
+-- Europe airports (additions)
+INSERT OR IGNORE INTO airports (iata_code, name, country, registration_prefix, category, continent, runway_length_m, latitude, longitude) VALUES
+('VCE', 'Venice Marco Polo International Airport',  'Italy',   'I',  4, 'Europe', 3300, 45.5053, 12.3519),
+('SZG', 'Salzburg Wolfgang Amadeus Mozart Airport', 'Austria', 'OE', 4, 'Europe', 2990, 47.7933, 13.0044);
+
 -- Seed aircraft types
 -- (id, manufacturer, model, full_name, max_passengers, range_km, cruise_speed_kmh,
 --  min_runway_takeoff_m, min_runway_landing_m, fuel_consumption_empty_per_km,

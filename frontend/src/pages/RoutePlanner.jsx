@@ -194,6 +194,9 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
   const [editEconomy, setEditEconomy] = useState('');
   const [editBusiness, setEditBusiness] = useState('');
   const [editFirst, setEditFirst] = useState('');
+  const [editingFnId, setEditingFnId] = useState(null);
+  const [editFnSuffix, setEditFnSuffix] = useState('');
+  const [savingFn, setSavingFn] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Fetched coordinates for the map preview
@@ -443,6 +446,37 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
       setError(err.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleStartEditFn = (route) => {
+    setEditingFnId(route.id);
+    const suffix = String(route.flight_number || '').slice(-4);
+    setEditFnSuffix(/^\d{4}$/.test(suffix) ? suffix : '');
+  };
+
+  const handleCancelEditFn = () => { setEditingFnId(null); setEditFnSuffix(''); };
+
+  const handleSaveEditFn = async (routeId) => {
+    if (editFnSuffix.length !== 4) return;
+    setSavingFn(true); setError('');
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch(`${API_URL}/api/routes/${routeId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ flight_number_suffix: editFnSuffix }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update flight number');
+      setEditingFnId(null);
+      setEditFnSuffix('');
+      setSuccess('Flight number updated');
+      await refreshRoutes();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingFn(false);
     }
   };
 
@@ -1020,6 +1054,40 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                           <tr key={`${route.id}-expand`}>
                             <td colSpan={6} style={{ padding: 0, background: '#F9F9F9', borderBottom: '2px solid #E8E8E8' }}>
                               <div style={{ padding: '14px 16px 14px 44px' }}>
+
+                                {/* Flight Number */}
+                                <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', marginBottom: '8px' }}>
+                                  Flight Number
+                                </div>
+                                {editingFnId === route.id ? (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '14px' }}>
+                                    <span style={{ fontFamily: 'monospace', fontSize: '0.95rem', fontWeight: 700, color: '#2C2C2C' }}>
+                                      {String(route.flight_number || '').slice(0, -4) || ''}
+                                    </span>
+                                    <input
+                                      type="text"
+                                      className="fn-input"
+                                      value={editFnSuffix}
+                                      onChange={e => setEditFnSuffix(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                                      maxLength={4}
+                                      placeholder="0000"
+                                      style={{ width: '70px' }}
+                                    />
+                                    <button
+                                      className="rp-btn-save"
+                                      onClick={() => handleSaveEditFn(route.id)}
+                                      disabled={savingFn || editFnSuffix.length !== 4}
+                                    >{savingFn ? 'Saving…' : 'Save'}</button>
+                                    <button className="rp-btn-cancel" onClick={handleCancelEditFn}>Cancel</button>
+                                  </div>
+                                ) : (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '14px' }}>
+                                    <span style={{ fontFamily: 'monospace', fontSize: '0.95rem', fontWeight: 700, color: '#2C2C2C' }}>
+                                      {route.flight_number}
+                                    </span>
+                                    <button className="rp-btn-edit" onClick={() => handleStartEditFn(route)}>Edit Flight Number</button>
+                                  </div>
+                                )}
 
                                 {/* Ticket Prices */}
                                 <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#999', marginBottom: '8px' }}>

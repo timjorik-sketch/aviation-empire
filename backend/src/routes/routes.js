@@ -304,12 +304,13 @@ router.post('/create',
   }
 );
 
-// Update route prices
+// Update route prices and/or flight number
 router.patch('/:id',
   authMiddleware,
   body('economy_price').optional().isFloat({ min: 0, max: 20000 }).withMessage('Economy price must be between $0 and $20,000'),
   body('business_price').optional({ nullable: true }).isFloat({ min: 0, max: 20000 }).withMessage('Business price must be between $0 and $20,000'),
   body('first_price').optional({ nullable: true }).isFloat({ min: 0, max: 20000 }).withMessage('First class price must be between $0 and $20,000'),
+  body('flight_number_suffix').optional().matches(/^\d{4}$/).withMessage('Flight number must be exactly 4 digits'),
   async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -318,18 +319,19 @@ router.patch('/:id',
       }
 
       const routeId = parseInt(req.params.id);
-      const { economy_price, business_price, first_price } = req.body;
+      const { economy_price, business_price, first_price, flight_number_suffix } = req.body;
 
       const airlineId = req.airlineId;
       if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
       const routeResult = await pool.query(
-        'SELECT id FROM routes WHERE id = $1 AND airline_id = $2',
+        'SELECT id, flight_number FROM routes WHERE id = $1 AND airline_id = $2',
         [routeId, airlineId]
       );
       if (!routeResult.rows[0]) {
         return res.status(404).json({ error: 'Route not found' });
       }
+      const oldFlightNumber = routeResult.rows[0].flight_number;
 
       // Audit C2: enforce flat $0–$20,000 range on price updates.
       if (economy_price !== undefined || business_price !== undefined || first_price !== undefined) {
@@ -343,6 +345,22 @@ router.patch('/:id',
         }
       }
 
+      // Resolve new flight number (if rename requested) and check uniqueness
+      let newFlightNumber = null;
+      if (flight_number_suffix !== undefined) {
+        const airlineRow = await pool.query('SELECT airline_code FROM airlines WHERE id = $1', [airlineId]);
+        if (!airlineRow.rows[0]) return res.status(400).json({ error: 'No airline found' });
+        const airlineCode = airlineRow.rows[0].airline_code;
+        newFlightNumber = `${airlineCode}${flight_number_suffix}`;
+        if (newFlightNumber !== oldFlightNumber) {
+          const dupe = await pool.query(
+            'SELECT id FROM routes WHERE airline_id = $1 AND flight_number = $2 AND id <> $3',
+            [airlineId, newFlightNumber, routeId]
+          );
+          if (dupe.rows[0]) return res.status(400).json({ error: `Flight number ${newFlightNumber} already exists` });
+        }
+      }
+
       const updates = [];
       const params = [];
       let paramIndex = 1;
@@ -350,6 +368,9 @@ router.patch('/:id',
       if (economy_price !== undefined) { updates.push(`economy_price = $${paramIndex++}`); params.push(economy_price); }
       if (business_price !== undefined) { updates.push(`business_price = $${paramIndex++}`); params.push(business_price || null); }
       if (first_price !== undefined) { updates.push(`first_price = $${paramIndex++}`); params.push(first_price || null); }
+      if (newFlightNumber !== null && newFlightNumber !== oldFlightNumber) {
+        updates.push(`flight_number = $${paramIndex++}`); params.push(newFlightNumber);
+      }
 
       if (updates.length === 0) {
         return res.status(400).json({ error: 'No fields to update' });
@@ -357,6 +378,20 @@ router.patch('/:id',
 
       params.push(routeId);
       await pool.query(`UPDATE routes SET ${updates.join(', ')} WHERE id = $${paramIndex}`, params);
+
+      // Sync flight number to weekly_schedule and upcoming flights
+      if (newFlightNumber !== null && newFlightNumber !== oldFlightNumber) {
+        await pool.query(
+          'UPDATE weekly_schedule SET flight_number = $1 WHERE route_id = $2 OR flight_number = $3',
+          [newFlightNumber, routeId, oldFlightNumber]
+        );
+        await pool.query(
+          `UPDATE flights SET flight_number = $1
+             WHERE status IN ('scheduled','boarding')
+               AND (route_id = $2 OR weekly_schedule_id IN (SELECT id FROM weekly_schedule WHERE route_id = $2))`,
+          [newFlightNumber, routeId]
+        );
+      }
 
       // Read back the current prices and sync schedule/flights
       const priceResult = await pool.query(

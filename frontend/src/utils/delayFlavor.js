@@ -21,7 +21,7 @@ const FLAVORS = {
     'Pushback truck unavailable',
     'Cleaning crew late',
     'Late connecting passengers',
-    'Wheelchair assistance delay',
+    'Baggage loading delay',
     'Apron bus delayed',
   ],
   atc: [

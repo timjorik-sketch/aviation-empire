@@ -2,21 +2,23 @@ import { useState, useEffect, useRef } from 'react';
 import { useNav } from './NavContext.jsx';
 
 const NAV_ITEMS = [
-  { key: 'dashboard',  label: 'Dashboard',  section: 'dashboard',  target: 'dashboard' },
-  { key: 'fleet',      label: 'Fleet',      section: 'fleet',      target: 'fleet' },
-  { key: 'operations', label: 'Operations', section: 'operations', target: 'ops-control' },
-  { key: 'network',    label: 'Network',    section: 'network',    target: 'hubs' },
-  { key: 'finances',   label: 'Finances',   section: 'finances',   target: 'finances' },
-  { key: 'staff',      label: 'Staff',      section: 'staff',      target: 'personnel' },
+  { key: 'dashboard',    label: 'Dashboard',    section: 'dashboard',    target: 'dashboard' },
+  { key: 'fleet',        label: 'Fleet',        section: 'fleet',        target: 'fleet' },
+  { key: 'operations',   label: 'Operations',   section: 'operations',   target: 'ops-control' },
+  { key: 'network',      label: 'Network',      section: 'network',      target: 'hubs' },
+  { key: 'finances',     label: 'Finances',     section: 'finances',     target: 'finances' },
+  { key: 'staff',        label: 'Staff',        section: 'staff',        target: 'personnel' },
+  { key: 'leaderboards', label: 'Leaderboards', section: 'leaderboards', target: 'leaderboards' },
 ];
 
 const SECTION_PAGES = {
-  dashboard:  ['dashboard'],
-  fleet:      ['fleet', 'cabin-profiles', 'marketplace', 'aircraft-detail'],
-  operations: ['ops-control', 'flight-schedule', 'service-profiles'],
-  network:    ['hubs', 'routes', 'airport-overview', 'airport', 'route-map'],
-  finances:   ['finances'],
-  staff:      ['personnel'],
+  dashboard:    ['dashboard'],
+  fleet:        ['fleet', 'cabin-profiles', 'marketplace', 'aircraft-detail'],
+  operations:   ['ops-control', 'flight-schedule', 'service-profiles'],
+  network:      ['hubs', 'routes', 'airport-overview', 'airport', 'route-map'],
+  finances:     ['finances'],
+  staff:        ['personnel'],
+  leaderboards: ['leaderboards'],
 };
 
 const SUB_TABS = {

@@ -1143,6 +1143,14 @@ function ReportView({ report, onNavigateToAircraft, onNavigateToAirport }) {
   const stability = f.stability;
   const stabPct = stability != null ? (stability * 100).toFixed(1) + '%' : '—';
 
+  const EVENTS_MAX = 45;
+  const EVENTS_PAGE_SIZE = 15;
+  const allEvents = (report.events || []).slice(0, EVENTS_MAX);
+  const eventsPageCount = Math.max(1, Math.ceil(allEvents.length / EVENTS_PAGE_SIZE));
+  const [eventsPage, setEventsPage] = useState(0);
+  const safePage = Math.min(eventsPage, eventsPageCount - 1);
+  const pagedEvents = allEvents.slice(safePage * EVENTS_PAGE_SIZE, (safePage + 1) * EVENTS_PAGE_SIZE);
+
   return (
     <>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '20px' }}>
@@ -1177,7 +1185,7 @@ function ReportView({ report, onNavigateToAircraft, onNavigateToAirport }) {
         <div className="card-header-bar">
           <span className="card-header-bar-title">Events Breakdown</span>
         </div>
-        {(report.events || []).length === 0 ? (
+        {allEvents.length === 0 ? (
           <EmptyState>No disruption events in the last 7 days.</EmptyState>
         ) : (
           <div style={{ overflowX: 'auto' }}>
@@ -1196,7 +1204,7 @@ function ReportView({ report, onNavigateToAircraft, onNavigateToAirport }) {
                 </tr>
               </thead>
               <tbody>
-                {report.events.map((e) => (
+                {pagedEvents.map((e) => (
                   <tr key={e.id} style={trStyle}>
                     <td style={{ ...td, fontSize: '0.78rem', color: '#888' }}>{formatTime(e.created_at)}</td>
                     <td style={{ ...td, fontFamily: 'monospace', fontWeight: 600 }}>{e.flight_number || '—'}</td>
@@ -1240,6 +1248,15 @@ function ReportView({ report, onNavigateToAircraft, onNavigateToAirport }) {
                 ))}
               </tbody>
             </table>
+            {eventsPageCount > 1 && (
+              <Pagination
+                page={safePage}
+                pageCount={eventsPageCount}
+                pageSize={EVENTS_PAGE_SIZE}
+                total={allEvents.length}
+                onChange={setEventsPage}
+              />
+            )}
           </div>
         )}
       </div>

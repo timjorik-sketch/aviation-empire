@@ -156,7 +156,9 @@ router.get('/', authMiddleware, async (req, res) => {
       JOIN aircraft ac ON f.aircraft_id = ac.id
       JOIN aircraft_types at ON ac.aircraft_type_id = at.id
       WHERE f.airline_id = $1
-      ORDER BY f.departure_time DESC
+      ORDER BY
+        CASE WHEN f.status IN ('in-flight','boarding','delayed') THEN 0 ELSE 1 END,
+        f.departure_time DESC
       LIMIT $2
     `, [airlineId, limit]);
 

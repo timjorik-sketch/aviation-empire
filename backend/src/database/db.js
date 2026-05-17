@@ -473,6 +473,17 @@ async function initDatabase() {
   ];
   await runStatements(occTables, 'occ tables');
 
+  // ── Enable RLS on tables exposed via Supabase PostgREST. Our backend
+  //    connects as the DB owner (BYPASSRLS), so enabling RLS with no
+  //    policies blocks anon/authenticated REST access without touching
+  //    server-side queries. Fixes Supabase linter rls_disabled_in_public.
+  const rlsEnable = [
+    `ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY`,
+    `ALTER TABLE airline_ground_handling ENABLE ROW LEVEL SECURITY`,
+    `ALTER TABLE flight_delay_events ENABLE ROW LEVEL SECURITY`,
+  ];
+  await runStatements(rlsEnable, 'rls enable');
+
   // ── flights.aircraft_id: switch from CASCADE to SET NULL so historical
   //    flight records (and their seats_sold/revenue) survive aircraft scrap.
   const fkFixes = [
@@ -924,7 +935,6 @@ async function initDatabase() {
     ['DUS', 5, 'Europe',         3000,  51.2895,   6.7668],
     ['HAM', 4, 'Europe',         3666,  53.6304,  10.0062],
     ['STR', 4, 'Europe',         3345,  48.6899,   9.2219],
-    ['TXL', 4, 'Europe',         2428,  52.5597,  13.2877],
     ['BUD', 4, 'Europe',         3707,  47.4298,  19.2611],
     ['OTP', 4, 'Europe',         3500,  44.5711,  26.0850],
     ['SOF', 4, 'Europe',         3600,  42.6952,  23.4114],
@@ -1056,6 +1066,34 @@ async function initDatabase() {
         await safeQuery(`UPDATE ${tbl} SET ${col}='BER' WHERE ${col}='SXF'`, null, `SXF→BER ${tbl}.${col}`);
       }
       await safeQuery(`DELETE FROM airports WHERE iata_code='SXF'`, null, 'delete SXF');
+    }
+  }
+
+  // TXL → BER consolidation (Berlin Tegel closed in 2020 after BER opened)
+  {
+    const { rows: txlRows } = await safeQuery(`SELECT 1 FROM airports WHERE iata_code='TXL'`, null, 'check TXL');
+    if (txlRows.length) {
+      const reassign = [
+        ['aircraft', 'home_airport'],
+        ['aircraft', 'current_location'],
+        ['routes', 'departure_airport'],
+        ['routes', 'arrival_airport'],
+        ['weekly_schedule', 'departure_airport'],
+        ['weekly_schedule', 'arrival_airport'],
+        ['airline_destinations', 'airport_code'],
+        ['personnel', 'airport_code'],
+        ['airport_slots', 'airport_code'],
+        ['slot_usage', 'airport_code'],
+        ['transfer_flights', 'departure_airport'],
+        ['transfer_flights', 'arrival_airport'],
+        ['airport_expansions', 'airport_code'],
+        ['expansion_usage', 'airport_code'],
+        ['used_aircraft_market', 'location'],
+      ];
+      for (const [tbl, col] of reassign) {
+        await safeQuery(`UPDATE ${tbl} SET ${col}='BER' WHERE ${col}='TXL'`, null, `TXL→BER ${tbl}.${col}`);
+      }
+      await safeQuery(`DELETE FROM airports WHERE iata_code='TXL'`, null, 'delete TXL');
     }
   }
 

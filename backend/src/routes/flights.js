@@ -136,6 +136,9 @@ router.get('/', authMiddleware, async (req, res) => {
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
+    const rawLimit = parseInt(req.query.limit, 10);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 1000) : 200;
+
     const result = await pool.query(`
       SELECT
         f.id, f.flight_number, f.departure_time, f.arrival_time,
@@ -154,7 +157,8 @@ router.get('/', authMiddleware, async (req, res) => {
       JOIN aircraft_types at ON ac.aircraft_type_id = at.id
       WHERE f.airline_id = $1
       ORDER BY f.departure_time DESC
-    `, [airlineId]);
+      LIMIT $2
+    `, [airlineId, limit]);
 
     const flights = result.rows.map(row => ({
       id: row.id,

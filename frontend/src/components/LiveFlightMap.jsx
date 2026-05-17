@@ -353,10 +353,26 @@ export default function LiveFlightMap({
     setTimeout(() => map.invalidateSize(), 100);
 
     fetchAndDraw();
-    const interval = setInterval(fetchAndDraw, 30000);
+
+    // Pause polling while the tab is hidden, and re-fetch once on resume so
+    // the map catches up. Background tabs were a major Supabase egress sink.
+    let interval = null;
+    const startPoll = () => {
+      if (interval == null) interval = setInterval(fetchAndDraw, 30000);
+    };
+    const stopPoll = () => {
+      if (interval != null) { clearInterval(interval); interval = null; }
+    };
+    const onVis = () => {
+      if (document.visibilityState === 'visible') { fetchAndDraw(); startPoll(); }
+      else { stopPoll(); }
+    };
+    if (document.visibilityState === 'visible') startPoll();
+    document.addEventListener('visibilitychange', onVis);
 
     return () => {
-      clearInterval(interval);
+      stopPoll();
+      document.removeEventListener('visibilitychange', onVis);
       map.remove();
       mapRef.current = null;
       layerGroupRef.current = null;

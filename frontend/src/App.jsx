@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, Component } from 'react';
+import { useState, useEffect, useRef, useCallback, Component } from 'react';
 
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { error: null }; }
@@ -50,6 +50,7 @@ import AdminInvites from './pages/AdminInvites';
 import SatisfactionRating, { getSatColor, scoreToRating } from './components/SatisfactionRating.jsx';
 import TopBar from './components/TopBar.jsx';
 import { NavContext } from './components/NavContext.jsx';
+import { useVisiblePolling } from './utils/useVisiblePolling.js';
 import './App.css';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -308,23 +309,20 @@ function App() {
   // Poll XP/level every 30s while an airline is active. The level-up popup
   // is driven by `level > acknowledged_level` (see effect below) — this poll
   // only refreshes the values; it does not trigger UI directly.
-  useEffect(() => {
+  const pollXp = useCallback(async () => {
     if (!activeAirline) return;
     const token = localStorage.getItem('token');
-    const poll = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/airline/xp`, { headers: { Authorization: `Bearer ${token}` } });
-        if (!res.ok) return;
-        const { level, total_points, acknowledged_level } = await res.json();
-        setActiveAirline(prev => prev ? { ...prev, level, total_points, acknowledged_level } : prev);
-        setAirlines(prev => prev.map(a =>
-          a.id === activeAirline.id ? { ...a, level, total_points, acknowledged_level } : a
-        ));
-      } catch { /* ignore */ }
-    };
-    const id = setInterval(poll, 30_000);
-    return () => clearInterval(id);
+    try {
+      const res = await fetch(`${API_URL}/api/airline/xp`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) return;
+      const { level, total_points, acknowledged_level } = await res.json();
+      setActiveAirline(prev => prev ? { ...prev, level, total_points, acknowledged_level } : prev);
+      setAirlines(prev => prev.map(a =>
+        a.id === activeAirline.id ? { ...a, level, total_points, acknowledged_level } : a
+      ));
+    } catch { /* ignore */ }
   }, [activeAirline?.id]);
+  useVisiblePolling(activeAirline ? pollXp : null, activeAirline ? 30_000 : null);
 
   // Show celebration popup once when current level exceeds the last
   // acknowledged level. Dismissal persists via POST /acknowledge-level.

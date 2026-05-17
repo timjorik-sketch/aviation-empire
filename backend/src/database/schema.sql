@@ -333,7 +333,6 @@ INSERT OR IGNORE INTO airports (iata_code, name, country, registration_prefix) V
 ('DUS', 'Düsseldorf Airport', 'Germany', 'D'),
 ('HAM', 'Hamburg Airport', 'Germany', 'D'),
 ('STR', 'Stuttgart Airport', 'Germany', 'D'),
-('TXL', 'Berlin Tegel Airport', 'Germany', 'D'),
 -- Hungary
 ('BUD', 'Budapest Ferenc Liszt Airport', 'Hungary', 'HA'),
 -- Romania

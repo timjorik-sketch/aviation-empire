@@ -4,6 +4,7 @@ import AirportLink from '../components/AirportLink.jsx';
 import AirlineProfilePopup from '../components/AirlineProfilePopup.jsx';
 import TopBar from '../components/TopBar.jsx';
 import Loader from '../components/Loader.jsx';
+import { useVisiblePolling } from '../utils/useVisiblePolling.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -422,11 +423,8 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
     }
   }, [airline, code, addingDest, onBalanceUpdate]);
 
-  // Auto-refresh boards every 30 seconds
-  useEffect(() => {
-    const interval = setInterval(fetchBoards, 30000);
-    return () => clearInterval(interval);
-  }, [fetchBoards]);
+  // Auto-refresh boards every 30 seconds — paused while the tab is hidden.
+  useVisiblePolling(fetchBoards, 30000);
 
   // Update "now" every 15 seconds so statuses stay current
   useEffect(() => {

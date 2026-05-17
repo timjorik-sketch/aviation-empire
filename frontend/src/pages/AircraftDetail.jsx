@@ -4,6 +4,7 @@ import TopBar from '../components/TopBar.jsx';
 import Toast from '../components/Toast.jsx';
 import { calculateCurrentValue, formatAircraftValue } from '../utils/aircraftValue.js';
 import { getEventFlavor } from '../utils/delayFlavor.js';
+import { useVisiblePolling } from '../utils/useVisiblePolling.js';
 import SatisfactionRating, { getSatColor, scoreToRating } from '../components/SatisfactionRating.jsx';
 import Loader from '../components/Loader.jsx';
 
@@ -423,14 +424,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     fetchAllAirports();
   }, [fetchDetail, fetchAirports, fetchAllAirports]);
 
-  // Keep current_flight + current_location fresh while the page is open so
-  // location and status reflect ongoing flight processing — including for
-  // grounded aircraft that still have in-progress scheduled flights.
-  useEffect(() => {
-    const iv = setInterval(fetchDetail, 30000);
-    return () => clearInterval(iv);
-  }, [fetchDetail]);
-
   useEffect(() => {
     if (aircraft?.type_id) fetchCabinProfiles(aircraft.type_id);
   }, [aircraft?.type_id, fetchCabinProfiles]);
@@ -452,11 +445,15 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     } catch {}
   }, [aircraftId]);
 
-  useEffect(() => {
+  useEffect(() => { fetchScheduledFlights(); }, [fetchScheduledFlights]);
+
+  // Refresh both aircraft detail and scheduled flights on a single 30s timer,
+  // paused while the tab is hidden.
+  const refreshAircraftViews = useCallback(() => {
+    fetchDetail();
     fetchScheduledFlights();
-    const iv = setInterval(fetchScheduledFlights, 30000);
-    return () => clearInterval(iv);
-  }, [fetchScheduledFlights]);
+  }, [fetchDetail, fetchScheduledFlights]);
+  useVisiblePolling(refreshAircraftViews, 30000);
 
   // ─── Auto-suggest ────────────────────────────────────────────────────────────
 

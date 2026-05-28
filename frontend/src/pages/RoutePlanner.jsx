@@ -280,45 +280,32 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
   })() : null;
 
   // Admin-only: capacity-aware price suggest. The Suggest button defaults to
-  // the largest multiple of 10 ≤ 119% of market. When the admin picks an
-  // aircraft from the dropdown below, we forward that aircraft's per-class
-  // seat capacity to the backend, which solves for the highest price that
-  // still fills ~95% of each cabin class — capped at 119% market. Prevents
-  // the "big jet on weak route" case where 119% of a low-category market is
-  // still too high to fill the cabin.
-  const [adminFleet, setAdminFleet] = useState([]);
-  const [adminAircraftId, setAdminAircraftId] = useState('');
-  const [adminCaps, setAdminCaps] = useState(null); // { eco, biz, fir }
+  // the largest multiple of 10 ≤ 119% of market. When the admin picks a cabin
+  // profile from the dropdown below, we forward that profile's per-class seat
+  // capacity to the backend, which solves for the highest price that still
+  // fills ~95% of each cabin class — capped at 119% market. Prevents the
+  // "big jet on weak route" case where 119% of a low-category market is still
+  // too high to fill the cabin.
+  const [adminProfiles, setAdminProfiles] = useState([]);
+  const [adminProfileId, setAdminProfileId] = useState('');
   const [adminMarket, setAdminMarket] = useState(null);   // { eco, biz, first }
   const [adminSuggested, setAdminSuggested] = useState(null); // backend-computed, capacity-aware
 
   useEffect(() => {
     if (!isAdmin) return;
     const token = localStorage.getItem('token');
-    fetch(`${API_URL}/api/aircraft/fleet`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_URL}/api/cabin-profiles`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : null)
-      .then(d => setAdminFleet((d?.fleet || []).filter(a => a.airline_cabin_profile_id)))
+      .then(d => setAdminProfiles(d?.profiles || []))
       .catch(() => {});
   }, [isAdmin]);
 
-  useEffect(() => {
-    if (!adminAircraftId) { setAdminCaps(null); return; }
-    const ac = adminFleet.find(a => String(a.id) === adminAircraftId);
-    if (!ac?.airline_cabin_profile_id) { setAdminCaps(null); return; }
-    const token = localStorage.getItem('token');
-    const ctrl = new AbortController();
-    fetch(`${API_URL}/api/cabin-profiles/${ac.airline_cabin_profile_id}`, {
-      headers: { Authorization: `Bearer ${token}` }, signal: ctrl.signal,
-    })
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        const classes = d?.profile?.classes || d?.classes || [];
-        const pick = (t) => classes.find(c => c.class_type === t)?.actual_capacity || 0;
-        setAdminCaps({ eco: pick('economy'), biz: pick('business'), fir: pick('first') });
-      })
-      .catch(() => setAdminCaps(null));
-    return () => ctrl.abort();
-  }, [adminAircraftId, adminFleet]);
+  const adminCaps = (() => {
+    const p = adminProfiles.find(x => String(x.id) === adminProfileId);
+    if (!p) return null;
+    const pick = (t) => p.classes?.find(c => c.class_type === t)?.actual_capacity || 0;
+    return { eco: pick('economy'), biz: pick('business'), fir: pick('first') };
+  })();
 
   useEffect(() => {
     if (!isAdmin || !departureAirport || !arrivalAirport || departureAirport === arrivalAirport) {
@@ -344,7 +331,7 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
       })
       .catch(() => {});
     return () => ctrl.abort();
-  }, [isAdmin, departureAirport, arrivalAirport, adminCaps]);
+  }, [isAdmin, departureAirport, arrivalAirport, adminProfileId, adminProfiles]);
 
   const suggestPrice = (market) => {
     if (!market || market <= 0) return null;
@@ -356,7 +343,6 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
     biz:   capacityAware ? adminSuggested.biz   : suggestPrice(adminMarket.biz),
     first: capacityAware ? adminSuggested.first : suggestPrice(adminMarket.first),
   } : null;
-  const selectedAdminAircraft = adminFleet.find(a => String(a.id) === adminAircraftId) || null;
 
   const fetchData = async () => {
     const token = localStorage.getItem('token');
@@ -850,21 +836,21 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
               </div>
 
               {/* Admin-only: capacity-aware suggest target */}
-              {isAdmin && adminFleet.length > 0 && (
+              {isAdmin && adminProfiles.length > 0 && (
                 <div style={{ marginBottom: '0.75rem', padding: '8px 10px', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 6 }}>
                   <label style={{ display: 'block', marginBottom: 4, fontSize: '0.72rem', fontWeight: 700, color: '#4338ca', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                    Admin · Suggest target
+                    Admin · Suggest target (cabin profile)
                   </label>
-                  <select value={adminAircraftId} onChange={e => setAdminAircraftId(e.target.value)}
+                  <select value={adminProfileId} onChange={e => setAdminProfileId(e.target.value)}
                     style={{ width: '100%', padding: '0.4rem', borderRadius: 4, border: '1px solid #c7d2fe', fontSize: '0.85rem', background: 'white' }}>
                     <option value="">— 119% market cap (default) —</option>
-                    {adminFleet.map(a => (
-                      <option key={a.id} value={a.id}>
-                        {a.registration} · {a.full_name} · {a.airline_cabin_profile_name || 'no profile'}
+                    {adminProfiles.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} · {p.aircraft_type_name} · {p.total_capacity} seats
                       </option>
                     ))}
                   </select>
-                  {capacityAware && selectedAdminAircraft && (
+                  {capacityAware && (
                     <div style={{ marginTop: 6, fontSize: '0.72rem', color: '#4338ca' }}>
                       Targeting ~95% load factor · caps: eco {adminCaps.eco}, biz {adminCaps.biz}, first {adminCaps.fir}
                     </div>

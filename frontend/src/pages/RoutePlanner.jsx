@@ -279,34 +279,84 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
     return { distKm: Math.round(distKm), flightTime: formatFlightTime(distKm) };
   })() : null;
 
-  // Admin-only: fetch fair-market price for the selected airport pair and derive
-  // a player-set suggestion = largest multiple of 10 that stays ≤ 119% of market.
-  const [adminMarket, setAdminMarket] = useState(null); // { eco, biz, first }
+  // Admin-only: capacity-aware price suggest. The Suggest button defaults to
+  // the largest multiple of 10 ≤ 119% of market. When the admin picks an
+  // aircraft from the dropdown below, we forward that aircraft's per-class
+  // seat capacity to the backend, which solves for the highest price that
+  // still fills ~95% of each cabin class — capped at 119% market. Prevents
+  // the "big jet on weak route" case where 119% of a low-category market is
+  // still too high to fill the cabin.
+  const [adminFleet, setAdminFleet] = useState([]);
+  const [adminAircraftId, setAdminAircraftId] = useState('');
+  const [adminCaps, setAdminCaps] = useState(null); // { eco, biz, fir }
+  const [adminMarket, setAdminMarket] = useState(null);   // { eco, biz, first }
+  const [adminSuggested, setAdminSuggested] = useState(null); // backend-computed, capacity-aware
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    const token = localStorage.getItem('token');
+    fetch(`${API_URL}/api/aircraft/fleet`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setAdminFleet((d?.fleet || []).filter(a => a.airline_cabin_profile_id)))
+      .catch(() => {});
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (!adminAircraftId) { setAdminCaps(null); return; }
+    const ac = adminFleet.find(a => String(a.id) === adminAircraftId);
+    if (!ac?.airline_cabin_profile_id) { setAdminCaps(null); return; }
+    const token = localStorage.getItem('token');
+    const ctrl = new AbortController();
+    fetch(`${API_URL}/api/cabin-profiles/${ac.airline_cabin_profile_id}`, {
+      headers: { Authorization: `Bearer ${token}` }, signal: ctrl.signal,
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        const classes = d?.profile?.classes || d?.classes || [];
+        const pick = (t) => classes.find(c => c.class_type === t)?.actual_capacity || 0;
+        setAdminCaps({ eco: pick('economy'), biz: pick('business'), fir: pick('first') });
+      })
+      .catch(() => setAdminCaps(null));
+    return () => ctrl.abort();
+  }, [adminAircraftId, adminFleet]);
+
   useEffect(() => {
     if (!isAdmin || !departureAirport || !arrivalAirport || departureAirport === arrivalAirport) {
       setAdminMarket(null);
+      setAdminSuggested(null);
       return;
     }
     const token = localStorage.getItem('token');
     const ctrl = new AbortController();
-    fetch(`${API_URL}/api/admin/market-price?dep=${departureAirport}&arr=${arrivalAirport}`, {
+    const qs = new URLSearchParams({ dep: departureAirport, arr: arrivalAirport });
+    if (adminCaps) {
+      if (adminCaps.eco) qs.set('eco_cap', String(adminCaps.eco));
+      if (adminCaps.biz) qs.set('biz_cap', String(adminCaps.biz));
+      if (adminCaps.fir) qs.set('fir_cap', String(adminCaps.fir));
+    }
+    fetch(`${API_URL}/api/admin/market-price?${qs.toString()}`, {
       headers: { Authorization: `Bearer ${token}` }, signal: ctrl.signal,
     })
       .then(r => r.ok ? r.json() : null)
-      .then(d => setAdminMarket(d?.market || null))
+      .then(d => {
+        setAdminMarket(d?.market || null);
+        setAdminSuggested(d?.suggested || null);
+      })
       .catch(() => {});
     return () => ctrl.abort();
-  }, [isAdmin, departureAirport, arrivalAirport]);
+  }, [isAdmin, departureAirport, arrivalAirport, adminCaps]);
 
   const suggestPrice = (market) => {
     if (!market || market <= 0) return null;
     return Math.floor((market * 1.19) / 10) * 10;
   };
+  const capacityAware = !!(adminCaps && adminSuggested);
   const suggestion = adminMarket ? {
-    eco:   suggestPrice(adminMarket.eco),
-    biz:   suggestPrice(adminMarket.biz),
-    first: suggestPrice(adminMarket.first),
+    eco:   capacityAware ? adminSuggested.eco   : suggestPrice(adminMarket.eco),
+    biz:   capacityAware ? adminSuggested.biz   : suggestPrice(adminMarket.biz),
+    first: capacityAware ? adminSuggested.first : suggestPrice(adminMarket.first),
   } : null;
+  const selectedAdminAircraft = adminFleet.find(a => String(a.id) === adminAircraftId) || null;
 
   const fetchData = async () => {
     const token = localStorage.getItem('token');
@@ -799,19 +849,42 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                 </label>
               </div>
 
+              {/* Admin-only: capacity-aware suggest target */}
+              {isAdmin && adminFleet.length > 0 && (
+                <div style={{ marginBottom: '0.75rem', padding: '8px 10px', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 6 }}>
+                  <label style={{ display: 'block', marginBottom: 4, fontSize: '0.72rem', fontWeight: 700, color: '#4338ca', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    Admin · Suggest target
+                  </label>
+                  <select value={adminAircraftId} onChange={e => setAdminAircraftId(e.target.value)}
+                    style={{ width: '100%', padding: '0.4rem', borderRadius: 4, border: '1px solid #c7d2fe', fontSize: '0.85rem', background: 'white' }}>
+                    <option value="">— 119% market cap (default) —</option>
+                    {adminFleet.map(a => (
+                      <option key={a.id} value={a.id}>
+                        {a.registration} · {a.full_name} · {a.airline_cabin_profile_name || 'no profile'}
+                      </option>
+                    ))}
+                  </select>
+                  {capacityAware && selectedAdminAircraft && (
+                    <div style={{ marginTop: 6, fontSize: '0.72rem', color: '#4338ca' }}>
+                      Targeting ~95% load factor · caps: eco {adminCaps.eco}, biz {adminCaps.biz}, first {adminCaps.fir}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Prices */}
               <div className="price-grid" style={{ marginBottom: '1rem' }}>
                 <div>
                   <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: '600', fontSize: '0.9rem', color: '#2C2C2C' }}>Economy ($)</label>
                   <input type="number" min="1" step="1" value={economyPrice} onChange={e => setEconomyPrice(e.target.value)}
                     required placeholder="e.g. 199"
-                    title={isAdmin && suggestion?.eco ? `Admin suggestion: $${suggestion.eco} (≤119% of market $${adminMarket.eco}, rounded to 10)` : undefined}
+                    title={isAdmin && suggestion?.eco ? (capacityAware ? `Admin suggestion: $${suggestion.eco} — fills ~95% of ${adminCaps.eco} eco seats (market $${adminMarket.eco}, capped 119%)` : `Admin suggestion: $${suggestion.eco} (≤119% of market $${adminMarket.eco}, rounded to 10)`) : undefined}
                     style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E0E0E0', fontSize: '0.9rem', boxSizing: 'border-box' }} />
                   {isAdmin && suggestion?.eco && (
                     <button type="button" onClick={() => setEconomyPrice(String(suggestion.eco))}
-                      title={`Market: $${adminMarket.eco} · 119% cap, rounded to 10`}
+                      title={capacityAware ? `Fills ~95% of ${adminCaps.eco} eco seats · market $${adminMarket.eco}` : `Market: $${adminMarket.eco} · 119% cap, rounded to 10`}
                       style={{ marginTop: 4, padding: '2px 6px', fontSize: '0.72rem', background: '#eef2ff', color: '#4338ca', border: '1px solid #c7d2fe', borderRadius: 4, cursor: 'pointer' }}>
-                      Suggest ${suggestion.eco}
+                      Suggest ${suggestion.eco}{capacityAware ? ' · 95% LF' : ''}
                     </button>
                   )}
                 </div>
@@ -819,13 +892,13 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                   <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: '600', fontSize: '0.9rem', color: '#2C2C2C' }}>Business ($) <span style={{ fontWeight: 400, color: '#999' }}>(opt.)</span></label>
                   <input type="number" min="1" step="1" value={businessPrice} onChange={e => setBusinessPrice(e.target.value)}
                     placeholder="e.g. 599"
-                    title={isAdmin && suggestion?.biz ? `Admin suggestion: $${suggestion.biz} (≤119% of market $${adminMarket.biz}, rounded to 10)` : undefined}
+                    title={isAdmin && suggestion?.biz ? (capacityAware ? `Admin suggestion: $${suggestion.biz} — fills ~95% of ${adminCaps.biz} biz seats (market $${adminMarket.biz}, capped 119%)` : `Admin suggestion: $${suggestion.biz} (≤119% of market $${adminMarket.biz}, rounded to 10)`) : undefined}
                     style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E0E0E0', fontSize: '0.9rem', boxSizing: 'border-box' }} />
                   {isAdmin && suggestion?.biz && (
                     <button type="button" onClick={() => setBusinessPrice(String(suggestion.biz))}
-                      title={`Market: $${adminMarket.biz} · 119% cap, rounded to 10`}
+                      title={capacityAware ? `Fills ~95% of ${adminCaps.biz} biz seats · market $${adminMarket.biz}` : `Market: $${adminMarket.biz} · 119% cap, rounded to 10`}
                       style={{ marginTop: 4, padding: '2px 6px', fontSize: '0.72rem', background: '#eef2ff', color: '#4338ca', border: '1px solid #c7d2fe', borderRadius: 4, cursor: 'pointer' }}>
-                      Suggest ${suggestion.biz}
+                      Suggest ${suggestion.biz}{capacityAware ? ' · 95% LF' : ''}
                     </button>
                   )}
                 </div>
@@ -833,13 +906,13 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                   <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: '600', fontSize: '0.9rem', color: '#2C2C2C' }}>First ($) <span style={{ fontWeight: 400, color: '#999' }}>(opt.)</span></label>
                   <input type="number" min="1" step="1" value={firstPrice} onChange={e => setFirstPrice(e.target.value)}
                     placeholder="e.g. 1299"
-                    title={isAdmin && suggestion?.first ? `Admin suggestion: $${suggestion.first} (≤119% of market $${adminMarket.first}, rounded to 10)` : undefined}
+                    title={isAdmin && suggestion?.first ? (capacityAware ? `Admin suggestion: $${suggestion.first} — fills ~95% of ${adminCaps.fir} first seats (market $${adminMarket.first}, capped 119%)` : `Admin suggestion: $${suggestion.first} (≤119% of market $${adminMarket.first}, rounded to 10)`) : undefined}
                     style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E0E0E0', fontSize: '0.9rem', boxSizing: 'border-box' }} />
                   {isAdmin && suggestion?.first && (
                     <button type="button" onClick={() => setFirstPrice(String(suggestion.first))}
-                      title={`Market: $${adminMarket.first} · 119% cap, rounded to 10`}
+                      title={capacityAware ? `Fills ~95% of ${adminCaps.fir} first seats · market $${adminMarket.first}` : `Market: $${adminMarket.first} · 119% cap, rounded to 10`}
                       style={{ marginTop: 4, padding: '2px 6px', fontSize: '0.72rem', background: '#eef2ff', color: '#4338ca', border: '1px solid #c7d2fe', borderRadius: 4, cursor: 'pointer' }}>
-                      Suggest ${suggestion.first}
+                      Suggest ${suggestion.first}{capacityAware ? ' · 95% LF' : ''}
                     </button>
                   )}
                 </div>

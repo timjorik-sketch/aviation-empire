@@ -3,7 +3,7 @@ import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 import adminMiddleware from '../middleware/admin.js';
 import { logEvent, reqInfo } from '../utils/auditLog.js';
-import { XP_THRESHOLDS } from './flights.js';
+import { XP_THRESHOLDS, calcBaseDemandPerHour, calcPriceAttractiveness } from './flights.js';
 import { calcMarketPrices } from '../utils/marketPricing.js';
 
 function haversineKm(lat1, lon1, lat2, lon2) {
@@ -409,6 +409,28 @@ router.delete('/invite-codes/:id', async (req, res) => {
 // eco/biz/first prices plus the distance. Players never see this — game design
 // keeps the model hidden — but admins use it to set test-routes intentionally
 // near the 119% ceiling.
+//
+// Optional `eco_cap`/`biz_cap`/`fir_cap` query params enable capacity-aware
+// suggestions: the highest price (in $10 steps, ratio ≤ 1.19) at which the
+// 72h expected pax still fills ~95% of that class's seats. Returned alongside
+// `market` as `suggested`. If even ratio 0.80 can't fill the cabin, 0.80 is
+// returned anyway — flags the route/aircraft pairing as undersized demand.
+const RATIO_LADDER = [1.19, 1.14, 1.09, 1.05, 1.00, 0.90, 0.80];
+const TARGET_LF = 0.95;
+const CLASS_SHARE = { eco: 1.00, biz: 0.15, fir: 0.05 };
+
+function suggestedForClass(market, cap, depCat, arrCat, share) {
+  if (!market || market <= 0 || !cap || cap <= 0) return null;
+  const baseDemand = calcBaseDemandPerHour(depCat, arrCat);
+  const target = cap * TARGET_LF;
+  for (const ratio of RATIO_LADDER) {
+    const attr = calcPriceAttractiveness(market * ratio, market);
+    const expectedPax = baseDemand * share * attr * 72;
+    if (expectedPax >= target) return Math.floor((market * ratio) / 10) * 10;
+  }
+  return Math.floor((market * RATIO_LADDER[RATIO_LADDER.length - 1]) / 10) * 10;
+}
+
 router.get('/market-price', async (req, res) => {
   try {
     const dep = String(req.query.dep || '').toUpperCase();
@@ -428,7 +450,18 @@ router.get('/market-price', async (req, res) => {
     }
     const distKm = Math.round(haversineKm(d.latitude, d.longitude, a.latitude, a.longitude));
     const prices = calcMarketPrices(distKm, d.category, a.category);
-    res.json({ dep, arr, distance_km: distKm, market: prices });
+
+    const ecoCap = parseInt(req.query.eco_cap, 10) || 0;
+    const bizCap = parseInt(req.query.biz_cap, 10) || 0;
+    const firCap = parseInt(req.query.fir_cap, 10) || 0;
+    const hasCaps = ecoCap > 0 || bizCap > 0 || firCap > 0;
+    const suggested = hasCaps ? {
+      eco:   suggestedForClass(prices.eco,   ecoCap, d.category, a.category, CLASS_SHARE.eco),
+      biz:   suggestedForClass(prices.biz,   bizCap, d.category, a.category, CLASS_SHARE.biz),
+      first: suggestedForClass(prices.first, firCap, d.category, a.category, CLASS_SHARE.fir),
+    } : null;
+
+    res.json({ dep, arr, distance_km: distKm, market: prices, suggested });
   } catch (e) {
     console.error('Market price error:', e);
     res.status(500).json({ error: 'Server error' });

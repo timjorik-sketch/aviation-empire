@@ -2128,4 +2128,4 @@ router.get('/weekly-schedule', authMiddleware, async (req, res) => {
 });
 
 export default router;
-export { startFlightProcessor, stopFlightProcessor, processFlights, generateFlights, generateFuelPrice, calculateFlightDuration, processBookings, checkLevelUp, XP_THRESHOLDS };
+export { startFlightProcessor, stopFlightProcessor, processFlights, generateFlights, generateFuelPrice, calculateFlightDuration, processBookings, checkLevelUp, XP_THRESHOLDS, calcBaseDemandPerHour, calcPriceAttractiveness };

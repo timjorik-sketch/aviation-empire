@@ -412,11 +412,16 @@ router.delete('/invite-codes/:id', async (req, res) => {
 //
 // Optional `eco_cap`/`biz_cap`/`fir_cap` query params enable capacity-aware
 // suggestions: the highest price (in $10 steps, ratio ≤ 1.19) at which the
-// 72h expected pax still fills ~95% of that class's seats. Returned alongside
+// 72h expected pax still fills 100% of that class's seats. Returned alongside
 // `market` as `suggested`. If even ratio 0.80 can't fill the cabin, 0.80 is
 // returned anyway — flags the route/aircraft pairing as undersized demand.
+//
+// Design intent: 119% market is the normal goal (fills the cabin on most
+// routes). The new function only kicks in on weak-demand routes where 1.19
+// can't fill — there it drops the price down the ladder until demand matches
+// capacity. Target = 1.0 (not 0.95), so the *cap is the actual cabin size*.
 const RATIO_LADDER = [1.19, 1.14, 1.09, 1.05, 1.00, 0.90, 0.80];
-const TARGET_LF = 0.95;
+const TARGET_LF = 1.00;
 const CLASS_SHARE = { eco: 1.00, biz: 0.15, fir: 0.05 };
 
 function suggestedForClass(market, cap, depCat, arrCat, share) {

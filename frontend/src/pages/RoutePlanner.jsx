@@ -852,7 +852,7 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                   </select>
                   {capacityAware && (
                     <div style={{ marginTop: 6, fontSize: '0.72rem', color: '#4338ca' }}>
-                      Targeting ~95% load factor · caps: eco {adminCaps.eco}, biz {adminCaps.biz}, first {adminCaps.fir}
+                      Targeting full load factor · caps: eco {adminCaps.eco}, biz {adminCaps.biz}, first {adminCaps.fir}
                     </div>
                   )}
                 </div>
@@ -864,13 +864,13 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                   <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: '600', fontSize: '0.9rem', color: '#2C2C2C' }}>Economy ($)</label>
                   <input type="number" min="1" step="1" value={economyPrice} onChange={e => setEconomyPrice(e.target.value)}
                     required placeholder="e.g. 199"
-                    title={isAdmin && suggestion?.eco ? (capacityAware ? `Admin suggestion: $${suggestion.eco} — fills ~95% of ${adminCaps.eco} eco seats (market $${adminMarket.eco}, capped 119%)` : `Admin suggestion: $${suggestion.eco} (≤119% of market $${adminMarket.eco}, rounded to 10)`) : undefined}
+                    title={isAdmin && suggestion?.eco ? (capacityAware ? `Admin suggestion: $${suggestion.eco} — fills ${adminCaps.eco} eco seats (market $${adminMarket.eco}, capped 119%)` : `Admin suggestion: $${suggestion.eco} (≤119% of market $${adminMarket.eco}, rounded to 10)`) : undefined}
                     style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E0E0E0', fontSize: '0.9rem', boxSizing: 'border-box' }} />
                   {isAdmin && suggestion?.eco && (
                     <button type="button" onClick={() => setEconomyPrice(String(suggestion.eco))}
-                      title={capacityAware ? `Fills ~95% of ${adminCaps.eco} eco seats · market $${adminMarket.eco}` : `Market: $${adminMarket.eco} · 119% cap, rounded to 10`}
+                      title={capacityAware ? `Fills ${adminCaps.eco} eco seats · market $${adminMarket.eco}` : `Market: $${adminMarket.eco} · 119% cap, rounded to 10`}
                       style={{ marginTop: 4, padding: '2px 6px', fontSize: '0.72rem', background: '#eef2ff', color: '#4338ca', border: '1px solid #c7d2fe', borderRadius: 4, cursor: 'pointer' }}>
-                      Suggest ${suggestion.eco}{capacityAware ? ' · 95% LF' : ''}
+                      Suggest ${suggestion.eco}{capacityAware ? ' · full LF' : ''}
                     </button>
                   )}
                 </div>
@@ -878,13 +878,13 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                   <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: '600', fontSize: '0.9rem', color: '#2C2C2C' }}>Business ($) <span style={{ fontWeight: 400, color: '#999' }}>(opt.)</span></label>
                   <input type="number" min="1" step="1" value={businessPrice} onChange={e => setBusinessPrice(e.target.value)}
                     placeholder="e.g. 599"
-                    title={isAdmin && suggestion?.biz ? (capacityAware ? `Admin suggestion: $${suggestion.biz} — fills ~95% of ${adminCaps.biz} biz seats (market $${adminMarket.biz}, capped 119%)` : `Admin suggestion: $${suggestion.biz} (≤119% of market $${adminMarket.biz}, rounded to 10)`) : undefined}
+                    title={isAdmin && suggestion?.biz ? (capacityAware ? `Admin suggestion: $${suggestion.biz} — fills ${adminCaps.biz} biz seats (market $${adminMarket.biz}, capped 119%)` : `Admin suggestion: $${suggestion.biz} (≤119% of market $${adminMarket.biz}, rounded to 10)`) : undefined}
                     style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E0E0E0', fontSize: '0.9rem', boxSizing: 'border-box' }} />
                   {isAdmin && suggestion?.biz && (
                     <button type="button" onClick={() => setBusinessPrice(String(suggestion.biz))}
-                      title={capacityAware ? `Fills ~95% of ${adminCaps.biz} biz seats · market $${adminMarket.biz}` : `Market: $${adminMarket.biz} · 119% cap, rounded to 10`}
+                      title={capacityAware ? `Fills ${adminCaps.biz} biz seats · market $${adminMarket.biz}` : `Market: $${adminMarket.biz} · 119% cap, rounded to 10`}
                       style={{ marginTop: 4, padding: '2px 6px', fontSize: '0.72rem', background: '#eef2ff', color: '#4338ca', border: '1px solid #c7d2fe', borderRadius: 4, cursor: 'pointer' }}>
-                      Suggest ${suggestion.biz}{capacityAware ? ' · 95% LF' : ''}
+                      Suggest ${suggestion.biz}{capacityAware ? ' · full LF' : ''}
                     </button>
                   )}
                 </div>
@@ -892,13 +892,13 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                   <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: '600', fontSize: '0.9rem', color: '#2C2C2C' }}>First ($) <span style={{ fontWeight: 400, color: '#999' }}>(opt.)</span></label>
                   <input type="number" min="1" step="1" value={firstPrice} onChange={e => setFirstPrice(e.target.value)}
                     placeholder="e.g. 1299"
-                    title={isAdmin && suggestion?.first ? (capacityAware ? `Admin suggestion: $${suggestion.first} — fills ~95% of ${adminCaps.fir} first seats (market $${adminMarket.first}, capped 119%)` : `Admin suggestion: $${suggestion.first} (≤119% of market $${adminMarket.first}, rounded to 10)`) : undefined}
+                    title={isAdmin && suggestion?.first ? (capacityAware ? `Admin suggestion: $${suggestion.first} — fills ${adminCaps.fir} first seats (market $${adminMarket.first}, capped 119%)` : `Admin suggestion: $${suggestion.first} (≤119% of market $${adminMarket.first}, rounded to 10)`) : undefined}
                     style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E0E0E0', fontSize: '0.9rem', boxSizing: 'border-box' }} />
                   {isAdmin && suggestion?.first && (
                     <button type="button" onClick={() => setFirstPrice(String(suggestion.first))}
-                      title={capacityAware ? `Fills ~95% of ${adminCaps.fir} first seats · market $${adminMarket.first}` : `Market: $${adminMarket.first} · 119% cap, rounded to 10`}
+                      title={capacityAware ? `Fills ${adminCaps.fir} first seats · market $${adminMarket.first}` : `Market: $${adminMarket.first} · 119% cap, rounded to 10`}
                       style={{ marginTop: 4, padding: '2px 6px', fontSize: '0.72rem', background: '#eef2ff', color: '#4338ca', border: '1px solid #c7d2fe', borderRadius: 4, cursor: 'pointer' }}>
-                      Suggest ${suggestion.first}{capacityAware ? ' · 95% LF' : ''}
+                      Suggest ${suggestion.first}{capacityAware ? ' · full LF' : ''}
                     </button>
                   )}
                 </div>

@@ -892,15 +892,15 @@ router.patch('/:id/airline-cabin-profile', authMiddleware, async (req, res) => {
       if (!cpResult.rows[0]) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Cabin profile not valid for this aircraft type' }); }
     }
 
-    const now = new Date();
-    const threeDaysLater = new Date(now.getTime() + 3 * 24 * 3600 * 1000);
+    // Cancel ALL scheduled/boarding flights (incl. past-due ones stuck in 'scheduled')
+    // — otherwise they survive the cabin-profile swap as orphans and re-run alongside
+    // the new schedule once the aircraft is re-activated.
     const flightResult = await client.query(`
       SELECT id, booked_economy, booked_business, booked_first,
              economy_price, business_price, first_price, booking_revenue_collected
       FROM flights
       WHERE aircraft_id = $1 AND status IN ('scheduled', 'boarding')
-        AND departure_time >= $2 AND departure_time <= $3
-    `, [aircraftId, now.toISOString(), threeDaysLater.toISOString()]);
+    `, [aircraftId]);
 
     const flightsToCancel = flightResult.rows.map(r => ({
       id: r.id,
@@ -1154,7 +1154,13 @@ router.delete('/:id/weekly-schedule/:entryId', authMiddleware, async (req, res) 
       return res.status(400).json({ error: 'Aircraft must be inactive to edit schedule. Deactivate the aircraft first.' });
     }
 
-    // Detach any existing flights from this schedule entry so they still run but don't block deletion
+    // Cancel any already-generated future flights derived from this entry so they don't run after the template is removed
+    await pool.query(
+      `UPDATE flights SET status = 'cancelled'
+       WHERE weekly_schedule_id = $1 AND status IN ('scheduled', 'boarding')`,
+      [entryId]
+    );
+    // Detach FK so we can drop the template row
     await pool.query('UPDATE flights SET weekly_schedule_id = NULL WHERE weekly_schedule_id = $1', [entryId]);
     await pool.query('DELETE FROM weekly_schedule WHERE id = $1 AND aircraft_id = $2', [entryId, aircraftId]);
 
@@ -1199,6 +1205,7 @@ router.get('/:id/schedule', authMiddleware, async (req, res) => {
     const routesResult = await pool.query(`
       SELECT r.id, r.flight_number, r.departure_airport, r.arrival_airport, r.distance_km,
              r.economy_price, r.business_price, r.first_price, r.service_profile_id,
+             r.created_at,
              dep.runway_length_m AS dep_runway_m,
              arr.runway_length_m AS arr_runway_m
       FROM routes r
@@ -1212,6 +1219,7 @@ router.get('/:id/schedule', authMiddleware, async (req, res) => {
       distance_km: row.distance_km,
       economy_price: row.economy_price, business_price: row.business_price, first_price: row.first_price,
       service_profile_id: row.service_profile_id,
+      created_at: row.created_at,
       estimated_duration: calculateFlightDuration(row.distance_km),
       dep_runway_m: row.dep_runway_m ?? null,
       arr_runway_m: row.arr_runway_m ?? null,
@@ -1408,7 +1416,13 @@ router.delete('/:id/schedule', authMiddleware, async (req, res) => {
     const countResult = await pool.query('SELECT COUNT(*) as cnt FROM weekly_schedule WHERE aircraft_id = $1', [aircraftId]);
     const count = parseInt(countResult.rows[0].cnt);
 
-    // Detach existing flight instances from the template (FK constraint), but let them run normally
+    // Cancel any already-generated future flights so they don't run alongside the new schedule
+    await pool.query(
+      `UPDATE flights SET status = 'cancelled'
+       WHERE aircraft_id = $1 AND status IN ('scheduled', 'boarding')`,
+      [aircraftId]
+    );
+    // Detach FK so we can drop the template rows
     await pool.query('UPDATE flights SET weekly_schedule_id = NULL WHERE aircraft_id = $1', [aircraftId]);
     await pool.query('DELETE FROM weekly_schedule WHERE aircraft_id = $1', [aircraftId]);
     await pool.query('DELETE FROM maintenance_schedule WHERE aircraft_id = $1', [aircraftId]);
@@ -1819,6 +1833,16 @@ router.patch('/:id/schedule/:entryId', authMiddleware, async (req, res) => {
 
     params.push(entryId);
     await pool.query(`UPDATE weekly_schedule SET ${updates.join(', ')} WHERE id = $${paramIdx}`, params);
+
+    // If day or time changed, cancel old generated flights for this entry — generateFlights will recreate them at the new slot.
+    // Without this, old flights at the original day/time keep running in parallel with the newly generated ones.
+    if (timeOrDayChanged) {
+      await pool.query(
+        `UPDATE flights SET status = 'cancelled'
+         WHERE weekly_schedule_id = $1 AND status IN ('scheduled', 'boarding')`,
+        [entryId]
+      );
+    }
 
     const priceChanged = economy_price !== undefined || business_price !== undefined || first_price !== undefined;
     const spChanged = service_profile_id !== undefined;

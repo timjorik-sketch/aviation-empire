@@ -1197,6 +1197,38 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
   const aircraftRange = aircraft?.range_km ?? null;
 
+  // 3 most recently created routes plus each one's reverse direction (if it exists),
+  // shown in a "Recent" optgroup at the top of the route dropdowns.
+  const recentRoutes = useMemo(() => {
+    if (!routes.length) return [];
+    const sorted = [...routes].sort((a, b) => {
+      const aT = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const bT = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return bT - aT;
+    });
+    const seen = new Set();
+    const out = [];
+    for (const r of sorted.slice(0, 3)) {
+      if (!seen.has(r.id)) { seen.add(r.id); out.push(r); }
+      const reverse = routes.find(x =>
+        x.id !== r.id &&
+        x.departure_airport === r.arrival_airport &&
+        x.arrival_airport === r.departure_airport
+      );
+      if (reverse && !seen.has(reverse.id)) { seen.add(reverse.id); out.push(reverse); }
+    }
+    return out;
+  }, [routes]);
+
+  const renderRouteOption = (r, keyPrefix = '') => {
+    const outOfRange = aircraftRange && r.distance_km > aircraftRange;
+    return (
+      <option key={`${keyPrefix}${r.id}`} value={r.id} disabled={outOfRange}>
+        {outOfRange ? '⚠ ' : ''}{r.flight_number}: {r.departure_airport} → {r.arrival_airport} ({(r.distance_km ?? '?').toLocaleString()} km{outOfRange ? ' — exceeds range' : ''})
+      </option>
+    );
+  };
+
   const routeInRange = (routeId) => {
     if (!routeId || !aircraftRange) return true;
     const r = routes.find(r => r.id === parseInt(routeId));
@@ -1726,14 +1758,14 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                   </label>
                   <select value={sRouteId} onChange={e => { setSRouteId(e.target.value); setSEcoPrice(''); setSBizPrice(''); setSFirstPrice(''); }}>
                     <option value="">— select route —</option>
-                    {routes.map(r => {
-                      const outOfRange = aircraftRange && r.distance_km > aircraftRange;
-                      return (
-                        <option key={r.id} value={r.id} disabled={outOfRange}>
-                          {outOfRange ? '⚠ ' : ''}{r.flight_number}: {r.departure_airport} → {r.arrival_airport} ({(r.distance_km ?? '?').toLocaleString()} km{outOfRange ? ' — exceeds range' : ''})
-                        </option>
-                      );
-                    })}
+                    {recentRoutes.length > 0 && (
+                      <optgroup label="Recent">
+                        {recentRoutes.map(r => renderRouteOption(r, 's-recent-'))}
+                      </optgroup>
+                    )}
+                    <optgroup label="All Routes">
+                      {routes.map(r => renderRouteOption(r, 's-all-'))}
+                    </optgroup>
                   </select>
                 </div>
               </div>
@@ -1813,28 +1845,28 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                   <label>Outbound</label>
                   <select value={outRouteId} onChange={e => { setOutRouteId(e.target.value); setInRouteId(''); setREcoPrice(''); setRBizPrice(''); setRFirstPrice(''); }}>
                     <option value="">— select —</option>
-                    {routes.map(r => {
-                      const outOfRange = aircraftRange && r.distance_km > aircraftRange;
-                      return (
-                        <option key={r.id} value={r.id} disabled={outOfRange}>
-                          {outOfRange ? '⚠ ' : ''}{r.flight_number}: {r.departure_airport} → {r.arrival_airport} ({(r.distance_km ?? '?').toLocaleString()} km{outOfRange ? ' — exceeds range' : ''})
-                        </option>
-                      );
-                    })}
+                    {recentRoutes.length > 0 && (
+                      <optgroup label="Recent">
+                        {recentRoutes.map(r => renderRouteOption(r, 'out-recent-'))}
+                      </optgroup>
+                    )}
+                    <optgroup label="All Routes">
+                      {routes.map(r => renderRouteOption(r, 'out-all-'))}
+                    </optgroup>
                   </select>
                 </div>
                 <div className="sched-form-row">
                   <label>Inbound</label>
                   <select value={inRouteId} onChange={e => setInRouteId(e.target.value)}>
                     <option value="">— select —</option>
-                    {routes.map(r => {
-                      const outOfRange = aircraftRange && r.distance_km > aircraftRange;
-                      return (
-                        <option key={r.id} value={r.id} disabled={outOfRange}>
-                          {outOfRange ? '⚠ ' : ''}{r.flight_number}: {r.departure_airport} → {r.arrival_airport} ({(r.distance_km ?? '?').toLocaleString()} km{outOfRange ? ' — exceeds range' : ''})
-                        </option>
-                      );
-                    })}
+                    {recentRoutes.length > 0 && (
+                      <optgroup label="Recent">
+                        {recentRoutes.map(r => renderRouteOption(r, 'in-recent-'))}
+                      </optgroup>
+                    )}
+                    <optgroup label="All Routes">
+                      {routes.map(r => renderRouteOption(r, 'in-all-'))}
+                    </optgroup>
                   </select>
                 </div>
               </div>

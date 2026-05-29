@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import TopBar from '../components/TopBar.jsx';
 import Loader from '../components/Loader.jsx';
+import { groupAirportsForDropdown } from '../utils/airportSort.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -373,6 +374,38 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
   const visibleExpansions = useMemo(
     () => expansions.filter(e => e.airport_code !== primaryHubCode),
     [expansions, primaryHubCode]
+  );
+
+  // Adapt destinations to the shared dropdown helper shape (iata_code, name, country, display_type, category)
+  const destAsAirports = useMemo(
+    () => destinations.map(d => ({
+      iata_code: d.airport_code,
+      name: d.airport_name,
+      country: d.country,
+      display_type: d.display_type,
+      category: d.category,
+    })),
+    [destinations]
+  );
+
+  // Eligible for "Set as Primary Hub": every opened destination except home_base
+  const primaryHubOptions = useMemo(
+    () => groupAirportsForDropdown(
+      destAsAirports.filter(a => a.display_type !== 'home_base'),
+      primaryHubCode,
+    ),
+    [destAsAirports, primaryHubCode]
+  );
+
+  // Eligible for "New Secondary Hub": destinations that aren't already home_base / primary / expanded
+  const expansionAirportOptions = useMemo(
+    () => groupAirportsForDropdown(
+      destAsAirports.filter(a => a.display_type !== 'home_base'
+        && a.iata_code !== primaryHubCode
+        && !expansions.find(ex => ex.airport_code === a.iata_code)),
+      primaryHubCode,
+    ),
+    [destAsAirports, primaryHubCode, expansions]
   );
 
   // Expansion cost preview for selected airport
@@ -924,10 +957,19 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
               <label>Select Airport</label>
               <select value={expAirport} onChange={e => setExpAirport(e.target.value)}>
                 <option value="">— choose destination —</option>
-                {destinations.filter(d => d.destination_type !== 'home_base' && !d.is_primary_hub && !expansions.find(ex => ex.airport_code === d.airport_code)).map(d => (
-                  <option key={d.airport_code} value={d.airport_code}>
-                    {d.airport_code} — {d.airport_name} (Cat {d.category})
+                {expansionAirportOptions.top.map(a => (
+                  <option key={a.iata_code} value={a.iata_code}>
+                    {a.iata_code} — {a.name} (Cat {a.category})
                   </option>
+                ))}
+                {expansionAirportOptions.countries.map(country => (
+                  <optgroup key={country} label={country}>
+                    {expansionAirportOptions.byCountry[country].map(a => (
+                      <option key={a.iata_code} value={a.iata_code}>
+                        {a.iata_code} — {a.name} (Cat {a.category})
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
             </div>
@@ -980,13 +1022,20 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
               <label>Select Airport</label>
               <select value={primaryAirport} onChange={e => setPrimaryAirport(e.target.value)}>
                 <option value="">— choose destination —</option>
-                {destinations
-                  .filter(d => d.destination_type !== 'home_base')
-                  .map(d => (
-                    <option key={d.airport_code} value={d.airport_code}>
-                      {d.airport_code} — {d.airport_name} (Cat {d.category})
-                    </option>
-                  ))}
+                {primaryHubOptions.top.map(a => (
+                  <option key={a.iata_code} value={a.iata_code}>
+                    {a.iata_code} — {a.name} (Cat {a.category})
+                  </option>
+                ))}
+                {primaryHubOptions.countries.map(country => (
+                  <optgroup key={country} label={country}>
+                    {primaryHubOptions.byCountry[country].map(a => (
+                      <option key={a.iata_code} value={a.iata_code}>
+                        {a.iata_code} — {a.name} (Cat {a.category})
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
               </select>
             </div>
             {primaryError && <p style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{primaryError}</p>}

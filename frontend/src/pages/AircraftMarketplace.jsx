@@ -3,6 +3,7 @@ import TopBar from '../components/TopBar.jsx';
 import Toast from '../components/Toast.jsx';
 import AirlineProfilePopup from '../components/AirlineProfilePopup.jsx';
 import Loader from '../components/Loader.jsx';
+import { groupAirportsForDropdown } from '../utils/airportSort.js';
 // aircraftValue utils used via local fmt() helper below
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -65,6 +66,7 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
   // Data
   const [allTypes, setAllTypes]     = useState([]);
   const [airports, setAirports]     = useState([]);
+  const [primaryHubCode, setPrimaryHubCode] = useState(null);
   const [usedListings, setUsedListings] = useState([]);
   const [loading, setLoading]       = useState(true);
 
@@ -91,6 +93,7 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
     ]).then(([mkt, apts, used]) => {
       setAllTypes(mkt.aircraft_types || []);
       setAirports(apts.airports || []);
+      setPrimaryHubCode(apts.primary_hub_airport_code ?? null);
       setDeliveryAirport(airline.home_airport_code || '');
       setUsedListings(used.listings || []);
     }).catch(() => setError('Failed to load market data'))
@@ -99,6 +102,11 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
 
   // Only purchasable types (locked aircraft hidden entirely)
   const purchasableTypes = useMemo(() => allTypes.filter(ac => ac.can_purchase), [allTypes]);
+
+  const airportOptions = useMemo(
+    () => groupAirportsForDropdown(airports, primaryHubCode),
+    [airports, primaryHubCode]
+  );
 
   // Max range across purchasable types (for slider)
   const maxRangeInData = useMemo(() => {
@@ -472,9 +480,14 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
                   <div className="am-form-row">
                     <label>Delivery Airport</label>
                     <select value={deliveryAirport} onChange={e => setDeliveryAirport(e.target.value)} className="am-form-select">
-                      {Object.entries(airports.reduce((acc, a) => { (acc[a.country] = acc[a.country] || []).push(a); return acc; }, {})).sort(([a],[b]) => a.localeCompare(b)).map(([country, list]) => (
+                      {airportOptions.top.map(a => (
+                        <option key={a.iata_code} value={a.iata_code}>
+                          {a.iata_code} – {a.name}{a.iata_code === airline.home_airport_code ? ' (Home)' : ''}
+                        </option>
+                      ))}
+                      {airportOptions.countries.map(country => (
                         <optgroup key={country} label={country}>
-                          {list.map(a => (
+                          {airportOptions.byCountry[country].map(a => (
                             <option key={a.iata_code} value={a.iata_code}>
                               {a.iata_code} – {a.name}{a.iata_code === airline.home_airport_code ? ' (Home)' : ''}
                             </option>
@@ -555,9 +568,14 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
                       <div className="am-form-row">
                         <label>Delivery Airport</label>
                         <select value={deliveryAirport} onChange={e => setDeliveryAirport(e.target.value)} className="am-form-select">
-                          {Object.entries(airports.reduce((acc, a) => { (acc[a.country] = acc[a.country] || []).push(a); return acc; }, {})).sort(([a],[b]) => a.localeCompare(b)).map(([country, list]) => (
+                          {airportOptions.top.map(a => (
+                            <option key={a.iata_code} value={a.iata_code}>
+                              {a.iata_code} – {a.name}{a.iata_code === airline.home_airport_code ? ' (Home)' : ''}
+                            </option>
+                          ))}
+                          {airportOptions.countries.map(country => (
                             <optgroup key={country} label={country}>
-                              {list.map(a => (
+                              {airportOptions.byCountry[country].map(a => (
                                 <option key={a.iata_code} value={a.iata_code}>
                                   {a.iata_code} – {a.name}{a.iata_code === airline.home_airport_code ? ' (Home)' : ''}
                                 </option>

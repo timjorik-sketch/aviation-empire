@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import AirportLink from '../components/AirportLink.jsx';
+import { groupAirportsForDropdown } from '../utils/airportSort.js';
 import TopBar from '../components/TopBar.jsx';
 import Toast from '../components/Toast.jsx';
 import RoutePreviewMap from '../components/RoutePreviewMap.jsx';
@@ -361,6 +362,7 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
       setAirports(dests.map(d => ({
         iata_code: d.airport_code, name: d.airport_name, country: d.country,
         effective_type: d.effective_type || d.destination_type,
+        display_type: d.display_type || d.effective_type || d.destination_type,
       })));
       setAnalyses(analysesData.analyses || []);
       setWeekUsed(analysesData.week_used || 0);
@@ -533,19 +535,15 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
     }
   };
 
-  const TIER_LABEL = { home_base: ' (Home-Base)', base: ' 🔥' };
-  const airportsByCountry = airports.reduce((acc, a) => {
-    if (!acc[a.country]) acc[a.country] = [];
-    acc[a.country].push(a);
-    return acc;
-  }, {});
+  const TIER_LABEL = { home_base: ' (Home-Base)', primary_hub: ' (Primary Hub)', hub: ' (Secondary Hub)', hub_restricted: ' (Secondary Hub)', base: ' 🔥' };
+  const airportOptions = useMemo(() => groupAirportsForDropdown(airports), [airports]);
+  // country grouping still needed for the all-airports check tool (uses allAirportsByCountry)
   const homeCountry = airports.find(a => a.effective_type === 'home_base')?.country || '';
   const countrySort = (a, b) => {
     if (a === homeCountry && b !== homeCountry) return -1;
     if (b === homeCountry && a !== homeCountry) return 1;
     return a.localeCompare(b);
   };
-  const sortedAirportCountries = Object.keys(airportsByCountry).sort(countrySort);
   const formatPrice = (p) => p == null ? '—' : `$${Number(p).toLocaleString()}`;
 
   if (loading) {
@@ -768,9 +766,14 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                   <select value={departureAirport} onChange={e => setDepartureAirport(e.target.value)} required
                     style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E0E0E0', fontSize: '0.9rem' }}>
                     <option value="">Select...</option>
-                    {sortedAirportCountries.map(country => (
+                    {airportOptions.top.map(a => (
+                      <option key={a.iata_code} value={a.iata_code}>
+                        {a.iata_code} – {a.name}{TIER_LABEL[a.effective_type] || ''}
+                      </option>
+                    ))}
+                    {airportOptions.countries.map(country => (
                       <optgroup key={country} label={country}>
-                        {airportsByCountry[country].map(a => (
+                        {airportOptions.byCountry[country].map(a => (
                           <option key={a.iata_code} value={a.iata_code}>
                             {a.iata_code} – {a.name}{TIER_LABEL[a.effective_type] || ''}
                           </option>
@@ -784,9 +787,14 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                   <select value={arrivalAirport} onChange={e => setArrivalAirport(e.target.value)} required
                     style={{ width: '100%', padding: '0.5rem', borderRadius: '6px', border: '1px solid #E0E0E0', fontSize: '0.9rem' }}>
                     <option value="">Select...</option>
-                    {sortedAirportCountries.map(country => (
+                    {airportOptions.top.map(a => (
+                      <option key={a.iata_code} value={a.iata_code} disabled={a.iata_code === departureAirport}>
+                        {a.iata_code} – {a.name}{TIER_LABEL[a.effective_type] || ''}
+                      </option>
+                    ))}
+                    {airportOptions.countries.map(country => (
                       <optgroup key={country} label={country}>
-                        {airportsByCountry[country].map(a => (
+                        {airportOptions.byCountry[country].map(a => (
                           <option key={a.iata_code} value={a.iata_code} disabled={a.iata_code === departureAirport}>
                             {a.iata_code} – {a.name}{TIER_LABEL[a.effective_type] || ''}
                           </option>

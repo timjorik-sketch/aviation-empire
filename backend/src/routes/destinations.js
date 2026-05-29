@@ -118,16 +118,29 @@ router.get('/opened', authMiddleware, async (req, res) => {
     const primaryHubCode = airlineRes.rows[0]?.primary_hub_airport_code ?? null;
 
     const result = await pool.query(`
-      SELECT ap.iata_code, ap.name, ap.country, d.destination_type
+      SELECT ap.iata_code, ap.name, ap.country, d.destination_type,
+             COALESCE((SELECT ae.expansion_level FROM airport_expansions ae
+              WHERE ae.airline_id = d.airline_id AND ae.airport_code = d.airport_code
+             ), 0) AS expansion_level
       FROM airline_destinations d
       JOIN airports ap ON d.airport_code = ap.iata_code
       WHERE d.airline_id = $1
       ORDER BY ap.country, ap.name
     `, [req.airlineId]);
 
-    const airports = result.rows.map(r => ({
-      iata_code: r.iata_code, name: r.name, country: r.country, destination_type: r.destination_type
-    }));
+    const airports = result.rows.map(r => {
+      const dtype = r.destination_type;
+      const isPrimaryHub = primaryHubCode && r.iata_code === primaryHubCode;
+      const hasExpansion = (parseInt(r.expansion_level) || 0) > 0;
+      const display_type = dtype === 'home_base' ? 'home_base'
+        : isPrimaryHub ? 'primary_hub'
+        : hasExpansion ? 'hub_restricted'
+        : dtype;
+      return {
+        iata_code: r.iata_code, name: r.name, country: r.country,
+        destination_type: dtype, display_type
+      };
+    });
     res.json({ airports, primary_hub_airport_code: primaryHubCode });
   } catch (error) {
     console.error('Get opened destinations error:', error);

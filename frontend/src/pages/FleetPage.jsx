@@ -4,6 +4,7 @@ import Toast from '../components/Toast.jsx';
 import Loader from '../components/Loader.jsx';
 import TopBar from '../components/TopBar.jsx';
 import { calculateCurrentValue, formatAircraftValue } from '../utils/aircraftValue.js';
+import { groupAirportsForDropdown } from '../utils/airportSort.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -403,40 +404,10 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
     return groups;
   }, [sortedOverview]);
 
-  // Opened airports split into flat top tiers (home / primary / secondary hubs) + by-country rest
-  const homebaseOptions = useMemo(() => {
-    const top = [];
-    const rest = [];
-    for (const a of openedAirports) {
-      if (a.destination_type === 'home_base'
-        || (primaryHubCode && a.iata_code === primaryHubCode)
-        || a.destination_type === 'hub'
-        || a.destination_type === 'hub_restricted') {
-        top.push(a);
-      } else {
-        rest.push(a);
-      }
-    }
-    const rank = (a) => {
-      if (a.destination_type === 'home_base') return 0;
-      if (primaryHubCode && a.iata_code === primaryHubCode) return 1;
-      return 2;
-    };
-    top.sort((a, b) => {
-      const ra = rank(a), rb = rank(b);
-      if (ra !== rb) return ra - rb;
-      return a.iata_code.localeCompare(b.iata_code);
-    });
-    const byCountry = rest.reduce((acc, a) => {
-      const c = a.country || '—';
-      if (!acc[c]) acc[c] = [];
-      acc[c].push(a);
-      return acc;
-    }, {});
-    const countries = Object.keys(byCountry).sort((a, b) => a.localeCompare(b));
-    for (const c of countries) byCountry[c].sort((a, b) => a.iata_code.localeCompare(b.iata_code));
-    return { top, countries, byCountry };
-  }, [openedAirports, primaryHubCode]);
+  const homebaseOptions = useMemo(
+    () => groupAirportsForDropdown(openedAirports, primaryHubCode),
+    [openedAirports, primaryHubCode]
+  );
 
   const SortIcon = ({ col }) => {
     if (sortCol !== col) return <span style={{ opacity: 0.3, marginLeft: '4px' }}>↕</span>;

@@ -2179,22 +2179,19 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                         <td><span className={`ad-sf-badge ad-sf-badge--${st.cls}`} style={{ color: st.color }}>{st.label}</span></td>
                         <td className="ad-sf-pax">
                           {(() => {
-                            if (f.status === 'completed') {
-                              return (
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                                  <span style={{ background: 'rgba(156,163,175,0.12)', color: '#9ca3af', fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', borderRadius: '4px', padding: '0.15rem 0.55rem', whiteSpace: 'nowrap' }}>
-                                    {f.seats_sold ?? 0}/{f.total_seats}
-                                  </span>
-                                  {f.satisfaction_score != null && scoreToRating(f.satisfaction_score) < 5.0 &&
-                                    <span style={{ background: 'rgba(220,38,38,0.1)', color: '#b91c1c', fontSize: '0.68rem', fontWeight: 700, borderRadius: '4px', padding: '0.15rem 0.45rem', lineHeight: 1 }}>{scoreToRating(f.satisfaction_score).toFixed(1)}!</span>
-                                  }
-                                </span>
-                              );
-                            }
                             // Single whole-aircraft load percentage (across all classes)
                             const fillPct = f.total_seats > 0 ? Math.round((f.seats_sold ?? 0) / f.total_seats * 100) : 0;
                             const fc = fillPct >= 80 ? '#16a34a' : fillPct >= 50 ? '#ca8a04' : '#dc2626';
-                            return <span style={{ color: fc, fontWeight: 600 }}>{f.seats_sold ?? 0}/{f.total_seats} ({fillPct}%)</span>;
+                            return (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                                <span style={{ background: `${fc}18`, color: fc, fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.04em', borderRadius: '4px', padding: '0.15rem 0.55rem', whiteSpace: 'nowrap' }}>
+                                  {fillPct}%
+                                </span>
+                                {f.status === 'completed' && f.satisfaction_score != null && scoreToRating(f.satisfaction_score) < 5.0 &&
+                                  <span style={{ background: 'rgba(220,38,38,0.1)', color: '#b91c1c', fontSize: '0.68rem', fontWeight: 700, borderRadius: '4px', padding: '0.15rem 0.45rem', lineHeight: 1 }}>{scoreToRating(f.satisfaction_score).toFixed(1)}!</span>
+                                }
+                              </span>
+                            );
                           })()}
                         </td>
                         <td className="ad-sf-rev">

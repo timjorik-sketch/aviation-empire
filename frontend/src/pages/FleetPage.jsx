@@ -403,19 +403,39 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
     return groups;
   }, [sortedOverview]);
 
-  // Opened airports sorted: home base → primary hub → secondary hubs → rest alphabetical
-  const sortedOpenedAirports = useMemo(() => {
+  // Opened airports split into flat top tiers (home / primary / secondary hubs) + by-country rest
+  const homebaseOptions = useMemo(() => {
+    const top = [];
+    const rest = [];
+    for (const a of openedAirports) {
+      if (a.destination_type === 'home_base'
+        || (primaryHubCode && a.iata_code === primaryHubCode)
+        || a.destination_type === 'hub'
+        || a.destination_type === 'hub_restricted') {
+        top.push(a);
+      } else {
+        rest.push(a);
+      }
+    }
     const rank = (a) => {
       if (a.destination_type === 'home_base') return 0;
       if (primaryHubCode && a.iata_code === primaryHubCode) return 1;
-      if (a.destination_type === 'hub' || a.destination_type === 'hub_restricted') return 2;
-      return 3;
+      return 2;
     };
-    return [...openedAirports].sort((a, b) => {
+    top.sort((a, b) => {
       const ra = rank(a), rb = rank(b);
       if (ra !== rb) return ra - rb;
       return a.iata_code.localeCompare(b.iata_code);
     });
+    const byCountry = rest.reduce((acc, a) => {
+      const c = a.country || '—';
+      if (!acc[c]) acc[c] = [];
+      acc[c].push(a);
+      return acc;
+    }, {});
+    const countries = Object.keys(byCountry).sort((a, b) => a.localeCompare(b));
+    for (const c of countries) byCountry[c].sort((a, b) => a.iata_code.localeCompare(b.iata_code));
+    return { top, countries, byCountry };
   }, [openedAirports, primaryHubCode]);
 
   const SortIcon = ({ col }) => {
@@ -846,10 +866,19 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                                           onChange={e => handleHomeBaseChange(ac, e.target.value)}
                                         >
                                           <option value="">— None —</option>
-                                          {sortedOpenedAirports.map(ap => (
+                                          {homebaseOptions.top.map(ap => (
                                             <option key={ap.iata_code} value={ap.iata_code}>
                                               {ap.iata_code} – {ap.name}
                                             </option>
+                                          ))}
+                                          {homebaseOptions.countries.map(country => (
+                                            <optgroup key={country} label={country}>
+                                              {homebaseOptions.byCountry[country].map(ap => (
+                                                <option key={ap.iata_code} value={ap.iata_code}>
+                                                  {ap.iata_code} – {ap.name}
+                                                </option>
+                                              ))}
+                                            </optgroup>
                                           ))}
                                         </select>
                                       </td>

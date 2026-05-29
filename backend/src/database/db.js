@@ -57,36 +57,18 @@ async function runStatements(stmts, context = '') {
 
     let pgStmt = stmt;
 
-    // INSERT OR IGNORE → INSERT ... ON CONFLICT
+    // INSERT OR IGNORE → INSERT ... ON CONFLICT DO NOTHING
+    // DB is the source of truth: seeds only INSERT rows that don't exist yet and
+    // never overwrite existing ones (airports included), so manual edits survive.
     if (pgStmt.includes('__INSERT_IGNORE__')) {
       pgStmt = pgStmt.replace('__INSERT_IGNORE__', 'INSERT');
-      // For airports with full details (category/coords): upsert so detailed rows overwrite basic ones
-      if (/INTO airports\s*\(/i.test(pgStmt) && /\blatitude\b/i.test(pgStmt)) {
-        pgStmt += ` ON CONFLICT (iata_code) DO UPDATE SET
-          name=EXCLUDED.name,
-          category=EXCLUDED.category,
-          continent=EXCLUDED.continent,
-          runway_length_m=EXCLUDED.runway_length_m,
-          latitude=EXCLUDED.latitude,
-          longitude=EXCLUDED.longitude`;
-      } else {
-        pgStmt += ' ON CONFLICT DO NOTHING';
-      }
+      pgStmt += ' ON CONFLICT DO NOTHING';
     }
-    // INSERT OR REPLACE for service_item_types → upsert
+    // INSERT OR REPLACE → INSERT ... ON CONFLICT DO NOTHING
+    // DB is the source of truth — seeds never overwrite existing rows.
     if (pgStmt.includes('__INSERT_REPLACE__')) {
-      if (/INTO service_item_types/i.test(pgStmt)) {
-        pgStmt = pgStmt.replace('__INSERT_REPLACE__', 'INSERT');
-        pgStmt += ` ON CONFLICT (id) DO UPDATE SET
-          item_name=EXCLUDED.item_name, category=EXCLUDED.category,
-          price_per_pax=EXCLUDED.price_per_pax, price_economy=EXCLUDED.price_economy,
-          price_business=EXCLUDED.price_business, price_first=EXCLUDED.price_first,
-          sort_order=EXCLUDED.sort_order, image_eco=EXCLUDED.image_eco,
-          image_bus=EXCLUDED.image_bus, image_fir=EXCLUDED.image_fir`;
-      } else {
-        pgStmt = pgStmt.replace('__INSERT_REPLACE__', 'INSERT');
-        pgStmt += ' ON CONFLICT DO NOTHING';
-      }
+      pgStmt = pgStmt.replace('__INSERT_REPLACE__', 'INSERT');
+      pgStmt += ' ON CONFLICT DO NOTHING';
     }
 
     try {
@@ -110,10 +92,37 @@ async function safeQuery(sql, params, label) {
   }
 }
 
+// ── ONE-TIME MIGRATIONS ──────────────────────────────────────────────────────
+// The database is the SINGLE SOURCE OF TRUTH. Historical data-fix blocks used to
+// re-run on every boot and overwrite live rows, clobbering manual edits made in
+// Supabase. runOnce() gates each such block on an `applied_migrations` row: it
+// runs the block at most once per database (the last assertion of the fixed
+// values), records the key, and never fights manual corrections again.
+// Requires the `applied_migrations` table to exist (created at init start).
+async function runOnce(key, fn) {
+  try {
+    const { rows } = await pool.query('SELECT 1 FROM applied_migrations WHERE key = $1', [key]);
+    if (rows.length) return;
+  } catch (e) {
+    console.warn(`[runOnce ${key}] check failed, running anyway: ${(e.message || '').substring(0, 100)}`);
+  }
+  await fn();
+  await pool
+    .query('INSERT INTO applied_migrations (key) VALUES ($1) ON CONFLICT DO NOTHING', [key])
+    .catch((e) => console.warn(`[runOnce ${key}] mark failed: ${(e.message || '').substring(0, 100)}`));
+}
+
 async function initDatabase() {
   // Test connection
   await pool.query('SELECT 1');
   console.log('PostgreSQL connected');
+
+  // Tracking table for one-time migrations (see runOnce). Must exist before any
+  // runOnce() call so historical data-fix blocks can freeze themselves.
+  await pool.query(`CREATE TABLE IF NOT EXISTS applied_migrations (
+    key TEXT PRIMARY KEY,
+    applied_at TIMESTAMPTZ DEFAULT now()
+  )`);
 
   // Read and transform schema
   const rawSchema = fs.readFileSync(SCHEMA_PATH, 'utf-8');
@@ -412,7 +421,11 @@ async function initDatabase() {
     `ALTER TABLE airports ADD COLUMN IF NOT EXISTS category INTEGER DEFAULT 4`,
     `ALTER TABLE airports ADD COLUMN IF NOT EXISTS continent TEXT`,
     `ALTER TABLE airports ADD COLUMN IF NOT EXISTS state TEXT`,
-    `ALTER TABLE airports ADD COLUMN IF NOT EXISTS runway_length_m INTEGER DEFAULT 2500`,
+    `ALTER TABLE airports ADD COLUMN IF NOT EXISTS runway_length_m INTEGER`,
+    // DB is the source of truth for runway length. Drop the old DEFAULT 2500 so
+    // airports inserted without a value are NULL (and get backfilled from
+    // runwayLengths.js below) instead of silently looking like a 2500m runway.
+    `ALTER TABLE airports ALTER COLUMN runway_length_m DROP DEFAULT`,
     `ALTER TABLE airports ADD COLUMN IF NOT EXISTS latitude REAL`,
     `ALTER TABLE airports ADD COLUMN IF NOT EXISTS longitude REAL`,
     `ALTER TABLE airports ADD COLUMN IF NOT EXISTS runway_heading INTEGER`,
@@ -529,12 +542,7 @@ async function initDatabase() {
     (13, 'Luggage 1 – Cabin',  'Luggage',        5.00,  5.00,  5.00,  5.00, 13, 'Service_Luggage_1.png',         'Service_Luggage_1.png',         'Service_Luggage_1.png'),
     (14, 'Luggage 2 – Medium', 'Luggage',       20.00, 20.00, 20.00, 20.00, 14, 'Service_Luggage_2.png',         'Service_Luggage_2.png',         'Service_Luggage_2.png'),
     (15, 'Luggage 3 – Large',  'Luggage',       35.00, 35.00, 35.00, 35.00, 15, 'Service_Luggage_3.png',         'Service_Luggage_3.png',         'Service_Luggage_3.png')
-    ON CONFLICT (id) DO UPDATE SET
-      item_name=EXCLUDED.item_name, category=EXCLUDED.category,
-      price_per_pax=EXCLUDED.price_per_pax, price_economy=EXCLUDED.price_economy,
-      price_business=EXCLUDED.price_business, price_first=EXCLUDED.price_first,
-      sort_order=EXCLUDED.sort_order, image_eco=EXCLUDED.image_eco,
-      image_bus=EXCLUDED.image_bus, image_fir=EXCLUDED.image_fir
+    ON CONFLICT (id) DO NOTHING
   `);
 
   await safeQuery(`SELECT setval('service_item_types_id_seq', COALESCE((SELECT MAX(id) FROM service_item_types), 1))`, null, 'setval sit');
@@ -600,10 +608,10 @@ async function initDatabase() {
   // Standardize Airbus Neo naming on the manufacturer's "A3XXneo" form.
   // Why: keeps existing DB rows aligned with the new seed names so the
   // full_name-based UPDATE filters below still match.
-  await runStatements([
+  await runOnce('fix:neo-name-normalization', () => runStatements([
     "UPDATE aircraft_types SET model='A319neo', full_name='Airbus A319neo' WHERE model IN ('A319 Neo','A319neo')",
     "UPDATE aircraft_types SET model='A321neo', full_name='Airbus A321neo' WHERE model IN ('A321 Neo','A321neo')",
-  ], 'neo name normalization');
+  ], 'neo name normalization'));
 
   // ── DATA CORRECTIONS ─────────────────────────────────────────────────────────
   // Aircraft runway & fuel corrections
@@ -778,7 +786,7 @@ async function initDatabase() {
     // Sukhoi
     ["UPDATE aircraft_types SET display_order=100 WHERE full_name='Sukhoi Superjet 100'"],
   ];
-  await runStatements(fuelCorrections.map(([s]) => s), 'data fixes');
+  await runOnce('fix:aircraft-data-corrections', () => runStatements(fuelCorrections.map(([s]) => s), 'data fixes'));
 
   // ── TOFL (min_runway_takeoff_m) corrections ───────────────────────────────
   const toflCorrections = [
@@ -846,7 +854,7 @@ async function initDatabase() {
     "UPDATE aircraft_types SET min_runway_takeoff_m=3200 WHERE full_name='Boeing 747-400'",
     "UPDATE aircraft_types SET min_runway_takeoff_m=2850 WHERE full_name='Airbus A350-900 ULR'",
   ];
-  await runStatements(toflCorrections, 'TOFL corrections');
+  await runOnce('fix:tofl-corrections', () => runStatements(toflCorrections, 'TOFL corrections'));
 
   // Depreciation parameters
   const depreciationData = [
@@ -867,19 +875,21 @@ async function initDatabase() {
     [61,0.032,0.0000072],[40,0.032,0.0000072],[41,0.032,0.0000072],
     [13,0.028,0.000009],[14,0.028,0.000009],[35,0.028,0.000009],[36,0.028,0.000009],
   ];
-  for (const [id, kAge, kFh] of depreciationData) {
-    await pool.query(
-      'UPDATE aircraft_types SET depreciation_age=$1, depreciation_fh=$2 WHERE id=$3',
-      [kAge, kFh, id]
-    ).catch(() => {});
-  }
+  await runOnce('fix:depreciation-params', async () => {
+    for (const [id, kAge, kFh] of depreciationData) {
+      await pool.query(
+        'UPDATE aircraft_types SET depreciation_age=$1, depreciation_fh=$2 WHERE id=$3',
+        [kAge, kFh, id]
+      ).catch(() => {});
+    }
+  });
 
   // fuel_consumption_per_km sync
-  await pool.query(`
+  await runOnce('fix:fuel-consumption-sync', () => pool.query(`
     UPDATE aircraft_types
     SET fuel_consumption_per_km = ROUND(CAST(fuel_consumption_full_per_km * 100 AS numeric), 4)
     WHERE fuel_consumption_per_km < 1
-  `).catch(() => {});
+  `).catch(() => {}));
 
   // ── RUNWAY HEADINGS (OurAirports public-domain data, ~5500 airports) ─────────
   // Used by the live map to render approach/departure corridors. Bulk-update in a
@@ -895,18 +905,18 @@ async function initDatabase() {
   );
 
   // ── RUNWAY LENGTHS (OurAirports public-domain data, ~7500 airports) ──────────
-  // Authoritative source for runway_length_m — overwrites schema.sql values which
-  // were largely hand-estimated and wrong for hundreds of airports. Bulk-update
-  // via jsonb_each_text; only changes rows where the new value differs.
-  // Add manual overrides AFTER this block if OurAirports has bad data for a
-  // specific airport (rare; e.g. military/factory strips).
+  // BACKFILL ONLY — the database is the source of truth for runway_length_m.
+  // This fills airports that have no value yet (NULL); it does NOT overwrite
+  // existing values, so manual corrections in the DB (Supabase) survive restarts.
+  // To fix a wrong runway: just edit the row in the DB — it sticks.
+  // (Was previously an overwrite-on-every-boot; that clobbered manual edits.)
   await safeQuery(
     `UPDATE airports a
        SET runway_length_m = (h.value)::int
        FROM jsonb_each_text($1::jsonb) h
-       WHERE a.iata_code = h.key AND a.runway_length_m IS DISTINCT FROM (h.value)::int`,
+       WHERE a.iata_code = h.key AND a.runway_length_m IS NULL`,
     [JSON.stringify(RUNWAY_LENGTHS)],
-    'runway length seed'
+    'runway length backfill'
   );
 
   // ── AIRPORT CATEGORY CORRECTIONS (runs after geo seed, before fee seed) ──────
@@ -942,9 +952,11 @@ async function initDatabase() {
     ['CAN', 8], ['CDG', 8], ['DEL', 8], ['DXB', 8], ['IST', 8], ['LAX', 8],
     ['LHR', 8], ['ORD', 8], ['SIN', 8], ['PEK', 8],
   ];
-  for (const [code, cat] of airportCategoryFixes) {
-    await safeQuery('UPDATE airports SET category=$1 WHERE iata_code=$2', [cat, code], `cat fix ${code}`);
-  }
+  await runOnce('fix:airport-categories', async () => {
+    for (const [code, cat] of airportCategoryFixes) {
+      await safeQuery('UPDATE airports SET category=$1 WHERE iata_code=$2', [cat, code], `cat fix ${code}`);
+    }
+  });
   // BJS → PEK rename (Beijing city code → actual airport code)
   await safeQuery(`UPDATE airports SET iata_code='PEK', name='Beijing Capital International Airport' WHERE iata_code='BJS'`, null, 'BJS→PEK rename');
 
@@ -1044,7 +1056,14 @@ async function initDatabase() {
     4:[300,700,2200,400,650,950],    3:[250,550,1800,350,500,750],
     2:[200,400,1400,300,400,600],    1:[150,300,1000,250,300,450],
   };
-  const { rows: allAirports } = await safeQuery('SELECT iata_code, category FROM airports', null, 'airport fees fetch');
+  // BACKFILL ONLY — fees are derived from category, but the DB is the source of
+  // truth. We only seed airports still at the column DEFAULT (landing_fee_light
+  // = 500, which is never a real CAT_FEES value) or NULL. Existing/edited fees
+  // are left untouched, and newly added airports get category fees on first boot.
+  const { rows: allAirports } = await safeQuery(
+    'SELECT iata_code, category FROM airports WHERE landing_fee_light IS NULL OR landing_fee_light = 500',
+    null, 'airport fees fetch (unset only)'
+  );
   for (const { iata_code, category } of allAirports) {
     const [l,m,h,gl,gm,gh] = CAT_FEES[category] || CAT_FEES[3];
     await safeQuery(

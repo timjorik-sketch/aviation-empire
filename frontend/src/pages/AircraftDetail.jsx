@@ -2179,10 +2179,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                         <td><span className={`ad-sf-badge ad-sf-badge--${st.cls}`} style={{ color: st.color }}>{st.label}</span></td>
                         <td className="ad-sf-pax">
                           {(() => {
-                            const ecoCap = f.eco_capacity || 0;
-                            const bizCap = f.biz_capacity || 0;
-                            const firCap = f.fir_capacity || 0;
-                            const hasClasses = ecoCap + bizCap + firCap > 0;
                             if (f.status === 'completed') {
                               return (
                                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
@@ -2195,30 +2191,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                                 </span>
                               );
                             }
-                            if (!hasClasses) {
-                              const fillPct = f.total_seats > 0 ? Math.round((f.seats_sold ?? 0) / f.total_seats * 100) : 0;
-                              const fc = fillPct >= 80 ? '#16a34a' : fillPct >= 50 ? '#ca8a04' : '#dc2626';
-                              return <span style={{ color: fc, fontWeight: 600 }}>{f.seats_sold ?? 0}/{f.total_seats} ({fillPct}%)</span>;
-                            }
-                            // Per-class fill pills
-                            const classes = [
-                              { lbl: 'E', booked: f.booked_economy ?? 0, cap: ecoCap },
-                              { lbl: 'B', booked: f.booked_business ?? 0, cap: bizCap },
-                              { lbl: 'F', booked: f.booked_first ?? 0, cap: firCap },
-                            ].filter(c => c.cap > 0);
-                            return (
-                              <span style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                                {classes.map(c => {
-                                  const pct = c.cap > 0 ? Math.round(c.booked / c.cap * 100) : 0;
-                                  const fc = pct >= 80 ? '#16a34a' : pct >= 50 ? '#ca8a04' : '#dc2626';
-                                  return (
-                                    <span key={c.lbl} style={{ fontSize: '0.72rem', fontWeight: 700, color: fc, background: `${fc}18`, borderRadius: '3px', padding: '1px 4px' }}>
-                                      {c.lbl}: {c.booked}/{c.cap}
-                                    </span>
-                                  );
-                                })}
-                              </span>
-                            );
+                            // Single whole-aircraft load percentage (across all classes)
+                            const fillPct = f.total_seats > 0 ? Math.round((f.seats_sold ?? 0) / f.total_seats * 100) : 0;
+                            const fc = fillPct >= 80 ? '#16a34a' : fillPct >= 50 ? '#ca8a04' : '#dc2626';
+                            return <span style={{ color: fc, fontWeight: 600 }}>{f.seats_sold ?? 0}/{f.total_seats} ({fillPct}%)</span>;
                           })()}
                         </td>
                         <td className="ad-sf-rev">

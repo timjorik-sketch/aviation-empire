@@ -246,6 +246,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [editHomebase, setEditHomebase] = useState('');
   const [homebaseSaving, setHomebaseSaving] = useState(false);
   const [airports, setAirports]         = useState([]);
+  const [primaryHubCode, setPrimaryHubCode] = useState(null);
   const [currentFlight, setCurrentFlight] = useState(null);
   const [currentLocation, setCurrentLocation] = useState(null);
   const [stats, setStats]               = useState({ total_flights: 0, total_profit: 0 });
@@ -342,6 +343,21 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const hasBusiness = selectedProfile?.classes?.some(c => c.class_type === 'business' && c.actual_capacity > 0) ?? false;
   const hasFirst    = selectedProfile?.classes?.some(c => c.class_type === 'first'    && c.actual_capacity > 0) ?? false;
 
+  // Opened airports sorted: home base → primary hub → secondary hubs → rest alphabetical
+  const sortedHomebaseAirports = useMemo(() => {
+    const rank = (a) => {
+      if (a.destination_type === 'home_base') return 0;
+      if (primaryHubCode && a.iata_code === primaryHubCode) return 1;
+      if (a.destination_type === 'hub' || a.destination_type === 'hub_restricted') return 2;
+      return 3;
+    };
+    return [...airports].sort((a, b) => {
+      const ra = rank(a), rb = rank(b);
+      if (ra !== rb) return ra - rb;
+      return a.iata_code.localeCompare(b.iata_code);
+    });
+  }, [airports, primaryHubCode]);
+
   const CABIN_CREW_RATIOS = { economy: 30, premium_economy: 30, business: 12, first: 6, first_suite: 4 };
   const cabinCrewCount = useMemo(() => {
     if (!selectedProfile) return 5;
@@ -391,7 +407,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     try {
       const res  = await fetch(`${API_URL}/api/destinations/opened`, { headers });
       const data = await res.json();
-      if (res.ok) setAirports(data.airports || []);
+      if (res.ok) {
+        setAirports(data.airports || []);
+        setPrimaryHubCode(data.primary_hub_airport_code ?? null);
+      }
     } catch {}
   }, []);
 
@@ -1466,10 +1485,8 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                         onChange={e => { setEditHomebase(e.target.value); handleHomebaseSave(e.target.value); }}
                         disabled={homebaseSaving}>
                         <option value="">— None —</option>
-                        {Object.entries(airports.reduce((acc, a) => { (acc[a.country] = acc[a.country] || []).push(a); return acc; }, {})).sort(([a],[b]) => a.localeCompare(b)).map(([country, list]) => (
-                          <optgroup key={country} label={country}>
-                            {list.map(ap => <option key={ap.iata_code} value={ap.iata_code}>{ap.iata_code} – {ap.name}</option>)}
-                          </optgroup>
+                        {sortedHomebaseAirports.map(ap => (
+                          <option key={ap.iata_code} value={ap.iata_code}>{ap.iata_code} – {ap.name}</option>
                         ))}
                       </select>
                     </td>

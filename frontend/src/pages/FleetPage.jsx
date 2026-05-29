@@ -22,6 +22,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
   const [profilesByType, setProfilesByType] = useState({}); // typeId → profiles[]
   const [profilesLoading, setProfilesLoading] = useState(false);
   const [openedAirports, setOpenedAirports] = useState([]);
+  const [primaryHubCode, setPrimaryHubCode] = useState(null);
 
   // Cabin profile assignment modal
   const [cpModal, setCpModal] = useState(null); // { aircraftId, typeId, currentProfileId }
@@ -217,6 +218,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
       for (const { tid, profiles } of profileResults) map[tid] = profiles;
       setProfilesByType(map);
       setOpenedAirports(openedRes.airports || []);
+      setPrimaryHubCode(openedRes.primary_hub_airport_code ?? null);
     } catch (e) {
       console.error('Load configuration-mode data error:', e);
     } finally {
@@ -400,6 +402,21 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
     if (production.length > 0) groups.push({ code: '__in_production__', forSale: false, inProduction: true, aircraft: production });
     return groups;
   }, [sortedOverview]);
+
+  // Opened airports sorted: home base → primary hub → secondary hubs → rest alphabetical
+  const sortedOpenedAirports = useMemo(() => {
+    const rank = (a) => {
+      if (a.destination_type === 'home_base') return 0;
+      if (primaryHubCode && a.iata_code === primaryHubCode) return 1;
+      if (a.destination_type === 'hub' || a.destination_type === 'hub_restricted') return 2;
+      return 3;
+    };
+    return [...openedAirports].sort((a, b) => {
+      const ra = rank(a), rb = rank(b);
+      if (ra !== rb) return ra - rb;
+      return a.iata_code.localeCompare(b.iata_code);
+    });
+  }, [openedAirports, primaryHubCode]);
 
   const SortIcon = ({ col }) => {
     if (sortCol !== col) return <span style={{ opacity: 0.3, marginLeft: '4px' }}>↕</span>;
@@ -829,7 +846,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                                           onChange={e => handleHomeBaseChange(ac, e.target.value)}
                                         >
                                           <option value="">— None —</option>
-                                          {openedAirports.map(ap => (
+                                          {sortedOpenedAirports.map(ap => (
                                             <option key={ap.iata_code} value={ap.iata_code}>
                                               {ap.iata_code} – {ap.name}
                                             </option>

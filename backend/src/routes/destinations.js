@@ -114,6 +114,9 @@ router.get('/opened', authMiddleware, async (req, res) => {
   try {
     await ensureHomeBase(req.airlineId);
 
+    const airlineRes = await pool.query('SELECT primary_hub_airport_code FROM airlines WHERE id = $1', [req.airlineId]);
+    const primaryHubCode = airlineRes.rows[0]?.primary_hub_airport_code ?? null;
+
     const result = await pool.query(`
       SELECT ap.iata_code, ap.name, ap.country, d.destination_type
       FROM airline_destinations d
@@ -125,7 +128,7 @@ router.get('/opened', authMiddleware, async (req, res) => {
     const airports = result.rows.map(r => ({
       iata_code: r.iata_code, name: r.name, country: r.country, destination_type: r.destination_type
     }));
-    res.json({ airports });
+    res.json({ airports, primary_hub_airport_code: primaryHubCode });
   } catch (error) {
     console.error('Get opened destinations error:', error);
     res.status(500).json({ error: 'Server error' });

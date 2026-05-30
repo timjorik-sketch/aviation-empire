@@ -51,6 +51,7 @@ import SatisfactionRating, { getSatColor, scoreToRating } from './components/Sat
 import TopBar from './components/TopBar.jsx';
 import { NavContext } from './components/NavContext.jsx';
 import { useVisiblePolling } from './utils/useVisiblePolling.js';
+import { POLL } from './config/pollingIntervals.js';
 import './App.css';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -322,7 +323,7 @@ function App() {
       ));
     } catch { /* ignore */ }
   }, [activeAirline?.id]);
-  useVisiblePolling(activeAirline ? pollXp : null, activeAirline ? 30_000 : null);
+  useVisiblePolling(activeAirline ? pollXp : null, activeAirline ? POLL.xp : null);
 
   // Show celebration popup once when current level exceeds the last
   // acknowledged level. Dismissal persists via POST /acknowledge-level.

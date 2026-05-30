@@ -10,6 +10,8 @@ import {
   calcCancelCosts,
   logDelayEvent,
 } from '../utils/delaySystem.js';
+import { getAirports } from '../utils/airportCache.js';
+import { FLIGHT_PROCESSOR_MS } from '../config/intervals.js';
 
 const router = express.Router();
 
@@ -694,8 +696,7 @@ async function generateFlights() {
 
     const airportCatMap = new Map();
     try {
-      const aptResult = await pool.query('SELECT iata_code, category FROM airports');
-      for (const row of aptResult.rows) {
+      for (const row of await getAirports()) {
         airportCatMap.set(row.iata_code, row.category || 4);
       }
     } catch (e) { /* fall back to defaults below */ }
@@ -2039,8 +2040,8 @@ function startFlightProcessor() {
   });
   backfillFuelPrices();
   scheduleAtMinute13(generateFuelPrice, 'FuelPrice');
-  // Process flight statuses every 10 seconds (status changes need to be fast)
-  flightProcessorInterval = setInterval(processFlights, 10000);
+  // Process flight statuses on the central cadence (see config/intervals.js).
+  flightProcessorInterval = setInterval(processFlights, FLIGHT_PROCESSOR_MS);
   setTimeout(processFlights, 1000);
 }
 

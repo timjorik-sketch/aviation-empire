@@ -613,6 +613,77 @@ async function initDatabase() {
     "UPDATE aircraft_types SET model='A321neo', full_name='Airbus A321neo' WHERE model IN ('A321 Neo','A321neo')",
   ], 'neo name normalization'));
 
+  // ── FLEET REPRICE ────────────────────────────────────────────────────────────
+  // Rebalance new_price_usd across the whole fleet (runOnce — non-destructive on
+  // later boots so an admin can still re-tune afterwards). Two layers:
+  //   1. Wide-bodies put on one per-seat curve ($/seat = 234k + 4471k/√pax) so
+  //      bigger frames cost less per seat (economies of scale). A380 is the anchor
+  //      at $330M; modern composites (787/A350/neo) keep a +6% tech premium over
+  //      old quads (A340/747, -10%); ULR/LR get +5%.
+  //   2. A flat -18% fleet discount on top of everything (reflects the real-world
+  //      list-vs-transaction price gap; narrow-bodies = old price × 0.82).
+  // Matched on full_name, same convention as the corrections below.
+  await runOnce('fix:fleet-reprice-curve-18pct-2026-05', () => runStatements([
+    // Wide-bodies (curve × 0.82)
+    "UPDATE aircraft_types SET new_price_usd=270600000 WHERE full_name='Airbus A380'",
+    "UPDATE aircraft_types SET new_price_usd=196800000 WHERE full_name IN ('Boeing 747-300','Boeing 747-400')",
+    "UPDATE aircraft_types SET new_price_usd=188600000 WHERE full_name IN ('Boeing 777-300','Boeing 747-8')",
+    "UPDATE aircraft_types SET new_price_usd=184500000 WHERE full_name='Airbus A350-1000'",
+    "UPDATE aircraft_types SET new_price_usd=180400000 WHERE full_name='Airbus A350-900 ULR'",
+    "UPDATE aircraft_types SET new_price_usd=172200000 WHERE full_name IN ('Boeing 787-10','Airbus A350-900','Airbus A330-900 Neo')",
+    "UPDATE aircraft_types SET new_price_usd=164000000 WHERE full_name='Boeing 777-200LR'",
+    "UPDATE aircraft_types SET new_price_usd=159900000 WHERE full_name IN ('Boeing 777-200','Airbus A330-300','Airbus A330-800 Neo','Boeing 787-9')",
+    "UPDATE aircraft_types SET new_price_usd=155800000 WHERE full_name='Airbus A340-600'",
+    "UPDATE aircraft_types SET new_price_usd=147600000 WHERE full_name='Airbus A330-200'",
+    "UPDATE aircraft_types SET new_price_usd=143500000 WHERE full_name='Airbus A340-300'",
+    "UPDATE aircraft_types SET new_price_usd=135300000 WHERE full_name IN ('Airbus A340-500','Boeing 787-8')",
+    // Narrow-body & regional (old price × 0.82)
+    "UPDATE aircraft_types SET new_price_usd=116440000 WHERE full_name='Airbus A321 XLR'",
+    "UPDATE aircraft_types SET new_price_usd=110700000 WHERE full_name='Boeing 757-300'",
+    "UPDATE aircraft_types SET new_price_usd=110618000 WHERE full_name='Boeing 737-10 Max'",
+    "UPDATE aircraft_types SET new_price_usd=106190000 WHERE full_name='Airbus A321neo'",
+    "UPDATE aircraft_types SET new_price_usd=102500000 WHERE full_name='Boeing 757-200'",
+    "UPDATE aircraft_types SET new_price_usd=99712000  WHERE full_name='Boeing 737-8 Max'",
+    "UPDATE aircraft_types SET new_price_usd=97006000  WHERE full_name='Airbus A321'",
+    "UPDATE aircraft_types SET new_price_usd=90200000  WHERE full_name='Airbus A320neo'",
+    "UPDATE aircraft_types SET new_price_usd=87002000  WHERE full_name='Boeing 737-800'",
+    "UPDATE aircraft_types SET new_price_usd=83230000  WHERE full_name='Airbus A319neo'",
+    "UPDATE aircraft_types SET new_price_usd=82820000  WHERE full_name='Airbus A320'",
+    "UPDATE aircraft_types SET new_price_usd=81180000  WHERE full_name='COMAC C919'",
+    "UPDATE aircraft_types SET new_price_usd=75030000  WHERE full_name='Airbus A220-300'",
+    "UPDATE aircraft_types SET new_price_usd=73390000  WHERE full_name='Airbus A319'",
+    "UPDATE aircraft_types SET new_price_usd=66420000  WHERE full_name='Airbus A220-100'",
+    "UPDATE aircraft_types SET new_price_usd=63468000  WHERE full_name='Airbus A318'",
+    "UPDATE aircraft_types SET new_price_usd=60680000  WHERE full_name='Boeing 737-600'",
+    "UPDATE aircraft_types SET new_price_usd=59778000  WHERE full_name='Embraer E195-E2'",
+    "UPDATE aircraft_types SET new_price_usd=55186000  WHERE full_name='Embraer E190-E2'",
+    "UPDATE aircraft_types SET new_price_usd=49200000  WHERE full_name='Boeing 737-400'",
+    "UPDATE aircraft_types SET new_price_usd=46494000  WHERE full_name='Embraer E175-E2'",
+    "UPDATE aircraft_types SET new_price_usd=45100000  WHERE full_name='Boeing 737-300'",
+    "UPDATE aircraft_types SET new_price_usd=44690000  WHERE full_name='Boeing 737-500'",
+    "UPDATE aircraft_types SET new_price_usd=43460000  WHERE full_name='Embraer E195'",
+    "UPDATE aircraft_types SET new_price_usd=42066000  WHERE full_name='Embraer E190'",
+    "UPDATE aircraft_types SET new_price_usd=38376000  WHERE full_name='Embraer E175'",
+    "UPDATE aircraft_types SET new_price_usd=37966000  WHERE full_name='Bombardier CRJ-900'",
+    "UPDATE aircraft_types SET new_price_usd=31160000  WHERE full_name='COMAC C909 (ARJ21)'",
+    "UPDATE aircraft_types SET new_price_usd=29684000  WHERE full_name='Bombardier CRJ-700'",
+    "UPDATE aircraft_types SET new_price_usd=29520000  WHERE full_name='Sukhoi Superjet 100'",
+    "UPDATE aircraft_types SET new_price_usd=28700000  WHERE full_name='Avro RJ85'",
+    "UPDATE aircraft_types SET new_price_usd=26814000  WHERE full_name='De Havilland DHC-8-400'",
+    "UPDATE aircraft_types SET new_price_usd=24518000  WHERE full_name='Embraer ERJ 145'",
+    "UPDATE aircraft_types SET new_price_usd=22140000  WHERE full_name='Bombardier CRJ-200'",
+    "UPDATE aircraft_types SET new_price_usd=21730000  WHERE full_name='ATR 72'",
+    "UPDATE aircraft_types SET new_price_usd=17630000  WHERE full_name='Embraer ERJ 140'",
+    "UPDATE aircraft_types SET new_price_usd=15170000  WHERE full_name='Embraer ERJ 135'",
+    "UPDATE aircraft_types SET new_price_usd=15088000  WHERE full_name='ATR 42'",
+    "UPDATE aircraft_types SET new_price_usd=14350000  WHERE full_name='De Havilland DHC-8-300'",
+    "UPDATE aircraft_types SET new_price_usd=11480000  WHERE full_name='Dornier 328 JET'",
+    "UPDATE aircraft_types SET new_price_usd=8856000   WHERE full_name='Dornier 328-100'",
+    "UPDATE aircraft_types SET new_price_usd=6970000   WHERE full_name='British Aerospace Jetstream 41'",
+    "UPDATE aircraft_types SET new_price_usd=6560000   WHERE full_name='Embraer EMB 120 Brasilia'",
+    "UPDATE aircraft_types SET new_price_usd=6150000   WHERE full_name='Saab 340'",
+  ], 'fleet reprice (wide-body curve + 18% fleet discount)'));
+
   // ── DATA CORRECTIONS ─────────────────────────────────────────────────────────
   // Aircraft runway & fuel corrections
   const fuelCorrections = [

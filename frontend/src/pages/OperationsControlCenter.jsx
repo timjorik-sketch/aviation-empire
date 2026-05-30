@@ -5,6 +5,7 @@ import Loader from '../components/Loader.jsx';
 import LiveFlightMap from '../components/LiveFlightMap.jsx';
 import { getEventFlavor } from '../utils/delayFlavor.js';
 import { useVisiblePolling } from '../utils/useVisiblePolling.js';
+import { POLL } from '../config/pollingIntervals.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -334,9 +335,9 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
   }, [fetchConfig, fetchReport, fetchFlights, fetchClientFeedback]);
 
   // Live refresh — paused while the tab is hidden (background tabs were a
-  // major Supabase egress sink). Flights at 30s is plenty for OCC.
-  useVisiblePolling(fetchFlights, 30000);
-  useVisiblePolling(fetchClientFeedback, 60000);
+  // major Supabase egress sink). Intervals centralised in pollingIntervals.js.
+  useVisiblePolling(fetchFlights, POLL.occFlights);
+  useVisiblePolling(fetchClientFeedback, POLL.clientFeedback);
 
   // Reset to first page whenever filters change so the user sees the head of
   // the result set. Must stay above any conditional return to satisfy the

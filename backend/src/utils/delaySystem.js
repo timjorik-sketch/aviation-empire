@@ -5,6 +5,7 @@
 // hotel partnership).
 
 import pool from '../database/postgres.js';
+import { getAirports } from './airportCache.js';
 
 // ── Tunables ───────────────────────────────────────────────────────────────
 export const BASE_RATES = {
@@ -156,11 +157,9 @@ function haversineKm(lat1, lon1, lat2, lon2) {
 }
 
 export async function findDiversionAirport(depCode, arrCode, minRunwayM, fraction) {
-  const apts = await pool.query(
-    'SELECT iata_code, latitude, longitude, runway_length_m FROM airports WHERE latitude IS NOT NULL AND longitude IS NOT NULL'
-  );
-  const dep = apts.rows.find(r => r.iata_code === depCode);
-  const arr = apts.rows.find(r => r.iata_code === arrCode);
+  const rows = (await getAirports()).filter(r => r.latitude != null && r.longitude != null);
+  const dep = rows.find(r => r.iata_code === depCode);
+  const arr = rows.find(r => r.iata_code === arrCode);
   if (!dep || !arr) return null;
 
   // Lerp to find target point at `fraction` of route
@@ -169,7 +168,7 @@ export async function findDiversionAirport(depCode, arrCode, minRunwayM, fractio
 
   let best = null;
   let bestDist = Infinity;
-  for (const r of apts.rows) {
+  for (const r of rows) {
     if (r.iata_code === depCode || r.iata_code === arrCode) continue;
     if ((r.runway_length_m ?? 0) < (minRunwayM ?? 0)) continue;
     const d = haversineKm(targetLat, targetLon, r.latitude, r.longitude);

@@ -6,6 +6,7 @@ import { calculateCurrentValue, formatAircraftValue } from '../utils/aircraftVal
 import { groupAirportsForDropdown } from '../utils/airportSort.js';
 import { getEventFlavor } from '../utils/delayFlavor.js';
 import { useVisiblePolling } from '../utils/useVisiblePolling.js';
+import { POLL } from '../config/pollingIntervals.js';
 import SatisfactionRating, { getSatColor, scoreToRating } from '../components/SatisfactionRating.jsx';
 import Loader from '../components/Loader.jsx';
 
@@ -457,13 +458,13 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
   useEffect(() => { fetchScheduledFlights(); }, [fetchScheduledFlights]);
 
-  // Refresh both aircraft detail and scheduled flights on a single 30s timer,
+  // Refresh both aircraft detail and scheduled flights on a single timer,
   // paused while the tab is hidden.
   const refreshAircraftViews = useCallback(() => {
     fetchDetail();
     fetchScheduledFlights();
   }, [fetchDetail, fetchScheduledFlights]);
-  useVisiblePolling(refreshAircraftViews, 30000);
+  useVisiblePolling(refreshAircraftViews, POLL.aircraftDetail);
 
   // ─── Auto-suggest ────────────────────────────────────────────────────────────
 

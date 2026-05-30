@@ -5,6 +5,7 @@ import authMiddleware from '../middleware/auth.js';
 import adminMiddleware from '../middleware/admin.js';
 import { calculateFlightDuration } from './flights.js';
 import { validatePriceClamp } from '../utils/marketPricing.js';
+import { getAirports } from '../utils/airportCache.js';
 
 const router = express.Router();
 
@@ -111,8 +112,7 @@ export async function fillUsedMarket() {
     const types = tResult.rows.map(r => ({ id: r.id, newPrice: r.new_price_usd, kAge: r.depreciation_age, kFh: r.depreciation_fh }));
     if (!types.length) return 0;
 
-    const aResult = await pool.query('SELECT iata_code, registration_prefix FROM airports');
-    const airports = aResult.rows.map(r => ({ code: r.iata_code, prefix: r.registration_prefix }));
+    const airports = (await getAirports()).map(r => ({ code: r.iata_code, prefix: r.registration_prefix }));
 
     const countResult = await pool.query('SELECT aircraft_type_id, COUNT(*) as cnt FROM used_aircraft_market GROUP BY aircraft_type_id');
     const countMap = {};

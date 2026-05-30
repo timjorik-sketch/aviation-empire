@@ -5,6 +5,7 @@ import AirlineProfilePopup from '../components/AirlineProfilePopup.jsx';
 import TopBar from '../components/TopBar.jsx';
 import Loader from '../components/Loader.jsx';
 import { useVisiblePolling } from '../utils/useVisiblePolling.js';
+import { POLL } from '../config/pollingIntervals.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -355,15 +356,15 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
   const [addingDest, setAddingDest] = useState(false);
 
   const fetchBoards = useCallback(() => {
-    Promise.all([
-      fetch(`${API_URL}/api/airports/${code}/departures`).then(r => r.json()),
-      fetch(`${API_URL}/api/airports/${code}/arrivals`).then(r => r.json()),
-      fetch(`${API_URL}/api/airports/${code}/airlines`).then(r => r.json()),
-    ]).then(([depData, arrData, airlinesData]) => {
-      setDepartures(depData.flights || []);
-      setArrivals(arrData.flights || []);
-      setAirlines(airlinesData.airlines || []);
-    }).catch(() => {});
+    // One merged request for departures + arrivals + airlines (they always
+    // render together) instead of three separate round-trips.
+    fetch(`${API_URL}/api/airports/${code}/board`)
+      .then(r => r.json())
+      .then(data => {
+        setDepartures(data.departures || []);
+        setArrivals(data.arrivals || []);
+        setAirlines(data.airlines || []);
+      }).catch(() => {});
   }, [code]);
 
   const openCapableModal = useCallback(() => {
@@ -423,8 +424,8 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
     }
   }, [airline, code, addingDest, onBalanceUpdate]);
 
-  // Auto-refresh boards every 30 seconds — paused while the tab is hidden.
-  useVisiblePolling(fetchBoards, 30000);
+  // Auto-refresh boards — paused while the tab is hidden.
+  useVisiblePolling(fetchBoards, POLL.airportBoards);
 
   // Update "now" every 15 seconds so statuses stay current
   useEffect(() => {

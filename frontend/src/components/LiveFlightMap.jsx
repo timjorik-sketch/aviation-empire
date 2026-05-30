@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import L from 'leaflet';
+import { POLL } from '../config/pollingIntervals.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -358,7 +359,7 @@ export default function LiveFlightMap({
     // the map catches up. Background tabs were a major Supabase egress sink.
     let interval = null;
     const startPoll = () => {
-      if (interval == null) interval = setInterval(fetchAndDraw, 30000);
+      if (interval == null) interval = setInterval(fetchAndDraw, POLL.liveMap);
     };
     const stopPoll = () => {
       if (interval != null) { clearInterval(interval); interval = null; }

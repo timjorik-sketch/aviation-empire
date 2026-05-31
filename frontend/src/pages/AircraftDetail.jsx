@@ -3015,14 +3015,8 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
               <button className="sched-modal-close" style={{ color: 'rgba(255,255,255,0.6)' }} onClick={() => setShowCopyModal(false)}>×</button>
             </div>
             <div className="sched-modal-body">
-              <div style={{ fontSize: '0.78rem', color: '#888', marginBottom: '1rem', lineHeight: 1.5 }}>
-                Clones the full weekly plan (flights + maintenance) of another <strong>{aircraft?.full_name}</strong> onto
-                this aircraft. The current schedule of this aircraft is <strong>replaced</strong>. All departures are shifted
-                by the offset below.
-              </div>
-
               <div className="sched-form-row" style={{ marginBottom: '0.8rem' }}>
-                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#666', marginBottom: 6 }}>Source Aircraft (same type)</label>
+                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#666', marginBottom: 6 }}>Source aircraft</label>
                 <select
                   value={copySourceId}
                   onChange={e => selectCopySource(e.target.value)}
@@ -3036,54 +3030,43 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                 </select>
               </div>
 
-              <div className="sched-form-row" style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#666', marginBottom: 6 }}>Time Shift</label>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <select value={copyShiftDir} onChange={e => setCopyShiftDir(e.target.value)}
-                    style={{ width: 64, padding: '0.48rem 0.5rem', border: '1px solid #E0E0E0', borderRadius: 6, fontSize: '0.95rem', color: '#2C2C2C', background: 'white' }}>
-                    <option value="+">+</option>
-                    <option value="-">−</option>
+              <div style={{ display: 'flex', gap: 12, marginBottom: '0.8rem' }}>
+                <div className="sched-form-row" style={{ flex: '0 0 auto' }}>
+                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#666', marginBottom: 6 }}>Time shift</label>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <select value={copyShiftDir} onChange={e => setCopyShiftDir(e.target.value)}
+                      style={{ width: 52, padding: '0.48rem 0.4rem', border: '1px solid #E0E0E0', borderRadius: 6, fontSize: '0.95rem', color: '#2C2C2C', background: 'white' }}>
+                      <option value="+">+</option>
+                      <option value="-">−</option>
+                    </select>
+                    <input type="number" className="sched-time-inp" min="0" max="167" placeholder="HH"
+                      value={copyShiftH} onChange={e => setCopyShiftH(e.target.value)} />
+                    <span className="sched-time-sep">h</span>
+                    <input type="number" className="sched-time-inp" min="0" max="59" placeholder="MM"
+                      value={copyShiftM} onChange={e => setCopyShiftM(e.target.value)}
+                      onBlur={e => setCopyShiftM(clampMinute(e.target.value))} />
+                  </div>
+                </div>
+                <div className="sched-form-row" style={{ flex: 1 }}>
+                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#666', marginBottom: 6 }}>Across midnight</label>
+                  <select value={copyDayMode} onChange={e => setCopyDayMode(e.target.value)}
+                    style={{ width: '100%', padding: '0.5rem 0.6rem', border: '1px solid #E0E0E0', borderRadius: 6, fontSize: '0.88rem', color: '#2C2C2C', background: 'white' }}>
+                    <option value="same">Keep weekday</option>
+                    <option value="roll">Shift across days</option>
                   </select>
-                  <input type="number" className="sched-time-inp" min="0" max="167" placeholder="HH"
-                    value={copyShiftH} onChange={e => setCopyShiftH(e.target.value)} />
-                  <span className="sched-time-sep">h</span>
-                  <input type="number" className="sched-time-inp" min="0" max="59" placeholder="MM"
-                    value={copyShiftM} onChange={e => setCopyShiftM(e.target.value)}
-                    onBlur={e => setCopyShiftM(clampMinute(e.target.value))} />
-                  <span className="sched-time-sep">min</span>
-                </div>
-                <div style={{ fontSize: '0.74rem', color: '#888', marginTop: 6 }}>
-                  e.g. +4h: a 08:00 departure becomes 12:00.
                 </div>
               </div>
 
               <div className="sched-form-row" style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#666', marginBottom: 6 }}>Across Midnight</label>
-                <select value={copyDayMode} onChange={e => setCopyDayMode(e.target.value)}
-                  style={{ width: '100%', padding: '0.5rem 0.6rem', border: '1px solid #E0E0E0', borderRadius: 6, fontSize: '0.88rem', color: '#2C2C2C', background: 'white' }}>
-                  <option value="same">Keep same weekday (short-haul / fixed daily legs)</option>
-                  <option value="roll">Move to next/previous day (long-haul / irregular)</option>
-                </select>
-                <div style={{ fontSize: '0.74rem', color: '#888', marginTop: 6 }}>
-                  {copyDayMode === 'same'
-                    ? 'A 22:00 + 4h departure becomes 02:00 on the same weekday.'
-                    : 'A 22:00 Mon + 4h departure becomes 02:00 Tue — the whole week slides.'}
-                </div>
-              </div>
-
-              <div className="sched-form-row" style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={copyReverse} onChange={e => setCopyReverse(e.target.checked)}
-                    style={{ marginTop: 2 }} />
-                  <span>
-                    <span style={{ fontSize: '0.86rem', fontWeight: 600, color: '#2C2C2C' }}>Reverse all flights (outbound ⇄ return)</span>
-                    <span style={{ display: 'block', fontSize: '0.74rem', color: '#888', marginTop: 2 }}>
-                      Each leg A→B is copied as its return route B→A. Mirror a counterpart aircraft.
-                      {copyReverse && copyMissingReverse > 0 &&
-                        <strong style={{ color: '#b45309' }}> {copyMissingReverse} flight(s) have no reverse route and will be skipped.</strong>}
-                    </span>
-                  </span>
+                <label style={{ display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer', fontSize: '0.86rem', fontWeight: 600, color: '#2C2C2C' }}>
+                  <input type="checkbox" checked={copyReverse} onChange={e => setCopyReverse(e.target.checked)} />
+                  Reverse flights (outbound ⇄ return)
                 </label>
+                {copyReverse && copyMissingReverse > 0 && (
+                  <div style={{ fontSize: '0.74rem', color: '#b45309', marginTop: 4 }}>
+                    {copyMissingReverse} flight(s) have no reverse route — skipped.
+                  </div>
+                )}
               </div>
 
               {copySourceLoading && <div style={{ fontSize: '0.82rem', color: '#888' }}>Loading schedule…</div>}

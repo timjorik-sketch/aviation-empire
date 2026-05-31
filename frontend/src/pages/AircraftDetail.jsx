@@ -77,6 +77,14 @@ const PX_PER_MIN = HOUR_H / 60; // 1.5 px per minute
 const TOTAL_H   = 24 * HOUR_H;  // 2160 px
 const GUTTER_W  = 38;
 const WAKE_TURNAROUND = { L: 25, M: 40, H: 60 };
+
+// Snap a minute-of-day value UP to the next slot of width `gap` aligned to `offset`.
+// gap<=0 -> no snapping. e.g. gap=60, offset=5 -> next xx:05; gap=15, offset=5 -> xx:05/20/35/50.
+function snapUp(t, gap, offset = 0) {
+  if (!gap || gap <= 0) return t;
+  const off = ((offset % gap) + gap) % gap;
+  return Math.ceil((t - off) / gap) * gap + off;
+}
 const COLORS = [
   '#4a6cf7','#e53e3e','#38a169','#d69e2e','#9f7aea',
   '#ed8936','#3182ce','#e53e8e','#319795','#805ad5',
@@ -319,6 +327,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [rFirstPrice, setRFirstPrice] = useState('');
   const [rServiceProfileId, setRServiceProfileId] = useState('');
   const [turnaroundGap, setTurnaroundGap] = useState(0);
+  const [gapOffset, setGapOffset] = useState(0);
   const [repeatCount, setRepeatCount]     = useState(1);
 
   const groundMin = useMemo(
@@ -625,18 +634,14 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
           preview.push({ type: 'out', route: outRoute, dep: minsToHM(curAbs), arr: minsToHM(outArrAbs), day: d });
           let nextAbs;
           if (inRoute) {
-            const inDepAbs = turnaroundGap > 0
-              ? Math.ceil((outArrAbs + groundMin) / turnaroundGap) * turnaroundGap
-              : outArrAbs + groundMin;
+            const inDepAbs = snapUp(outArrAbs + groundMin, turnaroundGap, gapOffset);
             const inArrAbs = inDepAbs + inRoute.estimated_duration;
             preview.push({ type: 'in', route: inRoute, dep: minsToHM(inDepAbs), arr: minsToHM(inArrAbs), day: d });
             nextAbs = inArrAbs + groundMin;
           } else {
             nextAbs = outArrAbs + groundMin;
           }
-          curAbs = turnaroundGap > 0
-            ? Math.ceil(nextAbs / turnaroundGap) * turnaroundGap
-            : nextAbs;
+          curAbs = snapUp(nextAbs, turnaroundGap, gapOffset);
         }
       }
     } else {
@@ -654,9 +659,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
         let nextAbs;
         if (inRoute) {
-          const inDepAbs = turnaroundGap > 0
-            ? Math.ceil((outArrAbs + groundMin) / turnaroundGap) * turnaroundGap
-            : outArrAbs + groundMin;
+          const inDepAbs = snapUp(outArrAbs + groundMin, turnaroundGap, gapOffset);
           const inArrAbs = inDepAbs + inRoute.estimated_duration;
           const inDay = (startDay + Math.floor(inDepAbs / 1440)) % 7;
           preview.push({ type: 'in', route: inRoute, dep: minsToHM(inDepAbs), arr: minsToHM(inArrAbs), day: inDay });
@@ -665,14 +668,12 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
           nextAbs = outArrAbs + groundMin;
         }
 
-        curAbs = turnaroundGap > 0
-          ? Math.ceil(nextAbs / turnaroundGap) * turnaroundGap
-          : nextAbs;
+        curAbs = snapUp(nextAbs, turnaroundGap, gapOffset);
       }
     }
 
     return preview;
-  }, [scheduleTab, outRouteId, inRouteId, rDay, rDepHour, rDepMinute, turnaroundGap, repeatCount, routes, groundMin]);
+  }, [scheduleTab, outRouteId, inRouteId, rDay, rDepHour, rDepMinute, turnaroundGap, gapOffset, repeatCount, routes, groundMin]);
 
   const seriesHasConflict = useMemo(() => {
     return seriesPreview.some(pf => {
@@ -708,9 +709,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     const outRoute = routes.find(r => r.id === parseInt(outRouteId));
     if (!outRoute) return null;
     const inRoute = inRouteId ? routes.find(r => r.id === parseInt(inRouteId)) : null;
-    const snap = (abs) => turnaroundGap > 0
-      ? Math.ceil(abs / turnaroundGap) * turnaroundGap
-      : abs;
+    const snap = (abs) => snapUp(abs, turnaroundGap, gapOffset);
     const startMin = parseHM(`${rDepHour.padStart(2,'0')}:${rDepMinute.padStart(2,'0')}`);
     const weekEnd = startMin + 7 * 1440;
     let cur = startMin;
@@ -731,16 +730,14 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       count++;
     }
     return count;
-  }, [outRouteId, inRouteId, routes, groundMin, turnaroundGap, rDepHour, rDepMinute]);
+  }, [outRouteId, inRouteId, routes, groundMin, turnaroundGap, gapOffset, rDepHour, rDepMinute]);
 
   const tripsPerDay = useMemo(() => {
     if (!outRouteId) return null;
     const outRoute = routes.find(r => r.id === parseInt(outRouteId));
     if (!outRoute) return null;
     const inRoute = inRouteId ? routes.find(r => r.id === parseInt(inRouteId)) : null;
-    const snap = (abs) => turnaroundGap > 0
-      ? Math.ceil(abs / turnaroundGap) * turnaroundGap
-      : abs;
+    const snap = (abs) => snapUp(abs, turnaroundGap, gapOffset);
     const startMin = parseHM(`${rDepHour.padStart(2,'0')}:${rDepMinute.padStart(2,'0')}`);
     const dayEnd = startMin + 1440;
     let cur = startMin;
@@ -761,7 +758,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       count++;
     }
     return count;
-  }, [outRouteId, inRouteId, routes, groundMin, turnaroundGap, rDepHour, rDepMinute]);
+  }, [outRouteId, inRouteId, routes, groundMin, turnaroundGap, gapOffset, rDepHour, rDepMinute]);
 
   // Clamp repeatCount whenever the effective maximum changes
   useEffect(() => {
@@ -2065,6 +2062,22 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     <option value="30">Round to 30 Min</option>
                     <option value="60">Round to 1h</option>
                   </select>
+                </div>
+                <div className="sched-form-row">
+                  <label>
+                    Start Minute
+                    <span style={{ fontWeight: 400, color: '#888', fontSize: '0.75rem', marginLeft: '0.4rem' }}>
+                      {turnaroundGap === 0 ? 'pick a gap first' : `aligns to xx:${String(gapOffset).padStart(2, '0')}`}
+                    </span>
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    value={gapOffset}
+                    disabled={turnaroundGap === 0}
+                    onChange={e => setGapOffset(Math.max(0, Math.min(59, parseInt(e.target.value) || 0)))}
+                    placeholder="0" />
                 </div>
                 <div className="sched-form-row">
                   <label>

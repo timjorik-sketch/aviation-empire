@@ -637,9 +637,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
     // Next departure after a landing: turnaround + Abstand, optionally aligned up to a clock grid.
     const nextDep = (arrAbs) => {
-      let dep = arrAbs + groundMin + restMin;
-      if (alignOn) dep = snapUp(dep, restMin > 0 ? restMin : 60, alignOffset);
-      return dep;
+      const base = arrAbs + groundMin;
+      if (restIsCustom) return base + restMin;              // Custom: exact additive wait after turnaround
+      if (restMin <= 0) return base;                        // Immediate: exact, no rounding
+      return snapUp(base, restMin, alignOn ? alignOffset : 0);  // Preset: round up to grid
     };
 
     if (rDay === 'all') {
@@ -686,7 +687,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     }
 
     return preview;
-  }, [scheduleTab, outRouteId, inRouteId, rDay, rDepHour, rDepMinute, restMin, alignOn, alignOffset, repeatCount, routes, groundMin]);
+  }, [scheduleTab, outRouteId, inRouteId, rDay, rDepHour, rDepMinute, restMin, restIsCustom, alignOn, alignOffset, repeatCount, routes, groundMin]);
 
   const seriesHasConflict = useMemo(() => {
     return seriesPreview.some(pf => {
@@ -723,9 +724,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     if (!outRoute) return null;
     const inRoute = inRouteId ? routes.find(r => r.id === parseInt(inRouteId)) : null;
     const nextDep = (arrAbs) => {
-      let dep = arrAbs + groundMin + restMin;
-      if (alignOn) dep = snapUp(dep, restMin > 0 ? restMin : 60, alignOffset);
-      return dep;
+      const base = arrAbs + groundMin;
+      if (restIsCustom) return base + restMin;              // Custom: exact additive wait after turnaround
+      if (restMin <= 0) return base;                        // Immediate: exact, no rounding
+      return snapUp(base, restMin, alignOn ? alignOffset : 0);  // Preset: round up to grid
     };
     const startMin = parseHM(`${rDepHour.padStart(2,'0')}:${rDepMinute.padStart(2,'0')}`);
     const weekEnd = startMin + 7 * 1440;
@@ -747,7 +749,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       count++;
     }
     return count;
-  }, [outRouteId, inRouteId, routes, groundMin, restMin, alignOn, alignOffset, rDepHour, rDepMinute]);
+  }, [outRouteId, inRouteId, routes, groundMin, restMin, restIsCustom, alignOn, alignOffset, rDepHour, rDepMinute]);
 
   const tripsPerDay = useMemo(() => {
     if (!outRouteId) return null;
@@ -755,9 +757,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     if (!outRoute) return null;
     const inRoute = inRouteId ? routes.find(r => r.id === parseInt(inRouteId)) : null;
     const nextDep = (arrAbs) => {
-      let dep = arrAbs + groundMin + restMin;
-      if (alignOn) dep = snapUp(dep, restMin > 0 ? restMin : 60, alignOffset);
-      return dep;
+      const base = arrAbs + groundMin;
+      if (restIsCustom) return base + restMin;              // Custom: exact additive wait after turnaround
+      if (restMin <= 0) return base;                        // Immediate: exact, no rounding
+      return snapUp(base, restMin, alignOn ? alignOffset : 0);  // Preset: round up to grid
     };
     const startMin = parseHM(`${rDepHour.padStart(2,'0')}:${rDepMinute.padStart(2,'0')}`);
     const dayEnd = startMin + 1440;
@@ -779,7 +782,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       count++;
     }
     return count;
-  }, [outRouteId, inRouteId, routes, groundMin, restMin, alignOn, alignOffset, rDepHour, rDepMinute]);
+  }, [outRouteId, inRouteId, routes, groundMin, restMin, restIsCustom, alignOn, alignOffset, rDepHour, rDepMinute]);
 
   // Clamp repeatCount whenever the effective maximum changes
   useEffect(() => {
@@ -2107,9 +2110,13 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
               <div className="sched-section-body">
                 <div className="sched-form-row">
                   <label>
-                    Wait after landing
+                    Next departure
                     <span style={{ fontWeight: 400, color: '#888', fontSize: '0.75rem', marginLeft: '0.4rem' }}>
-                      next departure = landing + {groundMin}min turnaround + this
+                      {restIsCustom
+                        ? `landing + ${groundMin}min turnaround + your custom wait`
+                        : restMin <= 0
+                          ? `landing + ${groundMin}min turnaround (exact)`
+                          : `landing + ${groundMin}min turnaround, rounded up to ${restMin >= 60 ? `${restMin / 60}h` : `${restMin} Min`} grid`}
                     </span>
                   </label>
                   <select
@@ -2119,16 +2126,22 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                       else { setRestIsCustom(false); setRestMin(parseInt(e.target.value)); }
                     }}>
                     <option value="0">Immediate</option>
-                    <option value="5">+ 5 Min</option>
-                    <option value="15">+ 15 Min</option>
-                    <option value="30">+ 30 Min</option>
-                    <option value="60">+ 1h</option>
-                    <option value="custom">Custom…</option>
+                    <option value="5">Round to 5 Min</option>
+                    <option value="10">Round to 10 Min</option>
+                    <option value="15">Round to 15 Min</option>
+                    <option value="30">Round to 30 Min</option>
+                    <option value="60">Round to 1h</option>
+                    <option value="custom">Custom wait…</option>
                   </select>
                 </div>
                 {restIsCustom && (
                   <div className="sched-form-row">
-                    <label>Custom wait (hh:mm)</label>
+                    <label>
+                      Custom wait (hh:mm)
+                      <span style={{ fontWeight: 400, color: '#888', fontSize: '0.75rem', marginLeft: '0.4rem' }}>
+                        added after the {groundMin}min turnaround
+                      </span>
+                    </label>
                     <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
                       <input
                         type="number" min="0" max="23" style={{ width: '4rem' }}
@@ -2148,24 +2161,26 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     </div>
                   </div>
                 )}
-                <div className="sched-form-row">
-                  <label>
-                    Align to clock
-                    <span style={{ fontWeight: 400, color: '#888', fontSize: '0.75rem', marginLeft: '0.4rem' }}>
-                      {alignOn
-                        ? `round up to next xx:${String(alignOffset).padStart(2, '0')}`
-                        : 'off — depart at the exact computed time'}
-                    </span>
-                  </label>
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={alignOn}
-                      onChange={e => setAlignOn(e.target.checked)} />
-                    <span>{alignOn ? 'On' : 'Off'}</span>
-                  </label>
-                </div>
-                {alignOn && (
+                {!restIsCustom && restMin > 0 && (
+                  <div className="sched-form-row">
+                    <label>
+                      Align grid offset
+                      <span style={{ fontWeight: 400, color: '#888', fontSize: '0.75rem', marginLeft: '0.4rem' }}>
+                        {alignOn
+                          ? `grid marks sit at xx:${String(alignOffset).padStart(2, '0')}`
+                          : 'off — grid sits on whole marks (xx:00)'}
+                      </span>
+                    </label>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={alignOn}
+                        onChange={e => setAlignOn(e.target.checked)} />
+                      <span>{alignOn ? 'On' : 'Off'}</span>
+                    </label>
+                  </div>
+                )}
+                {!restIsCustom && restMin > 0 && alignOn && (
                   <div className="sched-form-row">
                     <label>Align offset (xx:MM)</label>
                     <input

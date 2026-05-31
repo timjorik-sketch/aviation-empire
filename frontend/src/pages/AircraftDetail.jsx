@@ -2108,16 +2108,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
               <div className="sched-section-hd">Options</div>
               <div className="sched-section-body">
                 <div className="sched-form-row">
-                  <label>
-                    Next departure
-                    <span style={{ fontWeight: 400, color: '#888', fontSize: '0.75rem', marginLeft: '0.4rem' }}>
-                      {restIsCustom
-                        ? `landing + ${groundMin}min turnaround + your custom wait`
-                        : restMin <= 0
-                          ? `landing + ${groundMin}min turnaround (exact)`
-                          : `landing + ${groundMin}min turnaround, rounded up to ${restMin >= 60 ? `${restMin / 60}h` : `${restMin} Min`} grid`}
-                    </span>
-                  </label>
+                  <label>Next departure</label>
                   <select
                     value={restIsCustom ? 'custom' : String(restMin)}
                     onChange={e => {

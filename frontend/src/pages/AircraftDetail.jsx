@@ -333,8 +333,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [rBizPrice, setRBizPrice]     = useState('');
   const [rFirstPrice, setRFirstPrice] = useState('');
   const [rServiceProfileId, setRServiceProfileId] = useState('');
-  const [turnaroundGap, setTurnaroundGap] = useState(0);
-  const [gapOffset, setGapOffset] = useState(0);
+  const [restMin, setRestMin] = useState(0);          // Abstand after landing (additive minutes); 0 = Immediate
+  const [restIsCustom, setRestIsCustom] = useState(false);
+  const [alignOn, setAlignOn] = useState(false);      // Align switch: round departure up to a clock grid
+  const [alignOffset, setAlignOffset] = useState(0);  // xx:MM offset (0-59)
   const [repeatCount, setRepeatCount]     = useState(1);
 
   const groundMin = useMemo(
@@ -369,6 +371,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [copyShiftH, setCopyShiftH]         = useState('0');
   const [copyShiftM, setCopyShiftM]         = useState('00');
   const [copyDayMode, setCopyDayMode]       = useState('same'); // 'same' = keep weekday, 'roll' = move across midnight
+  const [copyReverse, setCopyReverse]       = useState(false);  // flip every copied flight to its reverse route (A→B ⇒ B→A)
   const [copySubmitting, setCopySubmitting] = useState(false);
 
   // Edit modal
@@ -632,6 +635,13 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     const startDepMin = parseHM(`${rDepHour.padStart(2,'0')}:${rDepMinute.padStart(2,'0')}`);
     const preview = [];
 
+    // Next departure after a landing: turnaround + Abstand, optionally aligned up to a clock grid.
+    const nextDep = (arrAbs) => {
+      let dep = arrAbs + groundMin + restMin;
+      if (alignOn) dep = snapUp(dep, restMin > 0 ? restMin : 60, alignOffset);
+      return dep;
+    };
+
     if (rDay === 'all') {
       // Every Day: chain repeatCount round trips per day, for all 7 days
       const reps = Math.max(1, Math.min(parseInt(repeatCount) || 1, 200));
@@ -640,16 +650,14 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         for (let i = 0; i < reps; i++) {
           const outArrAbs = curAbs + outRoute.estimated_duration;
           preview.push({ type: 'out', route: outRoute, dep: minsToHM(curAbs), arr: minsToHM(outArrAbs), day: d });
-          let nextAbs;
           if (inRoute) {
-            const inDepAbs = snapUp(outArrAbs + groundMin, turnaroundGap, gapOffset);
+            const inDepAbs = nextDep(outArrAbs);
             const inArrAbs = inDepAbs + inRoute.estimated_duration;
             preview.push({ type: 'in', route: inRoute, dep: minsToHM(inDepAbs), arr: minsToHM(inArrAbs), day: d });
-            nextAbs = inArrAbs + groundMin;
+            curAbs = nextDep(inArrAbs);
           } else {
-            nextAbs = outArrAbs + groundMin;
+            curAbs = nextDep(outArrAbs);
           }
-          curAbs = snapUp(nextAbs, turnaroundGap, gapOffset);
         }
       }
     } else {
@@ -665,23 +673,20 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         const outDay = (startDay + Math.floor(curAbs / 1440)) % 7;
         preview.push({ type: 'out', route: outRoute, dep: minsToHM(curAbs), arr: minsToHM(outArrAbs), day: outDay });
 
-        let nextAbs;
         if (inRoute) {
-          const inDepAbs = snapUp(outArrAbs + groundMin, turnaroundGap, gapOffset);
+          const inDepAbs = nextDep(outArrAbs);
           const inArrAbs = inDepAbs + inRoute.estimated_duration;
           const inDay = (startDay + Math.floor(inDepAbs / 1440)) % 7;
           preview.push({ type: 'in', route: inRoute, dep: minsToHM(inDepAbs), arr: minsToHM(inArrAbs), day: inDay });
-          nextAbs = inArrAbs + groundMin;
+          curAbs = nextDep(inArrAbs);
         } else {
-          nextAbs = outArrAbs + groundMin;
+          curAbs = nextDep(outArrAbs);
         }
-
-        curAbs = snapUp(nextAbs, turnaroundGap, gapOffset);
       }
     }
 
     return preview;
-  }, [scheduleTab, outRouteId, inRouteId, rDay, rDepHour, rDepMinute, turnaroundGap, gapOffset, repeatCount, routes, groundMin]);
+  }, [scheduleTab, outRouteId, inRouteId, rDay, rDepHour, rDepMinute, restMin, alignOn, alignOffset, repeatCount, routes, groundMin]);
 
   const seriesHasConflict = useMemo(() => {
     return seriesPreview.some(pf => {
@@ -710,14 +715,18 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   }, [seriesPreview, schedule, groundMin]);
 
   // How many round trips fit in a full week (7 × 1440 min) with current settings.
-  // Simulates the actual chain (same snap logic as seriesPreview) starting from 0
-  // to get the exact count regardless of turnaroundGap alignment.
+  // Simulates the actual chain (same nextDep logic as seriesPreview) starting from 0
+  // to get the exact count regardless of Abstand / align settings.
   const tripsPerWeek = useMemo(() => {
     if (!outRouteId) return null;
     const outRoute = routes.find(r => r.id === parseInt(outRouteId));
     if (!outRoute) return null;
     const inRoute = inRouteId ? routes.find(r => r.id === parseInt(inRouteId)) : null;
-    const snap = (abs) => snapUp(abs, turnaroundGap, gapOffset);
+    const nextDep = (arrAbs) => {
+      let dep = arrAbs + groundMin + restMin;
+      if (alignOn) dep = snapUp(dep, restMin > 0 ? restMin : 60, alignOffset);
+      return dep;
+    };
     const startMin = parseHM(`${rDepHour.padStart(2,'0')}:${rDepMinute.padStart(2,'0')}`);
     const weekEnd = startMin + 7 * 1440;
     let cur = startMin;
@@ -727,10 +736,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       const outArr = cur + outRoute.estimated_duration;
       let nextCur;
       if (inRoute) {
-        const inDep = snap(outArr + groundMin);
-        nextCur = snap(inDep + inRoute.estimated_duration + groundMin);
+        const inDep = nextDep(outArr);
+        nextCur = nextDep(inDep + inRoute.estimated_duration);
       } else {
-        nextCur = snap(outArr + groundMin);
+        nextCur = nextDep(outArr);
       }
       // Only count if the full trip (incl. turnaround) completes before the week repeats
       if (nextCur > weekEnd) break;
@@ -738,14 +747,18 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       count++;
     }
     return count;
-  }, [outRouteId, inRouteId, routes, groundMin, turnaroundGap, gapOffset, rDepHour, rDepMinute]);
+  }, [outRouteId, inRouteId, routes, groundMin, restMin, alignOn, alignOffset, rDepHour, rDepMinute]);
 
   const tripsPerDay = useMemo(() => {
     if (!outRouteId) return null;
     const outRoute = routes.find(r => r.id === parseInt(outRouteId));
     if (!outRoute) return null;
     const inRoute = inRouteId ? routes.find(r => r.id === parseInt(inRouteId)) : null;
-    const snap = (abs) => snapUp(abs, turnaroundGap, gapOffset);
+    const nextDep = (arrAbs) => {
+      let dep = arrAbs + groundMin + restMin;
+      if (alignOn) dep = snapUp(dep, restMin > 0 ? restMin : 60, alignOffset);
+      return dep;
+    };
     const startMin = parseHM(`${rDepHour.padStart(2,'0')}:${rDepMinute.padStart(2,'0')}`);
     const dayEnd = startMin + 1440;
     let cur = startMin;
@@ -755,10 +768,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       const outArr = cur + outRoute.estimated_duration;
       let nextCur;
       if (inRoute) {
-        const inDep = snap(outArr + groundMin);
-        nextCur = snap(inDep + inRoute.estimated_duration + groundMin);
+        const inDep = nextDep(outArr);
+        nextCur = nextDep(inDep + inRoute.estimated_duration);
       } else {
-        nextCur = snap(outArr + groundMin);
+        nextCur = nextDep(outArr);
       }
       // Only count if the full trip (incl. turnaround) completes before the day repeats
       if (nextCur > dayEnd) break;
@@ -766,7 +779,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       count++;
     }
     return count;
-  }, [outRouteId, inRouteId, routes, groundMin, turnaroundGap, gapOffset, rDepHour, rDepMinute]);
+  }, [outRouteId, inRouteId, routes, groundMin, restMin, alignOn, alignOffset, rDepHour, rDepMinute]);
 
   // Clamp repeatCount whenever the effective maximum changes
   useEffect(() => {
@@ -986,12 +999,24 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     return copyShiftDir === '-' ? -mag : mag;
   }, [copyShiftDir, copyShiftH, copyShiftM]);
 
+  // The airline route that flies the opposite direction of dep→arr, or null if none exists.
+  const findReverseRoute = useCallback((dep, arr) =>
+    routes.find(r => r.departure_airport === arr && r.arrival_airport === dep) || null,
+  [routes]);
+
   // Preview of the shifted entries (flights + maintenance), sorted by week position.
+  // When copyReverse is on, each flight is resolved to its reverse route; flights with
+  // no reverse route in the airline's network are flagged (`missing`) and skipped on copy.
   const copyPreview = useMemo(() => {
     const flights = copySourceSchedule.map(e => {
       const [h, m] = e.departure_time.split(':').map(Number);
       const s = shiftWeekSlot(e.day_of_week, h * 60 + m, copyShiftMin, copyDayMode);
-      return { kind: 'flight', label: `${e.flight_number} ${e.departure_airport}→${e.arrival_airport}`,
+      const rev = copyReverse ? findReverseRoute(e.departure_airport, e.arrival_airport) : null;
+      const missing = copyReverse && !rev;
+      const dep = copyReverse ? e.arrival_airport : e.departure_airport;
+      const arr = copyReverse ? e.departure_airport : e.arrival_airport;
+      const fn  = rev ? rev.flight_number : e.flight_number;
+      return { kind: 'flight', label: `${fn} ${dep}→${arr}`, missing,
         srcDay: e.day_of_week, srcTime: e.departure_time, day: s.day, time: minutesToHHMM(s.minuteOfDay),
         sortKey: s.day * 1440 + s.minuteOfDay };
     });
@@ -1001,12 +1026,17 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         day: s.day, time: minutesToHHMM(s.minuteOfDay), sortKey: s.day * 1440 + s.minuteOfDay };
     });
     return [...flights, ...maint].sort((a, b) => a.sortKey - b.sortKey);
-  }, [copySourceSchedule, copySourceMaint, copyShiftMin, copyDayMode]);
+  }, [copySourceSchedule, copySourceMaint, copyShiftMin, copyDayMode, copyReverse, findReverseRoute]);
+
+  const copyMissingReverse = useMemo(
+    () => copyPreview.filter(p => p.kind === 'flight' && p.missing).length,
+    [copyPreview]
+  );
 
   const openCopyModal = async () => {
     setShowCopyModal(true); setError(''); setSuccess('');
     setCopySourceId(''); setCopySourceSchedule([]); setCopySourceMaint([]);
-    setCopyShiftDir('+'); setCopyShiftH('0'); setCopyShiftM('00'); setCopyDayMode('same');
+    setCopyShiftDir('+'); setCopyShiftH('0'); setCopyShiftM('00'); setCopyDayMode('same'); setCopyReverse(false);
     setCopyFleetLoading(true);
     try {
       const res  = await fetch(`${API_URL}/api/aircraft/fleet`, { headers });
@@ -1040,6 +1070,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     if (copySourceSchedule.length === 0 && copySourceMaint.length === 0) {
       setError('Selected aircraft has nothing to copy'); return;
     }
+    // Don't wipe the target schedule if reversing would leave nothing to insert.
+    if (copyReverse && copySourceMaint.length === 0 && copyMissingReverse >= copySourceSchedule.length) {
+      setError('No reverse routes exist for any of these flights — nothing to copy.'); return;
+    }
     setCopySubmitting(true); setError(''); setSuccess('');
     try {
       // Replace mode: wipe the target's current schedule (flights + maintenance) first.
@@ -1047,12 +1081,21 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       const clearData = await clearRes.json();
       if (!clearRes.ok) throw new Error(clearData.error);
 
-      // Flights: clone route + prices + service profile, shift departure day/time.
+      // Flights: clone prices + service profile, shift departure day/time. When
+      // copyReverse is on, swap each leg to its reverse route; legs without a reverse
+      // route in the network are dropped (and reported below).
+      let reverseSkipped = 0;
       const flights = copySourceSchedule.map(e => {
         const [h, m] = e.departure_time.split(':').map(Number);
         const s = shiftWeekSlot(e.day_of_week, h * 60 + m, copyShiftMin, copyDayMode);
+        let routeId = e.route_id;
+        if (copyReverse) {
+          const rev = findReverseRoute(e.departure_airport, e.arrival_airport);
+          if (!rev) { reverseSkipped++; return null; }
+          routeId = rev.id;
+        }
         return {
-          route_id: e.route_id,
+          route_id: routeId,
           day_of_week: s.day,
           departure_time: minutesToHHMM(s.minuteOfDay),
           economy_price: e.economy_price,
@@ -1060,7 +1103,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
           first_price: e.first_price,
           service_profile_id: e.service_profile_id,
         };
-      });
+      }).filter(Boolean);
       if (flights.length) {
         const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/schedule`, {
           method: 'POST', headers: jsonHeaders, body: JSON.stringify({ flights }),
@@ -1084,8 +1127,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
       setSuccess(
         `Copied ${flights.length} flight(s)` +
+        (copyReverse ? ' (reversed)' : '') +
         (copySourceMaint.length ? ` and ${copySourceMaint.length - maintFailed}/${copySourceMaint.length} maintenance block(s)` : '') +
-        (maintFailed ? ` (${maintFailed} maintenance block(s) skipped — overlap)` : '')
+        (reverseSkipped ? ` — ${reverseSkipped} flight(s) skipped (no reverse route)` : '') +
+        (maintFailed ? ` — ${maintFailed} maintenance block(s) skipped (overlap)` : '')
       );
       setShowCopyModal(false);
       fetchSchedule();
@@ -2061,32 +2106,77 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
               <div className="sched-section-hd">Options</div>
               <div className="sched-section-body">
                 <div className="sched-form-row">
-                  <label>Turnaround Gap</label>
-                  <select value={turnaroundGap} onChange={e => setTurnaroundGap(parseInt(e.target.value))}>
-                    <option value="0">Immediate</option>
-                    <option value="5">Round to 5 Min</option>
-                    <option value="10">Round to 10 Min</option>
-                    <option value="15">Round to 15 Min</option>
-                    <option value="30">Round to 30 Min</option>
-                    <option value="60">Round to 1h</option>
-                  </select>
-                </div>
-                <div className="sched-form-row">
                   <label>
-                    Start Minute
+                    Wait after landing
                     <span style={{ fontWeight: 400, color: '#888', fontSize: '0.75rem', marginLeft: '0.4rem' }}>
-                      {turnaroundGap === 0 ? 'pick a gap first' : `aligns to xx:${String(gapOffset).padStart(2, '0')}`}
+                      next departure = landing + {groundMin}min turnaround + this
                     </span>
                   </label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="59"
-                    value={gapOffset}
-                    disabled={turnaroundGap === 0}
-                    onChange={e => setGapOffset(Math.max(0, Math.min(59, parseInt(e.target.value) || 0)))}
-                    placeholder="0" />
+                  <select
+                    value={restIsCustom ? 'custom' : String(restMin)}
+                    onChange={e => {
+                      if (e.target.value === 'custom') { setRestIsCustom(true); }
+                      else { setRestIsCustom(false); setRestMin(parseInt(e.target.value)); }
+                    }}>
+                    <option value="0">Immediate</option>
+                    <option value="5">+ 5 Min</option>
+                    <option value="15">+ 15 Min</option>
+                    <option value="30">+ 30 Min</option>
+                    <option value="60">+ 1h</option>
+                    <option value="custom">Custom…</option>
+                  </select>
                 </div>
+                {restIsCustom && (
+                  <div className="sched-form-row">
+                    <label>Custom wait (hh:mm)</label>
+                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                      <input
+                        type="number" min="0" max="23" style={{ width: '4rem' }}
+                        value={Math.floor(restMin / 60)}
+                        onChange={e => {
+                          const h = Math.max(0, Math.min(23, parseInt(e.target.value) || 0));
+                          setRestMin(h * 60 + (restMin % 60));
+                        }} />
+                      <span style={{ color: '#888' }}>:</span>
+                      <input
+                        type="number" min="0" max="59" style={{ width: '4rem' }}
+                        value={restMin % 60}
+                        onChange={e => {
+                          const m = Math.max(0, Math.min(59, parseInt(e.target.value) || 0));
+                          setRestMin(Math.floor(restMin / 60) * 60 + m);
+                        }} />
+                    </div>
+                  </div>
+                )}
+                <div className="sched-form-row">
+                  <label>
+                    Align to clock
+                    <span style={{ fontWeight: 400, color: '#888', fontSize: '0.75rem', marginLeft: '0.4rem' }}>
+                      {alignOn
+                        ? `round up to next xx:${String(alignOffset).padStart(2, '0')}`
+                        : 'off — depart at the exact computed time'}
+                    </span>
+                  </label>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={alignOn}
+                      onChange={e => setAlignOn(e.target.checked)} />
+                    <span>{alignOn ? 'On' : 'Off'}</span>
+                  </label>
+                </div>
+                {alignOn && (
+                  <div className="sched-form-row">
+                    <label>Align offset (xx:MM)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="59"
+                      value={alignOffset}
+                      onChange={e => setAlignOffset(Math.max(0, Math.min(59, parseInt(e.target.value) || 0)))}
+                      placeholder="0" />
+                  </div>
+                )}
                 <div className="sched-form-row">
                   <label>
                     Repetitions
@@ -2988,6 +3078,21 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                 </div>
               </div>
 
+              <div className="sched-form-row" style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={copyReverse} onChange={e => setCopyReverse(e.target.checked)}
+                    style={{ marginTop: 2 }} />
+                  <span>
+                    <span style={{ fontSize: '0.86rem', fontWeight: 600, color: '#2C2C2C' }}>Reverse all flights (outbound ⇄ return)</span>
+                    <span style={{ display: 'block', fontSize: '0.74rem', color: '#888', marginTop: 2 }}>
+                      Each leg A→B is copied as its return route B→A. Mirror a counterpart aircraft.
+                      {copyReverse && copyMissingReverse > 0 &&
+                        <strong style={{ color: '#b45309' }}> {copyMissingReverse} flight(s) have no reverse route and will be skipped.</strong>}
+                    </span>
+                  </span>
+                </label>
+              </div>
+
               {copySourceLoading && <div style={{ fontSize: '0.82rem', color: '#888' }}>Loading schedule…</div>}
 
               {!copySourceLoading && copySourceId && copyPreview.length > 0 && (
@@ -2997,10 +3102,14 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                   </div>
                   <div style={{ maxHeight: 220, overflowY: 'auto' }}>
                     {copyPreview.map((p, i) => (
-                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '6px 12px', borderTop: i ? '1px solid #F0F0F0' : 'none', fontSize: '0.8rem', color: p.kind === 'maint' ? '#9a3412' : '#2C2C2C' }}>
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.label}</span>
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '6px 12px', borderTop: i ? '1px solid #F0F0F0' : 'none', fontSize: '0.8rem', opacity: p.missing ? 0.55 : 1, color: p.missing ? '#b91c1c' : p.kind === 'maint' ? '#9a3412' : '#2C2C2C' }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {p.label}{p.missing && ' — no reverse route'}
+                        </span>
                         <span style={{ fontFamily: 'monospace', whiteSpace: 'nowrap', color: '#888' }}>
-                          {DAY_SHORT[p.srcDay]} {p.srcTime} → <strong style={{ color: '#2C2C2C' }}>{DAY_SHORT[p.day]} {p.time}</strong>
+                          {p.missing
+                            ? <em style={{ color: '#b91c1c' }}>skipped</em>
+                            : <>{DAY_SHORT[p.srcDay]} {p.srcTime} → <strong style={{ color: '#2C2C2C' }}>{DAY_SHORT[p.day]} {p.time}</strong></>}
                         </span>
                       </div>
                     ))}
@@ -3023,7 +3132,8 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
               <button
                 className="sched-btn-submit"
                 onClick={handleCopySubmit}
-                disabled={copySubmitting || !copySourceId || copyPreview.length === 0}
+                disabled={copySubmitting || !copySourceId || copyPreview.length === 0 ||
+                  (copyReverse && copySourceMaint.length === 0 && copyMissingReverse >= copySourceSchedule.length)}
               >
                 {copySubmitting ? 'Copying…' : 'Replace & Copy'}
               </button>

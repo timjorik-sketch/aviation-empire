@@ -3041,7 +3041,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     </select>
                     <input type="number" className="sched-time-inp" min="0" max="167" placeholder="HH"
                       value={copyShiftH} onChange={e => setCopyShiftH(e.target.value)} />
-                    <span className="sched-time-sep">h</span>
                     <input type="number" className="sched-time-inp" min="0" max="59" placeholder="MM"
                       value={copyShiftM} onChange={e => setCopyShiftM(e.target.value)}
                       onBlur={e => setCopyShiftM(clampMinute(e.target.value))} />

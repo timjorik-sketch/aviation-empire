@@ -164,6 +164,17 @@ function clampMinute(v) {
   return isNaN(n) ? '00' : String(Math.min(59, Math.max(0, n))).padStart(2, '0');
 }
 
+const WEEK_MIN = 7 * 1440;
+// Shift a weekly slot (day 0–6 + minute-of-day) by a signed minute offset, rolling
+// across midnight and the Sun→Mon seam so the whole weekly pattern moves consistently.
+function shiftWeekSlot(day, minuteOfDay, signedShiftMin) {
+  const total = (((day * 1440 + minuteOfDay + signedShiftMin) % WEEK_MIN) + WEEK_MIN) % WEEK_MIN;
+  return { day: Math.floor(total / 1440), minuteOfDay: total % 1440 };
+}
+function minutesToHHMM(mins) {
+  return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+}
+
 const CLASS_SHORT = {
   economy: 'E',
   premium_economy: 'PE',
@@ -329,6 +340,19 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [transferTimeM, setTransferTimeM]         = useState('00');
   const [transferSubmitting, setTransferSubmitting] = useState(false);
   const [allAirports, setAllAirports]             = useState([]);
+
+  // Copy schedule modal (clone another same-type aircraft's weekly plan, with a uniform time shift)
+  const [showCopyModal, setShowCopyModal]   = useState(false);
+  const [copyFleet, setCopyFleet]           = useState([]);   // same-type aircraft, current excluded
+  const [copyFleetLoading, setCopyFleetLoading] = useState(false);
+  const [copySourceId, setCopySourceId]     = useState('');
+  const [copySourceSchedule, setCopySourceSchedule] = useState([]);
+  const [copySourceMaint, setCopySourceMaint]       = useState([]);
+  const [copySourceLoading, setCopySourceLoading]   = useState(false);
+  const [copyShiftDir, setCopyShiftDir]     = useState('+');
+  const [copyShiftH, setCopyShiftH]         = useState('0');
+  const [copyShiftM, setCopyShiftM]         = useState('00');
+  const [copySubmitting, setCopySubmitting] = useState(false);
 
   // Edit modal
   const [editEntry, setEditEntry]       = useState(null);
@@ -947,6 +971,121 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       fetchScheduledFlights();
     } catch (err) { setError(err.message); }
     finally { setTransferSubmitting(false); }
+  };
+
+  // ── Copy schedule from another same-type aircraft (with uniform time shift) ──
+  const copyShiftMin = useMemo(() => {
+    const h = parseInt(copyShiftH) || 0;
+    const m = parseInt(copyShiftM) || 0;
+    const mag = Math.max(0, h) * 60 + Math.max(0, m);
+    return copyShiftDir === '-' ? -mag : mag;
+  }, [copyShiftDir, copyShiftH, copyShiftM]);
+
+  // Preview of the shifted entries (flights + maintenance), sorted by week position.
+  const copyPreview = useMemo(() => {
+    const flights = copySourceSchedule.map(e => {
+      const [h, m] = e.departure_time.split(':').map(Number);
+      const s = shiftWeekSlot(e.day_of_week, h * 60 + m, copyShiftMin);
+      return { kind: 'flight', label: `${e.flight_number} ${e.departure_airport}→${e.arrival_airport}`,
+        srcDay: e.day_of_week, srcTime: e.departure_time, day: s.day, time: minutesToHHMM(s.minuteOfDay),
+        sortKey: s.day * 1440 + s.minuteOfDay };
+    });
+    const maint = (copySourceMaint || []).map(mt => {
+      const s = shiftWeekSlot(mt.day_of_week, mt.start_minutes, copyShiftMin);
+      return { kind: 'maint', label: 'Maintenance', srcDay: mt.day_of_week, srcTime: minutesToHHMM(mt.start_minutes),
+        day: s.day, time: minutesToHHMM(s.minuteOfDay), sortKey: s.day * 1440 + s.minuteOfDay };
+    });
+    return [...flights, ...maint].sort((a, b) => a.sortKey - b.sortKey);
+  }, [copySourceSchedule, copySourceMaint, copyShiftMin]);
+
+  const openCopyModal = async () => {
+    setShowCopyModal(true); setError(''); setSuccess('');
+    setCopySourceId(''); setCopySourceSchedule([]); setCopySourceMaint([]);
+    setCopyShiftDir('+'); setCopyShiftH('0'); setCopyShiftM('00');
+    setCopyFleetLoading(true);
+    try {
+      const res  = await fetch(`${API_URL}/api/aircraft/fleet`, { headers });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load fleet');
+      const typeId = aircraft?.type_id;
+      const list = (Array.isArray(data) ? data : data.fleet || [])
+        .filter(a => Number(a.id) !== Number(aircraftId) && a.type_id === typeId);
+      setCopyFleet(list);
+    } catch (err) { setError(err.message); }
+    finally { setCopyFleetLoading(false); }
+  };
+
+  const selectCopySource = async (sourceId) => {
+    setCopySourceId(sourceId);
+    setCopySourceSchedule([]); setCopySourceMaint([]);
+    if (!sourceId) return;
+    setCopySourceLoading(true);
+    try {
+      const res  = await fetch(`${API_URL}/api/aircraft/${sourceId}/schedule`, { headers });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load source schedule');
+      setCopySourceSchedule(data.schedule || []);
+      setCopySourceMaint(data.maintenance || []);
+    } catch (err) { setError(err.message); }
+    finally { setCopySourceLoading(false); }
+  };
+
+  const handleCopySubmit = async () => {
+    if (!copySourceId) { setError('Select a source aircraft'); return; }
+    if (copySourceSchedule.length === 0 && copySourceMaint.length === 0) {
+      setError('Selected aircraft has nothing to copy'); return;
+    }
+    setCopySubmitting(true); setError(''); setSuccess('');
+    try {
+      // Replace mode: wipe the target's current schedule (flights + maintenance) first.
+      const clearRes  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/schedule`, { method: 'DELETE', headers });
+      const clearData = await clearRes.json();
+      if (!clearRes.ok) throw new Error(clearData.error);
+
+      // Flights: clone route + prices + service profile, shift departure day/time.
+      const flights = copySourceSchedule.map(e => {
+        const [h, m] = e.departure_time.split(':').map(Number);
+        const s = shiftWeekSlot(e.day_of_week, h * 60 + m, copyShiftMin);
+        return {
+          route_id: e.route_id,
+          day_of_week: s.day,
+          departure_time: minutesToHHMM(s.minuteOfDay),
+          economy_price: e.economy_price,
+          business_price: e.business_price,
+          first_price: e.first_price,
+          service_profile_id: e.service_profile_id,
+        };
+      });
+      if (flights.length) {
+        const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/schedule`, {
+          method: 'POST', headers: jsonHeaders, body: JSON.stringify({ flights }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to copy flights');
+      }
+
+      // Maintenance: duration is derived from aircraft type (identical here), so we
+      // only forward the shifted day + start time. Posted after flights so the
+      // server's flight-overlap check sees the new schedule.
+      let maintFailed = 0;
+      for (const mt of copySourceMaint) {
+        const s = shiftWeekSlot(mt.day_of_week, mt.start_minutes, copyShiftMin);
+        const res = await fetch(`${API_URL}/api/maintenance`, {
+          method: 'POST', headers: jsonHeaders,
+          body: JSON.stringify({ aircraft_id: aircraftId, day_of_week: s.day, start_time: minutesToHHMM(s.minuteOfDay), type: mt.type || 'routine' }),
+        });
+        if (!res.ok) maintFailed++;
+      }
+
+      setSuccess(
+        `Copied ${flights.length} flight(s)` +
+        (copySourceMaint.length ? ` and ${copySourceMaint.length - maintFailed}/${copySourceMaint.length} maintenance block(s)` : '') +
+        (maintFailed ? ` (${maintFailed} maintenance block(s) skipped — overlap)` : '')
+      );
+      setShowCopyModal(false);
+      fetchSchedule();
+    } catch (err) { setError(err.message); }
+    finally { setCopySubmitting(false); }
   };
 
   const handleCancelTransfer = async (transferRowId) => {
@@ -1736,9 +1875,14 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         <div className="ad-form-card">
           <div className="ad-sidebar-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>Schedule Flight</span>
-            <button className="ad-btn-clear-sched" onClick={() => { setShowTransferModal(true); setError(''); setSuccess(''); }}>
-              Transfer Flight
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="ad-btn-clear-sched" onClick={openCopyModal}>
+                Copy Schedule
+              </button>
+              <button className="ad-btn-clear-sched" onClick={() => { setShowTransferModal(true); setError(''); setSuccess(''); }}>
+                Transfer Flight
+              </button>
+            </div>
           </div>
           <div className="sched-tabs">
             {['single','series','maintenance'].map(tab => (
@@ -2757,6 +2901,101 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
           </div>
         );
       })()}
+
+      {/* ── Copy Schedule Modal ── */}
+      {showCopyModal && (
+        <div className="sched-modal-overlay" onClick={() => setShowCopyModal(false)}>
+          <div className="sched-modal" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+            <div className="sched-modal-header" style={{ background: '#2C2C2C', borderBottom: 'none' }}>
+              <h2 style={{ color: 'white', fontSize: '1rem' }}>Copy Schedule</h2>
+              <button className="sched-modal-close" style={{ color: 'rgba(255,255,255,0.6)' }} onClick={() => setShowCopyModal(false)}>×</button>
+            </div>
+            <div className="sched-modal-body">
+              <div style={{ fontSize: '0.78rem', color: '#888', marginBottom: '1rem', lineHeight: 1.5 }}>
+                Clones the full weekly plan (flights + maintenance) of another <strong>{aircraft?.full_name}</strong> onto
+                this aircraft. The current schedule of this aircraft is <strong>replaced</strong>. All departures are shifted
+                by the offset below.
+              </div>
+
+              <div className="sched-form-row" style={{ marginBottom: '0.8rem' }}>
+                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#666', marginBottom: 6 }}>Source Aircraft (same type)</label>
+                <select
+                  value={copySourceId}
+                  onChange={e => selectCopySource(e.target.value)}
+                  disabled={copyFleetLoading}
+                  style={{ width: '100%', padding: '0.5rem 0.6rem', border: '1px solid #E0E0E0', borderRadius: 6, fontSize: '0.88rem', color: '#2C2C2C', background: 'white' }}
+                >
+                  <option value="">{copyFleetLoading ? 'Loading…' : copyFleet.length ? '— select aircraft —' : 'No other aircraft of this type'}</option>
+                  {copyFleet.map(a => (
+                    <option key={a.id} value={a.id}>{a.registration}{a.name ? ` – ${a.name}` : ''}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="sched-form-row" style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#666', marginBottom: 6 }}>Time Shift</label>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <select value={copyShiftDir} onChange={e => setCopyShiftDir(e.target.value)}
+                    style={{ width: 64, padding: '0.48rem 0.5rem', border: '1px solid #E0E0E0', borderRadius: 6, fontSize: '0.95rem', color: '#2C2C2C', background: 'white' }}>
+                    <option value="+">+</option>
+                    <option value="-">−</option>
+                  </select>
+                  <input type="number" className="sched-time-inp" min="0" max="167" placeholder="HH"
+                    value={copyShiftH} onChange={e => setCopyShiftH(e.target.value)} />
+                  <span className="sched-time-sep">h</span>
+                  <input type="number" className="sched-time-inp" min="0" max="59" placeholder="MM"
+                    value={copyShiftM} onChange={e => setCopyShiftM(e.target.value)}
+                    onBlur={e => setCopyShiftM(clampMinute(e.target.value))} />
+                  <span className="sched-time-sep">min</span>
+                </div>
+                <div style={{ fontSize: '0.74rem', color: '#888', marginTop: 6 }}>
+                  e.g. +4h: a 08:00 departure becomes 12:00. Departures past midnight roll to the next day.
+                </div>
+              </div>
+
+              {copySourceLoading && <div style={{ fontSize: '0.82rem', color: '#888' }}>Loading schedule…</div>}
+
+              {!copySourceLoading && copySourceId && copyPreview.length > 0 && (
+                <div style={{ border: '1px solid #E0E0E0', borderRadius: 6, overflow: 'hidden' }}>
+                  <div style={{ background: '#F5F5F5', padding: '6px 12px', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#666' }}>
+                    Preview ({copyPreview.length})
+                  </div>
+                  <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+                    {copyPreview.map((p, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '6px 12px', borderTop: i ? '1px solid #F0F0F0' : 'none', fontSize: '0.8rem', color: p.kind === 'maint' ? '#9a3412' : '#2C2C2C' }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.label}</span>
+                        <span style={{ fontFamily: 'monospace', whiteSpace: 'nowrap', color: '#888' }}>
+                          {DAY_SHORT[p.srcDay]} {p.srcTime} → <strong style={{ color: '#2C2C2C' }}>{DAY_SHORT[p.day]} {p.time}</strong>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!copySourceLoading && copySourceId && copyPreview.length === 0 && (
+                <div style={{ fontSize: '0.82rem', color: '#888' }}>Selected aircraft has no schedule to copy.</div>
+              )}
+
+              {error && (
+                <div style={{ marginTop: '0.9rem', background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: 6, padding: '8px 12px', fontSize: '0.82rem' }}>
+                  {error}
+                </div>
+              )}
+            </div>
+            <div className="sched-modal-footer">
+              <button className="sched-btn-cancel" onClick={() => setShowCopyModal(false)}>Cancel</button>
+              <button
+                className="sched-btn-submit"
+                onClick={handleCopySubmit}
+                disabled={copySubmitting || !copySourceId || copyPreview.length === 0}
+              >
+                {copySubmitting ? 'Copying…' : 'Replace & Copy'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Transfer Flight Modal ── */}
       {showTransferModal && (() => {

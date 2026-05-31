@@ -174,9 +174,13 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
     if (!checkAircraft || !checkDepData || !checkArrData) return null;
     const dist = Math.round(haversineKm(checkDepData.latitude, checkDepData.longitude, checkArrData.latitude, checkArrData.longitude));
     const rangeOk = checkAircraft.range_km >= dist;
-    const depRunwayOk = (checkDepData.runway_length_m || 0) >= (checkAircraft.min_runway_takeoff_m || 0);
-    const arrRunwayOk = (checkArrData.runway_length_m || 0) >= (checkAircraft.min_runway_landing_m || 0);
-    return { dist, rangeOk, depRunwayOk, arrRunwayOk };
+    // Each airport must support BOTH takeoff and landing, because the aircraft
+    // flies the route in both directions (out and back). The binding requirement
+    // per airport is the longer of takeoff/landing.
+    const runwayNeeded = Math.max(checkAircraft.min_runway_takeoff_m || 0, checkAircraft.min_runway_landing_m || 0);
+    const depRunwayOk = (checkDepData.runway_length_m || 0) >= runwayNeeded;
+    const arrRunwayOk = (checkArrData.runway_length_m || 0) >= runwayNeeded;
+    return { dist, rangeOk, depRunwayOk, arrRunwayOk, runwayNeeded };
   })();
 
   const allAirportsByCountry = allAirports.reduce((acc, a) => {
@@ -733,13 +737,13 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                       },
                       {
                         ok: checkResult.depRunwayOk,
-                        label: `Departure runway (${checkDep})`,
-                        detail: `${checkAircraft.min_runway_takeoff_m?.toLocaleString()} m required — ${checkDepData?.runway_length_m?.toLocaleString()} m available`,
+                        label: `Runway ${checkDep} (takeoff & landing)`,
+                        detail: `${checkResult.runwayNeeded?.toLocaleString()} m required — ${checkDepData?.runway_length_m?.toLocaleString()} m available`,
                       },
                       {
                         ok: checkResult.arrRunwayOk,
-                        label: `Arrival runway (${checkArr})`,
-                        detail: `${checkAircraft.min_runway_landing_m?.toLocaleString()} m required — ${checkArrData?.runway_length_m?.toLocaleString()} m available`,
+                        label: `Runway ${checkArr} (takeoff & landing)`,
+                        detail: `${checkResult.runwayNeeded?.toLocaleString()} m required — ${checkArrData?.runway_length_m?.toLocaleString()} m available`,
                       },
                     ].map(({ ok, label, detail }) => (
                       <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

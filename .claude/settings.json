@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx --no-install esbuild --loader:.jsx=jsx --bundle=false --log-level=error src/pages/AircraftDetail.jsx --outfile=/tmp/out.js)"
+    ]
+  }
+}

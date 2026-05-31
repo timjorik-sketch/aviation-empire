@@ -173,9 +173,16 @@ function clampMinute(v) {
 }
 
 const WEEK_MIN = 7 * 1440;
-// Shift a weekly slot (day 0–6 + minute-of-day) by a signed minute offset, rolling
-// across midnight and the Sun→Mon seam so the whole weekly pattern moves consistently.
-function shiftWeekSlot(day, minuteOfDay, signedShiftMin) {
+// Shift a weekly slot (day 0–6 + minute-of-day) by a signed minute offset.
+//   mode 'roll' — departures crossing midnight move to the next/previous day, so the
+//                 whole weekly pattern slides consistently (good for irregular long-haul).
+//   mode 'same' — the day-of-week stays fixed and only the time-of-day wraps within the
+//                 day (good for short-haul with fixed daily legs).
+function shiftWeekSlot(day, minuteOfDay, signedShiftMin, mode = 'roll') {
+  if (mode === 'same') {
+    const mins = (((minuteOfDay + signedShiftMin) % 1440) + 1440) % 1440;
+    return { day, minuteOfDay: mins };
+  }
   const total = (((day * 1440 + minuteOfDay + signedShiftMin) % WEEK_MIN) + WEEK_MIN) % WEEK_MIN;
   return { day: Math.floor(total / 1440), minuteOfDay: total % 1440 };
 }
@@ -361,6 +368,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [copyShiftDir, setCopyShiftDir]     = useState('+');
   const [copyShiftH, setCopyShiftH]         = useState('0');
   const [copyShiftM, setCopyShiftM]         = useState('00');
+  const [copyDayMode, setCopyDayMode]       = useState('same'); // 'same' = keep weekday, 'roll' = move across midnight
   const [copySubmitting, setCopySubmitting] = useState(false);
 
   // Edit modal
@@ -982,23 +990,23 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const copyPreview = useMemo(() => {
     const flights = copySourceSchedule.map(e => {
       const [h, m] = e.departure_time.split(':').map(Number);
-      const s = shiftWeekSlot(e.day_of_week, h * 60 + m, copyShiftMin);
+      const s = shiftWeekSlot(e.day_of_week, h * 60 + m, copyShiftMin, copyDayMode);
       return { kind: 'flight', label: `${e.flight_number} ${e.departure_airport}→${e.arrival_airport}`,
         srcDay: e.day_of_week, srcTime: e.departure_time, day: s.day, time: minutesToHHMM(s.minuteOfDay),
         sortKey: s.day * 1440 + s.minuteOfDay };
     });
     const maint = (copySourceMaint || []).map(mt => {
-      const s = shiftWeekSlot(mt.day_of_week, mt.start_minutes, copyShiftMin);
+      const s = shiftWeekSlot(mt.day_of_week, mt.start_minutes, copyShiftMin, copyDayMode);
       return { kind: 'maint', label: 'Maintenance', srcDay: mt.day_of_week, srcTime: minutesToHHMM(mt.start_minutes),
         day: s.day, time: minutesToHHMM(s.minuteOfDay), sortKey: s.day * 1440 + s.minuteOfDay };
     });
     return [...flights, ...maint].sort((a, b) => a.sortKey - b.sortKey);
-  }, [copySourceSchedule, copySourceMaint, copyShiftMin]);
+  }, [copySourceSchedule, copySourceMaint, copyShiftMin, copyDayMode]);
 
   const openCopyModal = async () => {
     setShowCopyModal(true); setError(''); setSuccess('');
     setCopySourceId(''); setCopySourceSchedule([]); setCopySourceMaint([]);
-    setCopyShiftDir('+'); setCopyShiftH('0'); setCopyShiftM('00');
+    setCopyShiftDir('+'); setCopyShiftH('0'); setCopyShiftM('00'); setCopyDayMode('same');
     setCopyFleetLoading(true);
     try {
       const res  = await fetch(`${API_URL}/api/aircraft/fleet`, { headers });
@@ -1042,7 +1050,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       // Flights: clone route + prices + service profile, shift departure day/time.
       const flights = copySourceSchedule.map(e => {
         const [h, m] = e.departure_time.split(':').map(Number);
-        const s = shiftWeekSlot(e.day_of_week, h * 60 + m, copyShiftMin);
+        const s = shiftWeekSlot(e.day_of_week, h * 60 + m, copyShiftMin, copyDayMode);
         return {
           route_id: e.route_id,
           day_of_week: s.day,
@@ -1066,7 +1074,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       // server's flight-overlap check sees the new schedule.
       let maintFailed = 0;
       for (const mt of copySourceMaint) {
-        const s = shiftWeekSlot(mt.day_of_week, mt.start_minutes, copyShiftMin);
+        const s = shiftWeekSlot(mt.day_of_week, mt.start_minutes, copyShiftMin, copyDayMode);
         const res = await fetch(`${API_URL}/api/maintenance`, {
           method: 'POST', headers: jsonHeaders,
           body: JSON.stringify({ aircraft_id: aircraftId, day_of_week: s.day, start_time: minutesToHHMM(s.minuteOfDay), type: mt.type || 'routine' }),
@@ -2962,7 +2970,21 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                   <span className="sched-time-sep">min</span>
                 </div>
                 <div style={{ fontSize: '0.74rem', color: '#888', marginTop: 6 }}>
-                  e.g. +4h: a 08:00 departure becomes 12:00. Departures past midnight roll to the next day.
+                  e.g. +4h: a 08:00 departure becomes 12:00.
+                </div>
+              </div>
+
+              <div className="sched-form-row" style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#666', marginBottom: 6 }}>Across Midnight</label>
+                <select value={copyDayMode} onChange={e => setCopyDayMode(e.target.value)}
+                  style={{ width: '100%', padding: '0.5rem 0.6rem', border: '1px solid #E0E0E0', borderRadius: 6, fontSize: '0.88rem', color: '#2C2C2C', background: 'white' }}>
+                  <option value="same">Keep same weekday (short-haul / fixed daily legs)</option>
+                  <option value="roll">Move to next/previous day (long-haul / irregular)</option>
+                </select>
+                <div style={{ fontSize: '0.74rem', color: '#888', marginTop: 6 }}>
+                  {copyDayMode === 'same'
+                    ? 'A 22:00 + 4h departure becomes 02:00 on the same weekday.'
+                    : 'A 22:00 Mon + 4h departure becomes 02:00 Tue — the whole week slides.'}
                 </div>
               </div>
 

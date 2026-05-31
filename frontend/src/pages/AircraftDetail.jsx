@@ -335,8 +335,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [rServiceProfileId, setRServiceProfileId] = useState('');
   const [restMin, setRestMin] = useState(0);          // Abstand after landing (additive minutes); 0 = Immediate
   const [restIsCustom, setRestIsCustom] = useState(false);
-  const [alignOn, setAlignOn] = useState(false);      // Align switch: round departure up to a clock grid
-  const [alignOffset, setAlignOffset] = useState(0);  // xx:MM offset (0-59)
+  const [alignOffset, setAlignOffset] = useState(0);  // Offset xx:MM (0-59): where the rounding grid sits on the clock
   const [repeatCount, setRepeatCount]     = useState(1);
 
   const groundMin = useMemo(
@@ -640,7 +639,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       const base = arrAbs + groundMin;
       if (restIsCustom) return base + restMin;              // Custom: exact additive wait after turnaround
       if (restMin <= 0) return base;                        // Immediate: exact, no rounding
-      return snapUp(base, restMin, alignOn ? alignOffset : 0);  // Preset: round up to grid
+      return snapUp(base, restMin, alignOffset);            // Preset: round up to grid at offset
     };
 
     if (rDay === 'all') {
@@ -687,7 +686,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     }
 
     return preview;
-  }, [scheduleTab, outRouteId, inRouteId, rDay, rDepHour, rDepMinute, restMin, restIsCustom, alignOn, alignOffset, repeatCount, routes, groundMin]);
+  }, [scheduleTab, outRouteId, inRouteId, rDay, rDepHour, rDepMinute, restMin, restIsCustom, alignOffset, repeatCount, routes, groundMin]);
 
   const seriesHasConflict = useMemo(() => {
     return seriesPreview.some(pf => {
@@ -727,7 +726,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       const base = arrAbs + groundMin;
       if (restIsCustom) return base + restMin;              // Custom: exact additive wait after turnaround
       if (restMin <= 0) return base;                        // Immediate: exact, no rounding
-      return snapUp(base, restMin, alignOn ? alignOffset : 0);  // Preset: round up to grid
+      return snapUp(base, restMin, alignOffset);            // Preset: round up to grid at offset
     };
     const startMin = parseHM(`${rDepHour.padStart(2,'0')}:${rDepMinute.padStart(2,'0')}`);
     const weekEnd = startMin + 7 * 1440;
@@ -749,7 +748,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       count++;
     }
     return count;
-  }, [outRouteId, inRouteId, routes, groundMin, restMin, restIsCustom, alignOn, alignOffset, rDepHour, rDepMinute]);
+  }, [outRouteId, inRouteId, routes, groundMin, restMin, restIsCustom, alignOffset, rDepHour, rDepMinute]);
 
   const tripsPerDay = useMemo(() => {
     if (!outRouteId) return null;
@@ -760,7 +759,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       const base = arrAbs + groundMin;
       if (restIsCustom) return base + restMin;              // Custom: exact additive wait after turnaround
       if (restMin <= 0) return base;                        // Immediate: exact, no rounding
-      return snapUp(base, restMin, alignOn ? alignOffset : 0);  // Preset: round up to grid
+      return snapUp(base, restMin, alignOffset);            // Preset: round up to grid at offset
     };
     const startMin = parseHM(`${rDepHour.padStart(2,'0')}:${rDepMinute.padStart(2,'0')}`);
     const dayEnd = startMin + 1440;
@@ -782,7 +781,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       count++;
     }
     return count;
-  }, [outRouteId, inRouteId, routes, groundMin, restMin, restIsCustom, alignOn, alignOffset, rDepHour, rDepMinute]);
+  }, [outRouteId, inRouteId, routes, groundMin, restMin, restIsCustom, alignOffset, rDepHour, rDepMinute]);
 
   // Clamp repeatCount whenever the effective maximum changes
   useEffect(() => {
@@ -2164,25 +2163,13 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                 {!restIsCustom && restMin > 0 && (
                   <div className="sched-form-row">
                     <label>
-                      Align grid offset
+                      Offset (xx:MM)
                       <span style={{ fontWeight: 400, color: '#888', fontSize: '0.75rem', marginLeft: '0.4rem' }}>
-                        {alignOn
-                          ? `grid marks sit at xx:${String(alignOffset).padStart(2, '0')}`
-                          : 'off — grid sits on whole marks (xx:00)'}
+                        {alignOffset > 0
+                          ? `departures land on xx:${String(alignOffset).padStart(2, '0')}`
+                          : 'whole marks (xx:00)'}
                       </span>
                     </label>
-                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
-                      <input
-                        type="checkbox"
-                        checked={alignOn}
-                        onChange={e => setAlignOn(e.target.checked)} />
-                      <span>{alignOn ? 'On' : 'Off'}</span>
-                    </label>
-                  </div>
-                )}
-                {!restIsCustom && restMin > 0 && alignOn && (
-                  <div className="sched-form-row">
-                    <label>Align offset (xx:MM)</label>
                     <input
                       type="number"
                       min="0"

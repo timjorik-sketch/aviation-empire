@@ -377,10 +377,12 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
         .fs-dist-cell {
           background: white;
           padding: 6px;
-          display: flex; flex-wrap: wrap; gap: 3px;
+          display: flex; flex-direction: column; gap: 3px;
           min-height: 32px;
-          align-content: flex-start;
         }
+        /* One slot per destination, in a shared order across all 7 day columns,
+           so the same destination sits at the same height every day. */
+        .fs-dist-slot { display: flex; flex-wrap: wrap; gap: 3px; }
         .fs-dist-pill {
           font-family: monospace; font-size: 0.75rem; font-weight: 700;
           letter-spacing: 0.02em;
@@ -528,29 +530,52 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
                       <span key={lbl} className="fs-dist-head-day">{lbl}</span>
                     ))}
                   </div>
-                  {distRows.map(row => (
-                    <div key={row.time} className="fs-dist-row">
-                      <span className="fs-dist-time">{row.time}</span>
-                      {DAY_LABELS.map((_, di) => {
-                        const cell = row.days[di] || [];
-                        return (
-                          <div key={di} className="fs-dist-cell">
-                            {cell.map(f => (
-                              <button
-                                key={f.id}
-                                type="button"
-                                className="fs-dist-pill"
-                                title={`${f.flight_number} → ${f.arrival_airport} ${f.arrival_name} · ${fmt.reg(f.registration)}`}
-                                onClick={() => onNavigateToAirport?.(f.arrival_airport)}
-                              >
-                                {f.arrival_airport}
-                              </button>
-                            ))}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ))}
+                  {distRows.map(row => {
+                    // Shared, stable destination order for this time row (across all days)
+                    const dests = [...new Set(
+                      DAY_LABELS.flatMap((_, di) => (row.days[di] || []).map(f => f.arrival_airport))
+                    )].sort();
+                    return (
+                      <div key={row.time} className="fs-dist-row">
+                        <span className="fs-dist-time">{row.time}</span>
+                        {DAY_LABELS.map((_, di) => {
+                          const cell = row.days[di] || [];
+                          const byDest = {};
+                          for (const f of cell) (byDest[f.arrival_airport] ||= []).push(f);
+                          return (
+                            <div key={di} className="fs-dist-cell">
+                              {dests.map(dest => {
+                                const flights = byDest[dest];
+                                if (!flights) {
+                                  // Invisible placeholder keeps this destination's slot at the same height
+                                  return (
+                                    <span key={dest} className="fs-dist-slot" aria-hidden="true">
+                                      <span className="fs-dist-pill" style={{ visibility: 'hidden' }}>{dest}</span>
+                                    </span>
+                                  );
+                                }
+                                return (
+                                  <span key={dest} className="fs-dist-slot">
+                                    {flights.map(f => (
+                                      <button
+                                        key={f.id}
+                                        type="button"
+                                        className="fs-dist-pill"
+                                        title={`${f.flight_number} → ${f.arrival_airport} ${f.arrival_name} · ${fmt.reg(f.registration)}`}
+                                        onClick={() => onNavigateToAirport?.(f.arrival_airport)}
+                                      >
+                                        {f.arrival_airport}
+                                      </button>
+                                    ))}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

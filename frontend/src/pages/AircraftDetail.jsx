@@ -1421,13 +1421,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
   const aircraftRange = aircraft?.range_km ?? null;
 
-  // Route ids that already have at least one weekly_schedule entry on this aircraft.
-  // Routes NOT in this set are "not yet scheduled" and get a marker in the dropdown.
-  const scheduledRouteIds = useMemo(
-    () => new Set(schedule.map(e => e.route_id)),
-    [schedule]
-  );
-
   // 3 most recently created routes plus each one's reverse direction (if it exists),
   // shown in a "Recent" optgroup at the top of the route dropdowns.
   const recentRoutes = useMemo(() => {
@@ -1453,12 +1446,9 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
   const renderRouteOption = (r, keyPrefix = '') => {
     const outOfRange = aircraftRange && r.distance_km > aircraftRange;
-    const notScheduled = !outOfRange && !scheduledRouteIds.has(r.id);
-    const prefix = outOfRange ? '⚠ ' : notScheduled ? '✦ ' : '';
-    const suffix = outOfRange ? ' — exceeds range' : '';
     return (
       <option key={`${keyPrefix}${r.id}`} value={r.id} disabled={outOfRange}>
-        {prefix}{r.flight_number}: {r.departure_airport} → {r.arrival_airport} ({(r.distance_km ?? '?').toLocaleString()} km{suffix})
+        {outOfRange ? '⚠ ' : ''}{r.flight_number}: {r.departure_airport} → {r.arrival_airport} ({(r.distance_km ?? '?').toLocaleString()} km{outOfRange ? ' — exceeds range' : ''})
       </option>
     );
   };

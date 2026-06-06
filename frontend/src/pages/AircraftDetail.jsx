@@ -107,6 +107,23 @@ function addMins(hm, add) {
   return minsToHM(parseHM(hm) + add);
 }
 
+// Approximate UTC offset (whole hours) from longitude — nautical time zones,
+// no DST, no political borders. Returns null when longitude is unknown.
+function lonOffsetHours(lon) {
+  if (lon == null || isNaN(lon)) return null;
+  return Math.round(lon / 15);
+}
+// Schedule times are stored/displayed as Europe/Berlin wall-clock. Under the
+// longitude approximation Berlin (≈13.4°E) sits at UTC+1, so converting a
+// displayed minute-of-day to local wall-clock at a given longitude is just a
+// whole-hour shift. Returns the local "HH:MM", or null when longitude is unknown.
+const BERLIN_LON_OFFSET = 1;
+function localHMFromBerlin(berlinMin, lon) {
+  const off = lonOffsetHours(lon);
+  if (off == null) return null;
+  return minsToHM(berlinMin + (off - BERLIN_LON_OFFSET) * 60);
+}
+
 function formatHours(min) {
   if (!min) return '0m';
   const m = Math.round(min);
@@ -553,12 +570,17 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     return schedule.map(entry => {
       const depMin = parseHM(entry.departure_time);
       const arrMin = parseHM(entry.arrival_time);
+      // Approximate local wall-clock at origin (departure) and destination (arrival).
+      const depLocal = localHMFromBerlin(depMin, entry.dep_longitude);
+      const arrLocal = localHMFromBerlin(arrMin, entry.arr_longitude);
       const dur    = ((arrMin - depMin) + 1440) % 1440 || 1;
       const crossesMidnight = depMin + dur > 1440;
       const seg1H = crossesMidnight ? (1440 - depMin) * PX_PER_MIN : dur * PX_PER_MIN;
       return {
         ...entry,
         dayIndex: entry.day_of_week,
+        depLocal,
+        arrLocal,
         top:      depMin * PX_PER_MIN,
         height:   Math.max(seg1H, 14),
         crossesMidnight,
@@ -1874,11 +1896,16 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                       <div key={f.id}
                         className={`ad-grid-flight clickable ${conflictIds.has(f.id) ? 'conflict' : ''}`}
                         style={{ top: f.top, height: f.height, background: f.color, color: f.textColor }}
-                        title={`${f.flight_number}: ${f.departure_airport}→${f.arrival_airport}\n${f.departure_time}–${f.arrival_time}`}
+                        title={`${f.flight_number}: ${f.departure_airport}→${f.arrival_airport}\nDep ${f.departure_time}${f.depLocal ? ` (${f.depLocal} ${f.departure_airport} local)` : ''}\nArr ${f.arrival_time}${f.arrLocal ? ` (${f.arrLocal} ${f.arrival_airport} local)` : ''}`}
                         onClick={() => openEditModal(f)}>
                         <span className="ad-grid-fn">{f.flight_number}</span>
                         {f.height > 24 && <span className="ad-grid-rt">{f.departure_airport}→{f.arrival_airport}</span>}
-                        {f.height > 40 && <span className="ad-grid-tm">{f.departure_time}</span>}
+                        {f.height > 38 && (
+                          <span className="ad-grid-tm">{f.departure_time}{f.depLocal && ` (${f.depLocal})`}</span>
+                        )}
+                        {f.height > 50 && (
+                          <span className="ad-grid-tm">{f.arrival_time}{f.arrLocal && ` (${f.arrLocal})`}</span>
+                        )}
                         <button className="ad-grid-del"
                           title="Delete flight"
                           onClick={e => { e.stopPropagation(); handleDeleteFlight(f.id); }}>
@@ -1899,11 +1926,13 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                       <div key={`ov-${f.id}`}
                         className={`ad-grid-flight clickable ${conflictIds.has(f.id) ? 'conflict' : ''}`}
                         style={{ top: 0, height: f.overflowHeight, background: f.color, color: f.textColor, opacity: 0.85, borderTop: `2px dashed ${f.textColor}` }}
-                        title={`${f.flight_number}: ${f.departure_airport}→${f.arrival_airport}\n${f.departure_time}–${f.arrival_time} (cont.)`}
+                        title={`${f.flight_number}: ${f.departure_airport}→${f.arrival_airport}\nDep ${f.departure_time}${f.depLocal ? ` (${f.depLocal} ${f.departure_airport} local)` : ''}\nArr ${f.arrival_time}${f.arrLocal ? ` (${f.arrLocal} ${f.arrival_airport} local)` : ''} (cont.)`}
                         onClick={() => openEditModal(f)}>
                         <span className="ad-grid-fn">{f.flight_number}</span>
                         {f.overflowHeight > 24 && <span className="ad-grid-rt">→{f.arrival_airport}</span>}
-                        {f.overflowHeight > 40 && <span className="ad-grid-tm">until {f.arrival_time}</span>}
+                        {f.overflowHeight > 40 && (
+                          <span className="ad-grid-tm">until {f.arrival_time}{f.arrLocal && ` (${f.arrLocal})`}</span>
+                        )}
                         <button className="ad-grid-next-dep" title={`Schedule next from ${f.arrival_airport}`}
                           onClick={e => { e.stopPropagation(); fillNextDep(f, f.overflowDayIndex); }}>
                           <svg width="9" height="9" viewBox="0 0 10 10" fill="currentColor">

@@ -1230,8 +1230,12 @@ router.get('/:id/schedule', authMiddleware, async (req, res) => {
              ws.departure_airport, ws.arrival_airport,
              ws.departure_time, ws.arrival_time,
              ws.economy_price, ws.business_price, ws.first_price, ws.route_id,
-             ws.service_profile_id
+             ws.service_profile_id,
+             dep.longitude AS dep_longitude,
+             arr.longitude AS arr_longitude
       FROM weekly_schedule ws
+      LEFT JOIN airports dep ON dep.iata_code = ws.departure_airport
+      LEFT JOIN airports arr ON arr.iata_code = ws.arrival_airport
       WHERE ws.aircraft_id = $1
       ORDER BY ws.day_of_week, ws.departure_time
     `, [aircraftId]);
@@ -1240,7 +1244,8 @@ router.get('/:id/schedule', authMiddleware, async (req, res) => {
       departure_airport: row.departure_airport, arrival_airport: row.arrival_airport,
       departure_time: row.departure_time, arrival_time: row.arrival_time,
       economy_price: row.economy_price, business_price: row.business_price, first_price: row.first_price,
-      route_id: row.route_id, service_profile_id: row.service_profile_id
+      route_id: row.route_id, service_profile_id: row.service_profile_id,
+      dep_longitude: row.dep_longitude, arr_longitude: row.arr_longitude
     }));
 
     const maintResult = await pool.query(`

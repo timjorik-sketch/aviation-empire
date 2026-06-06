@@ -398,6 +398,45 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
           .fs-dist-cell { padding: 4px; min-height: 28px; }
           .fs-dist-pill { font-size: 0.68rem; padding: 1px 4px; }
           .fs-dist-head-time, .fs-dist-head-day { font-size: 0.62rem; padding: 6px 4px; }
+
+          /* Header: title truncates, pill stays visible */
+          .fs-header-title-wrap {
+            overflow: hidden;
+          }
+          .fs-header-title-wrap .card-header-bar-title {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            display: block;
+          }
+          .fs-header-title-wrap .fs-header-sub { display: none; }
+
+          /* Controls: stack vertically */
+          .fs-dist-controls {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 10px;
+            padding: 12px 14px;
+          }
+          .fs-dist-label {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 6px;
+          }
+          .fs-dist-select {
+            min-width: 0;
+            width: 100%;
+          }
+          .fs-haul-filter {
+            width: 100%;
+            justify-content: stretch;
+          }
+          .fs-haul-btn {
+            flex: 1;
+            text-align: center;
+            padding: 6px 4px;
+          }
+          .fs-dist-summary { text-align: right; }
         }
 
         @media (max-width: 480px) {
@@ -430,13 +469,13 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
 
         <div className="info-card" style={{ padding: 0, overflow: 'hidden' }}>
           <div className="card-header-bar" style={{ margin: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+            <div className="fs-header-title-wrap" style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1, overflow: 'hidden' }}>
               <span className="card-header-bar-title">{airline.name} — Flightplan</span>
-              <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.5)' }}>
+              <span className="fs-header-sub" style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.5)', whiteSpace: 'nowrap', flexShrink: 0 }}>
                 {totalRoutes} routes · {airports.length} airports
               </span>
             </div>
-            <div className="fs-view-pill" role="tablist" aria-label="Flightplan view mode">
+            <div className="fs-view-pill" role="tablist" aria-label="Flightplan view mode" style={{ flexShrink: 0 }}>
               <button
                 type="button"
                 role="tab"

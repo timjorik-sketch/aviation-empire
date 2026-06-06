@@ -2104,12 +2104,16 @@ router.get('/weekly-schedule', authMiddleware, async (req, res) => {
         ac.id as aircraft_id, ac.registration, ac.is_active,
         at.full_name as aircraft_type,
         dep.name as departure_name,
-        arr.name as arrival_name
+        arr.name as arrival_name,
+        r.distance_km
       FROM weekly_schedule ws
       JOIN aircraft ac ON ws.aircraft_id = ac.id
       JOIN aircraft_types at ON ac.aircraft_type_id = at.id
       JOIN airports dep ON ws.departure_airport = dep.iata_code
       JOIN airports arr ON ws.arrival_airport = arr.iata_code
+      LEFT JOIN routes r ON r.departure_airport = ws.departure_airport
+        AND r.arrival_airport = ws.arrival_airport
+        AND r.airline_id = ac.airline_id
       WHERE ac.airline_id = $1
       ORDER BY arr.name ASC, ws.day_of_week ASC, ws.departure_time ASC
     `, [airlineId]);
@@ -2120,6 +2124,7 @@ router.get('/weekly-schedule', authMiddleware, async (req, res) => {
       departure_time: r.departure_time, arrival_time: r.arrival_time,
       aircraft_id: r.aircraft_id, registration: r.registration, is_active: r.is_active,
       aircraft_type: r.aircraft_type, departure_name: r.departure_name, arrival_name: r.arrival_name,
+      distance_km: r.distance_km,
     }));
     res.json({ entries });
   } catch (error) {

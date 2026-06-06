@@ -66,6 +66,7 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState('routes'); // 'routes' | 'distribution'
   const [selectedAirport, setSelectedAirport] = useState(null);
+  const [haulFilter, setHaulFilter] = useState('all'); // 'all' | 'short' | 'medium' | 'long'
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -96,6 +97,13 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
     setSelectedAirport(next);
   }, [distAirports, selectedAirport, airline]);
 
+  const haulCategory = (distKm) => {
+    if (distKm == null) return null;
+    if (distKm < 1500) return 'short';
+    if (distKm <= 4000) return 'medium';
+    return 'long';
+  };
+
   // Distribution rows: one row per unique departure time at selected airport.
   // Each row has 7 day columns; each cell holds a list of departures (arrival IATA + flight + aircraft).
   const distRows = useMemo(() => {
@@ -103,6 +111,7 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
     const byTime = new Map(); // "HH:MM" -> { time, days: { 0..6: [{...}] } }
     for (const e of entries) {
       if (e.departure_airport !== selectedAirport) continue;
+      if (haulFilter !== 'all' && haulCategory(e.distance_km) !== haulFilter) continue;
       const t = fmt.time(e.departure_time);
       if (!byTime.has(t)) byTime.set(t, { time: t, days: {} });
       const row = byTime.get(t);
@@ -117,7 +126,7 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
       });
     }
     return [...byTime.values()].sort((a, b) => a.time.localeCompare(b.time));
-  }, [entries, selectedAirport]);
+  }, [entries, selectedAirport, haulFilter]);
 
   // Group by departure_airport → flight_number
   const grouped = entries.reduce((acc, e) => {
@@ -287,6 +296,37 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
           min-width: 220px;
         }
         .fs-dist-select:focus { outline: none; border-color: #2C2C2C; }
+
+        .fs-haul-filter {
+          display: inline-flex;
+          background: #F0F0F0;
+          border: 1px solid #DDD;
+          border-radius: 6px;
+          padding: 2px;
+          gap: 2px;
+          flex-shrink: 0;
+        }
+        .fs-haul-btn {
+          padding: 5px 12px;
+          background: transparent;
+          border: none;
+          border-radius: 4px;
+          font-size: 0.75rem;
+          font-weight: 600;
+          color: #666;
+          cursor: pointer;
+          transition: background 0.15s, color 0.15s;
+          white-space: nowrap;
+        }
+        .fs-haul-btn:hover:not(.fs-haul-btn--active) {
+          background: #E4E4E4;
+          color: #2C2C2C;
+        }
+        .fs-haul-btn--active {
+          background: #2C2C2C;
+          color: white;
+        }
+
         .fs-dist-summary {
           font-size: 0.72rem; color: #999;
           font-variant-numeric: tabular-nums;
@@ -439,6 +479,23 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
                     ))}
                   </select>
                 </label>
+                <div className="fs-haul-filter" role="group" aria-label="Haul type filter">
+                  {[
+                    { key: 'all', label: 'All' },
+                    { key: 'short', label: 'Short' },
+                    { key: 'medium', label: 'Medium' },
+                    { key: 'long', label: 'Long' },
+                  ].map(({ key, label }) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className={`fs-haul-btn${haulFilter === key ? ' fs-haul-btn--active' : ''}`}
+                      onClick={() => setHaulFilter(key)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
                 <span className="fs-dist-summary">
                   {distRows.length} departure time{distRows.length !== 1 ? 's' : ''}
                 </span>

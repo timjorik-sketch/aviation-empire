@@ -12,6 +12,14 @@ const fmt = {
   reg: (r) => r ? r.replace('-', '–') : r,
 };
 
+// Classify a flight by great-circle distance into haul category
+function haulCategory(distance_km) {
+  if (distance_km == null) return null;
+  if (distance_km < 1500) return 'short';
+  if (distance_km <= 4000) return 'medium';
+  return 'long';
+}
+
 // Build day→times map, then compress into display rows
 function buildScheduleRows(slots) {
   const dayTimes = {};
@@ -66,6 +74,7 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState('routes'); // 'routes' | 'distribution'
   const [selectedAirport, setSelectedAirport] = useState(null);
+  const [haulFilter, setHaulFilter] = useState('all'); // 'all' | 'short' | 'medium' | 'long'
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -103,6 +112,7 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
     const byTime = new Map(); // "HH:MM" -> { time, days: { 0..6: [{...}] } }
     for (const e of entries) {
       if (e.departure_airport !== selectedAirport) continue;
+      if (haulFilter !== 'all' && haulCategory(e.distance_km) !== haulFilter) continue;
       const t = fmt.time(e.departure_time);
       if (!byTime.has(t)) byTime.set(t, { time: t, days: {} });
       const row = byTime.get(t);
@@ -117,7 +127,7 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
       });
     }
     return [...byTime.values()].sort((a, b) => a.time.localeCompare(b.time));
-  }, [entries, selectedAirport]);
+  }, [entries, selectedAirport, haulFilter]);
 
   // Group by departure_airport → flight_number
   const grouped = entries.reduce((acc, e) => {
@@ -292,6 +302,39 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
           font-variant-numeric: tabular-nums;
         }
 
+        /* Haul-length pill filter */
+        .fs-haul-filter {
+          display: inline-flex;
+          gap: 2px;
+          background: #EFEFEF;
+          border: 1px solid #DDD;
+          border-radius: 6px;
+          padding: 2px;
+        }
+        .fs-haul-btn {
+          padding: 5px 12px;
+          background: transparent;
+          border: none;
+          border-radius: 4px;
+          font-size: 0.72rem;
+          font-weight: 600;
+          color: #777;
+          cursor: pointer;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          white-space: nowrap;
+          transition: background 0.15s, color 0.15s;
+        }
+        .fs-haul-btn:hover:not(.fs-haul-btn--active) {
+          background: rgba(0,0,0,0.05);
+          color: #2C2C2C;
+        }
+        .fs-haul-btn--active {
+          background: white;
+          color: #2C2C2C;
+          box-shadow: 0 1px 2px rgba(0,0,0,0.12);
+        }
+
         .fs-dist-grid {
           display: flex; flex-direction: column;
         }
@@ -358,6 +401,19 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
           .fs-dist-cell { padding: 4px; min-height: 28px; }
           .fs-dist-pill { font-size: 0.68rem; padding: 1px 4px; }
           .fs-dist-head-time, .fs-dist-head-day { font-size: 0.62rem; padding: 6px 4px; }
+
+          .fs-dist-controls { flex-direction: column; align-items: stretch; }
+          .fs-dist-label { flex-direction: column; align-items: flex-start; }
+          .fs-dist-select { min-width: 0; width: 100%; }
+          .fs-haul-filter { width: 100%; justify-content: stretch; }
+          .fs-haul-btn { flex: 1; text-align: center; }
+
+          .fs-header-titles { overflow: hidden; }
+          .fs-header-titles .card-header-bar-title {
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+          }
+          .fs-header-sub { display: none; }
+          .fs-view-pill { flex-shrink: 0; }
         }
 
         @media (max-width: 480px) {
@@ -390,9 +446,9 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
 
         <div className="info-card" style={{ padding: 0, overflow: 'hidden' }}>
           <div className="card-header-bar" style={{ margin: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+            <div className="fs-header-titles" style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
               <span className="card-header-bar-title">{airline.name} — Flightplan</span>
-              <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.5)' }}>
+              <span className="fs-header-sub" style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.5)' }}>
                 {totalRoutes} routes · {airports.length} airports
               </span>
             </div>
@@ -439,6 +495,24 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
                     ))}
                   </select>
                 </label>
+                <div className="fs-haul-filter" role="group" aria-label="Filter by haul length">
+                  {[
+                    { key: 'all', label: 'All' },
+                    { key: 'short', label: 'Short' },
+                    { key: 'medium', label: 'Medium' },
+                    { key: 'long', label: 'Long' },
+                  ].map(opt => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      className={`fs-haul-btn${haulFilter === opt.key ? ' fs-haul-btn--active' : ''}`}
+                      aria-pressed={haulFilter === opt.key}
+                      onClick={() => setHaulFilter(opt.key)}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
                 <span className="fs-dist-summary">
                   {distRows.length} departure time{distRows.length !== 1 ? 's' : ''}
                 </span>

@@ -1279,6 +1279,22 @@ function getCurrentWeekStart() {
   return monday.toISOString().split('T')[0];
 }
 
+// True if a flight overlaps a maintenance block on the circular weekly timeline
+// (Mon 00:00 = 0 … Sun 23:59 = 10079). The flight is padded by the turnaround
+// buffer on BOTH sides — the same rule the maintenance scheduler applies — so the
+// two paths agree no matter which entry is created first. Week-aware (tests ±1
+// week) so overnight flights and past-midnight maintenance compare correctly at
+// the Sun→Mon seam. All inputs are absolute "week minutes".
+function flightOverlapsMaintenance(depWk, arrWk, pad, mStartWk, mEndWk) {
+  const WEEK_MIN = 7 * 1440;
+  const blockStart = depWk - pad;
+  const blockEnd = arrWk + pad;
+  for (const shift of [-WEEK_MIN, 0, WEEK_MIN]) {
+    if (blockStart + shift < mEndWk && mStartWk < blockEnd + shift) return true;
+  }
+  return false;
+}
+
 async function getExpansionDepartures(airlineId, aircraftId) {
   const airlineResult = await pool.query('SELECT home_airport_code, primary_hub_airport_code FROM airlines WHERE id = $1', [airlineId]);
   const homeCode = airlineResult.rows[0]?.home_airport_code ?? '';
@@ -1527,12 +1543,12 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
       const [eArrH, eArrM] = row.arrival_time.split(':').map(Number);
       existByDay.get(d).push({ depMin: eDepH * 60 + eDepM, arrMin: eArrH * 60 + eArrM });
     }
-    const maintByDay = new Map();
-    for (const row of maintResult.rows) {
-      const d = row.day_of_week;
-      if (!maintByDay.has(d)) maintByDay.set(d, []);
-      maintByDay.get(d).push({ start: row.start_minutes, end: row.start_minutes + row.duration_minutes });
-    }
+    // Maintenance as absolute week-minute intervals so the overlap check is
+    // week-/midnight-aware (a block can start one day and run into the next).
+    const maintWk = maintResult.rows.map(row => {
+      const s = row.day_of_week * 1440 + row.start_minutes;
+      return { start: s, end: s + row.duration_minutes };
+    });
 
     // ── Validate all flights against cached data ──
     const prepared = [];
@@ -1594,10 +1610,14 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
         }
       }
 
-      // Check overlap with maintenance
-      for (const m of (maintByDay.get(dow) || [])) {
-        if (depMin < m.end && m.start < arrMin) {
-          return res.status(400).json({ error: `Flight at ${departure_time} overlaps with a maintenance window` });
+      // Check overlap with maintenance — pad the flight by turnaround on both
+      // sides (same rule as the maintenance scheduler) and compare in week-minutes
+      // so overnight flights and past-midnight maintenance line up at the seam.
+      const depWk = dow * 1440 + depMin;
+      const arrWk = dow * 1440 + arrMin;
+      for (const m of maintWk) {
+        if (flightOverlapsMaintenance(depWk, arrWk, GROUND_MIN, m.start, m.end)) {
+          return res.status(400).json({ error: `Flight at ${departure_time} overlaps with a maintenance window (incl. ${GROUND_MIN}min turnaround)` });
         }
       }
 
@@ -1802,12 +1822,12 @@ router.patch('/:id/schedule/:entryId', authMiddleware, async (req, res) => {
         'SELECT day_of_week, start_minutes, duration_minutes FROM maintenance_schedule WHERE aircraft_id = $1 AND airline_id = $2',
         [aircraftId, airlineId]
       );
+      const editDepWk = effectiveDow * 1440 + effectiveDepMin;
+      const editArrWk = effectiveDow * 1440 + effectiveArrMin;
       for (const row of maintEntries.rows) {
-        if (row.day_of_week !== effectiveDow) continue;
-        const mStart = row.start_minutes;
-        const mEnd = mStart + row.duration_minutes;
-        if (effectiveDepMin < mEnd && mStart < effectiveArrMin) {
-          return res.status(400).json({ error: 'Edit would overlap with a maintenance window' });
+        const mStartWk = row.day_of_week * 1440 + row.start_minutes;
+        if (flightOverlapsMaintenance(editDepWk, editArrWk, GROUND_MIN, mStartWk, mStartWk + row.duration_minutes)) {
+          return res.status(400).json({ error: `Edit would overlap with a maintenance window (incl. ${GROUND_MIN}min turnaround)` });
         }
       }
     }

@@ -634,6 +634,15 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const maintBars = useMemo(() => maintenance.map(m => {
     const crossesMidnight = m.start_minutes + m.duration_minutes > 1440;
     const seg1H = crossesMidnight ? (1440 - m.start_minutes) * PX_PER_MIN : m.duration_minutes * PX_PER_MIN;
+    // Turnaround band AFTER the block: the aircraft can't depart until `groundMin`
+    // after maintenance ends, so the next flight must clear this zone — exactly the
+    // gap the backend enforces. Drawn hatched, mirroring the flight ground band, so
+    // a block that visually fits between two flights also passes validation. The
+    // preceding flight's own ground band already covers the gap before the block.
+    const endAbs  = m.start_minutes + m.duration_minutes;       // may exceed 1440
+    const endDay  = endAbs >= 1440 ? (m.day_of_week + 1) % 7 : m.day_of_week;
+    const endWall = endAbs % 1440;                              // wall-clock end minute
+    const groundCrossesMidnight = endWall + groundMin > 1440;
     return {
       ...m,
       dayIndex: m.day_of_week,
@@ -641,9 +650,14 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       height: Math.max(seg1H, 14),
       crossesMidnight,
       overflowDayIndex: crossesMidnight ? (m.day_of_week + 1) % 7 : null,
-      overflowHeight:   crossesMidnight ? Math.max((m.start_minutes + m.duration_minutes - 1440) * PX_PER_MIN, 14) : 0,
+      overflowHeight:   crossesMidnight ? Math.max((endAbs - 1440) * PX_PER_MIN, 14) : 0,
+      groundDayIndex:         endDay,
+      groundTop:              endWall * PX_PER_MIN,
+      groundSeg1Height:       (groundCrossesMidnight ? (1440 - endWall) : groundMin) * PX_PER_MIN,
+      groundOverflowDayIndex: groundCrossesMidnight ? (endDay + 1) % 7 : null,
+      groundOverflowHeight:   groundCrossesMidnight ? (endWall + groundMin - 1440) * PX_PER_MIN : 0,
     };
-  }), [maintenance]);
+  }), [maintenance, groundMin]);
 
   // ─── Series preview (pure time arithmetic — no Date objects) ─────────────
 
@@ -1832,6 +1846,8 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                 const groundOverflowBars = flightBars.filter(f => f.groundOverflowDayIndex === di);
                 const mBars            = maintBars.filter(m => m.dayIndex === di);
                 const mOverflowBars    = maintBars.filter(m => m.overflowDayIndex === di);
+                const mGroundBars      = maintBars.filter(m => m.groundDayIndex === di);
+                const mGroundOverflowBars = maintBars.filter(m => m.groundOverflowDayIndex === di);
                 return (
                   <div key={di} className="ad-grid-col">
                     {Array.from({ length: 24 }, (_, h) => (
@@ -1839,6 +1855,30 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     ))}
                     {Array.from({ length: 24 }, (_, h) => (
                       <div key={`hh-${h}`} className="ad-halfhour-line" style={{ top: h * HOUR_H + HOUR_H / 2 }} />
+                    ))}
+                    {mGroundBars.map(m => (
+                      <div key={`mg-${m.id}`} className="ad-grid-ground"
+                        title={`${groundMin}min turnaround after maintenance`}
+                        style={{
+                          top: m.groundTop,
+                          height: m.groundSeg1Height,
+                          backgroundImage: `repeating-linear-gradient(-45deg, #6b7280 0px, #6b7280 2px, transparent 2px, transparent 7px)`,
+                          border: '1px solid #6b7280',
+                          borderTop: 'none',
+                          boxSizing: 'border-box',
+                        }} />
+                    ))}
+                    {mGroundOverflowBars.map(m => (
+                      <div key={`mgov-${m.id}`} className="ad-grid-ground"
+                        style={{
+                          top: 0,
+                          height: m.groundOverflowHeight,
+                          backgroundImage: `repeating-linear-gradient(-45deg, #6b7280 0px, #6b7280 2px, transparent 2px, transparent 7px)`,
+                          border: '1px solid #6b7280',
+                          borderTop: 'none',
+                          boxSizing: 'border-box',
+                          opacity: 0.85,
+                        }} />
                     ))}
                     {mBars.map(m => (
                       <div key={`m-${m.id}`} className="ad-grid-maint"

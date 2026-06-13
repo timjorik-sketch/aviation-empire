@@ -760,9 +760,9 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
     const cfResult = await pool.query(`
       SELECT f.flight_number, f.departure_time, f.arrival_time,
              COALESCE(r.departure_airport, ws.departure_airport) as dep_code,
-             dep.name,
+             dep.name AS dep_name,
              COALESCE(r.arrival_airport, ws.arrival_airport) as arr_code,
-             arr.name
+             arr.name AS arr_name
       FROM flights f
       LEFT JOIN routes r ON f.route_id = r.id
       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
@@ -781,8 +781,8 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
       const cf = cfResult.rows[0];
       current_flight = {
         flight_number: cf.flight_number, departure_time: cf.departure_time, arrival_time: cf.arrival_time,
-        departure_airport: cf.dep_code, departure_name: cf.name,
-        arrival_airport: cf.arr_code, arrival_name: cf.name
+        departure_airport: cf.dep_code, departure_name: cf.dep_name,
+        arrival_airport: cf.arr_code, arrival_name: cf.arr_name
       };
     }
 

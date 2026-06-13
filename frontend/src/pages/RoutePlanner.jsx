@@ -8,6 +8,12 @@ import Loader from '../components/Loader.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
+// Airport tiers that count as the airline's own hubs (not destinations). The
+// region filter ignores these endpoints so picking the home-base continent
+// doesn't match every outbound route.
+const HUB_TYPES = new Set(['home_base', 'primary_hub', 'hub', 'hub_restricted']);
+const HUB_PRIORITY = { home_base: 0, primary_hub: 1, hub: 2, hub_restricted: 3 };
+
 function haversineKm(lat1, lon1, lat2, lon2) {
   const R = 6371, toRad = d => d * Math.PI / 180;
   const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
@@ -94,44 +100,76 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
   const [sortCol, setSortCol] = useState('flight_number');
   const [sortDir, setSortDir] = useState('asc');
 
-  // Filter state (by destination continent / country)
+  // Filter state (by destination continent / country, and by hub)
   const [filterContinent, setFilterContinent] = useState('');
   const [filterCountry, setFilterCountry] = useState('');
+  const [filterHub, setFilterHub] = useState('');
 
   const handleSort = (col) => {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortCol(col); setSortDir('asc'); }
   };
 
-  // Distinct continents present on either endpoint (so hubs are selectable too)
+  // Set of the airline's own hub airport codes (home base + hubs)
+  const hubCodeSet = useMemo(
+    () => new Set(airports.filter(a => HUB_TYPES.has(a.effective_type)).map(a => a.iata_code)),
+    [airports]
+  );
+
+  // The "destination" endpoints of a route — i.e. those that are NOT hubs. This
+  // is what the region filter looks at, so both the outbound (hub → dest) and the
+  // return (dest → hub) match on the destination's continent/country, while the
+  // hub's own region is ignored. If both endpoints are hubs, fall back to both.
+  const destEndpoints = (r) => {
+    const depIsDest = !hubCodeSet.has(r.departure_airport);
+    const arrIsDest = !hubCodeSet.has(r.arrival_airport);
+    const bothHubs = !depIsDest && !arrIsDest;
+    const out = [];
+    if (depIsDest || bothHubs) out.push({ continent: r.departure_continent, country: r.departure_country });
+    if (arrIsDest || bothHubs) out.push({ continent: r.arrival_continent, country: r.arrival_country });
+    return out;
+  };
+
+  // Distinct destination continents (hub regions excluded)
   const continentOptions = useMemo(() => {
     const set = new Set();
-    routes.forEach(r => {
-      if (r.arrival_continent) set.add(r.arrival_continent);
-      if (r.departure_continent) set.add(r.departure_continent);
-    });
+    routes.forEach(r => destEndpoints(r).forEach(e => { if (e.continent) set.add(e.continent); }));
     return [...set].sort((a, b) => a.localeCompare(b));
-  }, [routes]);
+  }, [routes, hubCodeSet]);
 
-  // Distinct countries on either endpoint — narrowed to the selected continent, if any
+  // Distinct destination countries — narrowed to the selected continent, if any
   const countryOptions = useMemo(() => {
     const set = new Set();
-    routes.forEach(r => {
-      if (!filterContinent || r.arrival_continent === filterContinent) {
-        if (r.arrival_country) set.add(r.arrival_country);
-      }
-      if (!filterContinent || r.departure_continent === filterContinent) {
-        if (r.departure_country) set.add(r.departure_country);
-      }
-    });
+    routes.forEach(r => destEndpoints(r).forEach(e => {
+      if (filterContinent && e.continent !== filterContinent) return;
+      if (e.country) set.add(e.country);
+    }));
     return [...set].sort((a, b) => a.localeCompare(b));
-  }, [routes, filterContinent]);
+  }, [routes, filterContinent, hubCodeSet]);
 
-  // A route matches if EITHER endpoint is in the selected region, so the
-  // return leg (destination → hub) shows alongside the outbound (hub → destination).
+  // Hubs that actually appear on a route, for the hub dropdown
+  const hubFilterOptions = useMemo(() => {
+    const present = new Set();
+    routes.forEach(r => {
+      if (hubCodeSet.has(r.departure_airport)) present.add(r.departure_airport);
+      if (hubCodeSet.has(r.arrival_airport)) present.add(r.arrival_airport);
+    });
+    return airports
+      .filter(a => present.has(a.iata_code))
+      .sort((a, b) =>
+        (HUB_PRIORITY[a.effective_type] ?? 9) - (HUB_PRIORITY[b.effective_type] ?? 9) ||
+        a.iata_code.localeCompare(b.iata_code));
+  }, [routes, airports, hubCodeSet]);
+
   const filteredRoutes = routes.filter(r => {
-    if (filterContinent && r.arrival_continent !== filterContinent && r.departure_continent !== filterContinent) return false;
-    if (filterCountry && r.arrival_country !== filterCountry && r.departure_country !== filterCountry) return false;
+    // Hub filter: route must touch the selected hub on either endpoint
+    if (filterHub && r.departure_airport !== filterHub && r.arrival_airport !== filterHub) return false;
+    // Region filter: only the destination (non-hub) endpoints are considered
+    if (filterContinent || filterCountry) {
+      const ends = destEndpoints(r);
+      if (filterContinent && !ends.some(e => e.continent === filterContinent)) return false;
+      if (filterCountry && !ends.some(e => e.country === filterCountry)) return false;
+    }
     return true;
   });
 
@@ -1100,9 +1138,25 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
               </span>
               {routes.length > 0 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  {hubFilterOptions.length > 0 && (
+                    <select
+                      value={filterHub}
+                      onChange={e => setFilterHub(e.target.value)}
+                      title="Filter by home base / hub"
+                      style={{ padding: '0.3rem 0.5rem', borderRadius: 4, border: '1px solid rgba(255,255,255,0.3)', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '0.8rem' }}
+                    >
+                      <option value="" style={{ color: '#2C2C2C' }}>All hubs</option>
+                      {hubFilterOptions.map(h => (
+                        <option key={h.iata_code} value={h.iata_code} style={{ color: '#2C2C2C' }}>
+                          {h.iata_code}{TIER_LABEL[h.effective_type] || ''}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   <select
                     value={filterContinent}
                     onChange={e => { setFilterContinent(e.target.value); setFilterCountry(''); }}
+                    title="Filter by destination continent"
                     style={{ padding: '0.3rem 0.5rem', borderRadius: 4, border: '1px solid rgba(255,255,255,0.3)', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '0.8rem' }}
                   >
                     <option value="" style={{ color: '#2C2C2C' }}>All continents</option>
@@ -1113,6 +1167,7 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                   <select
                     value={filterCountry}
                     onChange={e => setFilterCountry(e.target.value)}
+                    title="Filter by destination country"
                     style={{ padding: '0.3rem 0.5rem', borderRadius: 4, border: '1px solid rgba(255,255,255,0.3)', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '0.8rem' }}
                   >
                     <option value="" style={{ color: '#2C2C2C' }}>All countries</option>
@@ -1120,10 +1175,10 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                       <option key={c} value={c} style={{ color: '#2C2C2C' }}>{c}</option>
                     ))}
                   </select>
-                  {(filterContinent || filterCountry) && (
+                  {(filterContinent || filterCountry || filterHub) && (
                     <button
                       type="button"
-                      onClick={() => { setFilterContinent(''); setFilterCountry(''); }}
+                      onClick={() => { setFilterContinent(''); setFilterCountry(''); setFilterHub(''); }}
                       style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.3)', color: 'rgba(255,255,255,0.7)', padding: '0.3rem 0.6rem', borderRadius: 4, fontSize: '0.75rem', cursor: 'pointer' }}
                     >
                       Clear

@@ -105,6 +105,13 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
   const [filterCountry, setFilterCountry] = useState('');
   const [filterHub, setFilterHub] = useState('');
 
+  // Bulk-renumber modal state
+  const [showRenumber, setShowRenumber] = useState(false);
+  const [renumberStart, setRenumberStart] = useState('601');
+  const [renumberScheme, setRenumberScheme] = useState('odd_even'); // odd_even | sequential | gap10
+  const [renumberOrder, setRenumberOrder] = useState('country');    // country | flight_number | distance
+  const [renumberBusy, setRenumberBusy] = useState(false);
+
   const handleSort = (col) => {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortCol(col); setSortDir('asc'); }
@@ -172,6 +179,124 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
     }
     return true;
   });
+
+  // The non-hub ("destination") endpoint of a route, for ordering/labels
+  const routeDest = (r) => hubCodeSet.has(r.arrival_airport)
+    ? { iata: r.departure_airport, country: r.departure_country || '' }
+    : { iata: r.arrival_airport, country: r.arrival_country || '' };
+
+  // Build the renumber plan for the currently filtered routes.
+  // Pairs outbound/return by reversed airports, orders by the chosen key, then
+  // assigns numbers per the chosen scheme. Flags overflow (>9999) and collisions
+  // with the airline's routes outside the current filter.
+  const renumberPlan = useMemo(() => {
+    if (!showRenumber) return { rows: [], hasConflict: false, total: 0 };
+
+    const start = parseInt(renumberStart, 10);
+    const filteredIds = new Set(filteredRoutes.map(r => r.id));
+    // Numbers used by routes NOT in the current filter — these are collisions
+    const outsideNumbers = new Set(routes.filter(r => !filteredIds.has(r.id)).map(r => r.flight_number));
+
+    // Pair routes by reversed airports (greedy)
+    const used = new Set();
+    const units = [];
+    for (const r of filteredRoutes) {
+      if (used.has(r.id)) continue;
+      const partner = filteredRoutes.find(p =>
+        !used.has(p.id) && p.id !== r.id &&
+        p.departure_airport === r.arrival_airport && p.arrival_airport === r.departure_airport);
+      used.add(r.id);
+      if (partner) used.add(partner.id);
+      // Outbound = the leg departing from a hub; fallback to lower current number
+      let outbound = r, ret = partner || null;
+      if (partner) {
+        const rFromHub = hubCodeSet.has(r.departure_airport);
+        const pFromHub = hubCodeSet.has(partner.departure_airport);
+        if (pFromHub && !rFromHub) { outbound = partner; ret = r; }
+        else if (rFromHub === pFromHub &&
+                 String(partner.flight_number) < String(r.flight_number)) { outbound = partner; ret = r; }
+      }
+      units.push({ outbound, ret });
+    }
+
+    // Order the units
+    const keyOf = (u) => {
+      const d = routeDest(u.outbound);
+      if (renumberOrder === 'distance') return u.outbound.distance_km || 0;
+      if (renumberOrder === 'flight_number') return String(u.outbound.flight_number || '');
+      return `${d.country}|${d.iata}`; // country
+    };
+    units.sort((a, b) => {
+      const ka = keyOf(a), kb = keyOf(b);
+      return typeof ka === 'number' ? ka - kb : String(ka).localeCompare(String(kb));
+    });
+
+    // Assign numbers
+    const rows = [];
+    const seen = new Set();
+    const pushRow = (route, num, isOutbound) => {
+      const overflow = !Number.isFinite(num) || num > 9999 || num < 1;
+      const suffix = overflow ? '----' : String(num).padStart(4, '0');
+      const newNumber = overflow ? null : `${airlineCode}${suffix}`;
+      const collides = !overflow && outsideNumbers.has(newNumber);
+      const dupInBatch = !overflow && seen.has(newNumber);
+      if (newNumber) seen.add(newNumber);
+      rows.push({
+        route_id: route.id,
+        oldNumber: route.flight_number,
+        dep: route.departure_airport,
+        arr: route.arrival_airport,
+        newSuffix: suffix,
+        newNumber,
+        isOutbound,
+        conflict: overflow || collides || dupInBatch,
+        reason: overflow ? 'over 9999' : collides ? 'in use elsewhere' : dupInBatch ? 'duplicate' : '',
+      });
+    };
+
+    let n = Number.isFinite(start) ? start : NaN;
+    if (renumberScheme === 'odd_even' && Number.isFinite(n) && n % 2 === 0) n += 1;
+    let pairIndex = 0;
+    for (const u of units) {
+      if (renumberScheme === 'gap10') {
+        const out = (Number.isFinite(start) ? start : NaN) + 10 * pairIndex;
+        pushRow(u.outbound, out, true);
+        if (u.ret) pushRow(u.ret, out + 1, false);
+      } else if (renumberScheme === 'sequential') {
+        pushRow(u.outbound, n, true); n += 1;
+        if (u.ret) { pushRow(u.ret, n, false); n += 1; }
+      } else { // odd_even
+        pushRow(u.outbound, n, true);
+        if (u.ret) pushRow(u.ret, n + 1, false);
+        n += 2;
+      }
+      pairIndex += 1;
+    }
+
+    return { rows, hasConflict: rows.some(r => r.conflict), total: rows.length };
+  }, [showRenumber, renumberStart, renumberScheme, renumberOrder, filteredRoutes, routes, hubCodeSet, airlineCode]);
+
+  const handleApplyRenumber = async () => {
+    if (renumberPlan.hasConflict || renumberPlan.rows.length === 0) return;
+    setRenumberBusy(true); setError('');
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch(`${API_URL}/api/routes/bulk-renumber`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ assignments: renumberPlan.rows.map(r => ({ route_id: r.route_id, suffix: r.newSuffix })) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || (data.conflicts ? `Conflicts: ${data.conflicts.join(', ')}` : 'Failed to renumber'));
+      setSuccess(data.message || 'Routes renumbered');
+      setShowRenumber(false);
+      await refreshRoutes();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setRenumberBusy(false);
+    }
+  };
 
   const sortedRoutes = [...filteredRoutes].sort((a, b) => {
     let av = a[sortCol], bv = b[sortCol];
@@ -1184,6 +1309,15 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                       Clear
                     </button>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => setShowRenumber(true)}
+                    disabled={filteredRoutes.length === 0}
+                    title="Renumber the currently filtered routes"
+                    style={{ background: 'white', border: 'none', color: '#2C2C2C', padding: '0.3rem 0.7rem', borderRadius: 4, fontSize: '0.75rem', fontWeight: 700, cursor: filteredRoutes.length === 0 ? 'not-allowed' : 'pointer', opacity: filteredRoutes.length === 0 ? 0.5 : 1 }}
+                  >
+                    ↻ Renumber
+                  </button>
                 </div>
               )}
             </div>
@@ -1368,6 +1502,105 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
             )}
           </div>
         </div>
+
+        {/* Bulk renumber modal */}
+        {showRenumber && (
+          <div
+            onClick={() => !renumberBusy && setShowRenumber(false)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              style={{ background: 'white', borderRadius: 10, width: 'min(720px, 100%)', maxHeight: '88vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 10px 40px rgba(0,0,0,0.25)' }}
+            >
+              <div style={{ background: '#2C2C2C', color: 'white', padding: '16px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: '0.95rem', fontWeight: 700 }}>Renumber Routes</div>
+                  <div style={{ fontSize: '0.74rem', opacity: 0.7, marginTop: 2 }}>
+                    {filteredRoutes.length} filtered route{filteredRoutes.length === 1 ? '' : 's'}
+                    {(filterHub || filterContinent || filterCountry) ? ' (filter applied)' : ' (all routes)'}
+                  </div>
+                </div>
+                <button onClick={() => !renumberBusy && setShowRenumber(false)}
+                  style={{ background: 'transparent', border: 'none', color: 'white', fontSize: '1.4rem', cursor: 'pointer', lineHeight: 1 }}>×</button>
+              </div>
+
+              {/* Controls */}
+              <div style={{ padding: '16px 22px', borderBottom: '1px solid #F0F0F0', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#666', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Start number</label>
+                  <input type="text" value={renumberStart}
+                    onChange={e => setRenumberStart(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    placeholder="601" maxLength={4}
+                    style={{ width: '100%', padding: '0.45rem 0.6rem', borderRadius: 6, border: '1px solid #E0E0E0', fontSize: '0.9rem', fontFamily: 'monospace', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#666', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Scheme</label>
+                  <select value={renumberScheme} onChange={e => setRenumberScheme(e.target.value)}
+                    style={{ width: '100%', padding: '0.45rem 0.6rem', borderRadius: 6, border: '1px solid #E0E0E0', fontSize: '0.85rem', background: 'white', boxSizing: 'border-box' }}>
+                    <option value="odd_even">Outbound odd / return even</option>
+                    <option value="sequential">Sequential</option>
+                    <option value="gap10">Gaps of 10</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#666', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Order by</label>
+                  <select value={renumberOrder} onChange={e => setRenumberOrder(e.target.value)}
+                    style={{ width: '100%', padding: '0.45rem 0.6rem', borderRadius: 6, border: '1px solid #E0E0E0', fontSize: '0.85rem', background: 'white', boxSizing: 'border-box' }}>
+                    <option value="country">Country → airport</option>
+                    <option value="flight_number">Current flight number</option>
+                    <option value="distance">Distance (short → long)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Preview */}
+              <div style={{ overflowY: 'auto', flex: 1 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                  <thead>
+                    <tr>
+                      {['', 'Route', 'Current', '', 'New', ''].map((h, i) => (
+                        <th key={i} style={{ textAlign: 'left', padding: '8px 14px', position: 'sticky', top: 0, background: '#F5F5F5', borderBottom: '1px solid #E0E0E0', fontSize: '0.7rem', color: '#888', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {renumberPlan.rows.map((r, i) => (
+                      <tr key={`${r.route_id}-${i}`} style={{ background: r.conflict ? '#FEF2F2' : 'transparent' }}>
+                        <td style={{ padding: '6px 14px', color: '#BBB', fontSize: '0.78rem' }}>{r.isOutbound ? '→' : '←'}</td>
+                        <td style={{ padding: '6px 14px', fontFamily: 'monospace', color: '#444' }}>{r.dep} → {r.arr}</td>
+                        <td style={{ padding: '6px 14px', fontFamily: 'monospace', color: '#999' }}>{r.oldNumber}</td>
+                        <td style={{ padding: '6px 6px', color: '#CCC' }}>→</td>
+                        <td style={{ padding: '6px 14px', fontFamily: 'monospace', fontWeight: 700, color: r.conflict ? '#dc2626' : '#16a34a' }}>
+                          {r.newNumber || `${airlineCode}${r.newSuffix}`}
+                        </td>
+                        <td style={{ padding: '6px 14px', fontSize: '0.72rem', color: '#dc2626', whiteSpace: 'nowrap' }}>{r.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Footer */}
+              <div style={{ padding: '14px 22px', borderTop: '1px solid #F0F0F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                <div style={{ fontSize: '0.78rem', color: renumberPlan.hasConflict ? '#dc2626' : '#888' }}>
+                  {renumberPlan.hasConflict
+                    ? 'Resolve conflicts (red) before applying — pick a different start number.'
+                    : `${renumberPlan.total} route${renumberPlan.total === 1 ? '' : 's'} will be renumbered.`}
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => setShowRenumber(false)} disabled={renumberBusy}
+                    style={{ padding: '0.5rem 1rem', background: 'white', border: '1px solid #999', borderRadius: 6, cursor: 'pointer', fontSize: '0.85rem', color: '#666' }}>Cancel</button>
+                  <button onClick={handleApplyRenumber}
+                    disabled={renumberBusy || renumberPlan.hasConflict || renumberPlan.total === 0}
+                    style={{ padding: '0.5rem 1.2rem', background: '#2C2C2C', border: 'none', borderRadius: 6, cursor: (renumberBusy || renumberPlan.hasConflict || renumberPlan.total === 0) ? 'not-allowed' : 'pointer', fontSize: '0.85rem', fontWeight: 700, color: 'white', opacity: (renumberBusy || renumberPlan.hasConflict || renumberPlan.total === 0) ? 0.5 : 1 }}>
+                    {renumberBusy ? 'Applying…' : 'Apply'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
   );
 }

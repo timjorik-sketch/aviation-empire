@@ -430,6 +430,100 @@ router.patch('/:id',
   }
 );
 
+// Bulk renumber routes (mass edit of flight-number suffixes).
+// Body: { assignments: [{ route_id, suffix }] } where suffix is exactly 4 digits.
+// Validates ownership, 4-digit format, no duplicate suffixes within the batch,
+// and no collision with the airline's other routes outside the batch. Applies
+// in a transaction via a temp pass so no intermediate duplicate ever exists.
+// Mirrors the single-edit sync: weekly_schedule + future (scheduled/boarding)
+// flights get the new number; flown history is left untouched.
+router.post('/bulk-renumber', authMiddleware, async (req, res) => {
+  const airlineId = req.airlineId;
+  if (!airlineId) return res.status(400).json({ error: 'No active airline' });
+
+  const assignments = Array.isArray(req.body?.assignments) ? req.body.assignments : null;
+  if (!assignments || assignments.length === 0) {
+    return res.status(400).json({ error: 'No assignments provided' });
+  }
+
+  // Normalise + validate shape
+  const norm = [];
+  const seenSuffix = new Set();
+  const seenRoute = new Set();
+  for (const a of assignments) {
+    const routeId = parseInt(a?.route_id);
+    const suffix = String(a?.suffix ?? '');
+    if (!Number.isInteger(routeId) || !/^\d{4}$/.test(suffix)) {
+      return res.status(400).json({ error: 'Each assignment needs a route_id and a 4-digit suffix' });
+    }
+    if (seenRoute.has(routeId)) return res.status(400).json({ error: 'Duplicate route in batch' });
+    if (seenSuffix.has(suffix)) return res.status(400).json({ error: `Duplicate flight number ${suffix} in batch` });
+    seenRoute.add(routeId);
+    seenSuffix.add(suffix);
+    norm.push({ routeId, suffix });
+  }
+
+  try {
+    const airlineRow = await pool.query('SELECT airline_code FROM airlines WHERE id = $1', [airlineId]);
+    if (!airlineRow.rows[0]) return res.status(400).json({ error: 'No airline found' });
+    const airlineCode = airlineRow.rows[0].airline_code;
+
+    // All routes must belong to this airline
+    const ownRows = await pool.query('SELECT id FROM routes WHERE airline_id = $1', [airlineId]);
+    const ownIds = new Set(ownRows.rows.map(r => r.id));
+    for (const { routeId } of norm) {
+      if (!ownIds.has(routeId)) return res.status(404).json({ error: `Route ${routeId} not found` });
+    }
+    const batchIds = new Set(norm.map(n => n.routeId));
+
+    // Collision check: a target number already used by a route NOT in the batch
+    const targetNumbers = norm.map(n => `${airlineCode}${n.suffix}`);
+    const collisionRows = await pool.query(
+      'SELECT id, flight_number FROM routes WHERE airline_id = $1 AND flight_number = ANY($2)',
+      [airlineId, targetNumbers]
+    );
+    const conflicts = collisionRows.rows.filter(r => !batchIds.has(r.id)).map(r => r.flight_number);
+    if (conflicts.length > 0) {
+      return res.status(409).json({ error: 'Flight number conflicts', conflicts });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Pass 1: park every batched route on a guaranteed-unique temp number
+      for (const { routeId } of norm) {
+        await client.query('UPDATE routes SET flight_number = $1 WHERE id = $2', [`TMP_${routeId}`, routeId]);
+      }
+
+      // Pass 2: assign final numbers + sync schedule and future flights
+      for (const { routeId, suffix } of norm) {
+        const finalNumber = `${airlineCode}${suffix}`;
+        await client.query('UPDATE routes SET flight_number = $1 WHERE id = $2', [finalNumber, routeId]);
+        await client.query('UPDATE weekly_schedule SET flight_number = $1 WHERE route_id = $2', [finalNumber, routeId]);
+        await client.query(
+          `UPDATE flights SET flight_number = $1
+             WHERE status IN ('scheduled','boarding')
+               AND (route_id = $2 OR weekly_schedule_id IN (SELECT id FROM weekly_schedule WHERE route_id = $2))`,
+          [finalNumber, routeId]
+        );
+      }
+
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
+
+    res.json({ message: `Renumbered ${norm.length} route${norm.length === 1 ? '' : 's'}`, count: norm.length });
+  } catch (error) {
+    console.error('Bulk renumber error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Delete route
 router.delete('/:id', authMiddleware, async (req, res) => {
   try {

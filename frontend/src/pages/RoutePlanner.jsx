@@ -94,12 +94,39 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
   const [sortCol, setSortCol] = useState('flight_number');
   const [sortDir, setSortDir] = useState('asc');
 
+  // Filter state (by destination continent / country)
+  const [filterContinent, setFilterContinent] = useState('');
+  const [filterCountry, setFilterCountry] = useState('');
+
   const handleSort = (col) => {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortCol(col); setSortDir('asc'); }
   };
 
-  const sortedRoutes = [...routes].sort((a, b) => {
+  // Distinct destination continents present in the routes
+  const continentOptions = useMemo(() => {
+    const set = new Set();
+    routes.forEach(r => { if (r.arrival_continent) set.add(r.arrival_continent); });
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [routes]);
+
+  // Distinct destination countries — narrowed to the selected continent, if any
+  const countryOptions = useMemo(() => {
+    const set = new Set();
+    routes.forEach(r => {
+      if (filterContinent && r.arrival_continent !== filterContinent) return;
+      if (r.arrival_country) set.add(r.arrival_country);
+    });
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [routes, filterContinent]);
+
+  const filteredRoutes = routes.filter(r => {
+    if (filterContinent && r.arrival_continent !== filterContinent) return false;
+    if (filterCountry && r.arrival_country !== filterCountry) return false;
+    return true;
+  });
+
+  const sortedRoutes = [...filteredRoutes].sort((a, b) => {
     let av = a[sortCol], bv = b[sortCol];
     if (av == null) av = sortCol === 'distance_km' || sortCol === 'weekly_flights' ? -1 : '';
     if (bv == null) bv = sortCol === 'distance_km' || sortCol === 'weekly_flights' ? -1 : '';
@@ -1058,11 +1085,48 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
 
         {/* Routes Table - full width */}
         <div className="info-card">
-            <div className="card-header-bar">
-              <span className="card-header-bar-title">Your Routes ({routes.length})</span>
+            <div className="card-header-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <span className="card-header-bar-title">
+                Your Routes ({filteredRoutes.length}{filteredRoutes.length !== routes.length ? ` / ${routes.length}` : ''})
+              </span>
+              {routes.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <select
+                    value={filterContinent}
+                    onChange={e => { setFilterContinent(e.target.value); setFilterCountry(''); }}
+                    style={{ padding: '0.3rem 0.5rem', borderRadius: 4, border: '1px solid rgba(255,255,255,0.3)', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '0.8rem' }}
+                  >
+                    <option value="" style={{ color: '#2C2C2C' }}>All continents</option>
+                    {continentOptions.map(c => (
+                      <option key={c} value={c} style={{ color: '#2C2C2C' }}>{c}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={filterCountry}
+                    onChange={e => setFilterCountry(e.target.value)}
+                    style={{ padding: '0.3rem 0.5rem', borderRadius: 4, border: '1px solid rgba(255,255,255,0.3)', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '0.8rem' }}
+                  >
+                    <option value="" style={{ color: '#2C2C2C' }}>All countries</option>
+                    {countryOptions.map(c => (
+                      <option key={c} value={c} style={{ color: '#2C2C2C' }}>{c}</option>
+                    ))}
+                  </select>
+                  {(filterContinent || filterCountry) && (
+                    <button
+                      type="button"
+                      onClick={() => { setFilterContinent(''); setFilterCountry(''); }}
+                      style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.3)', color: 'rgba(255,255,255,0.7)', padding: '0.3rem 0.6rem', borderRadius: 4, fontSize: '0.75rem', cursor: 'pointer' }}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
             {routes.length === 0 ? (
               <p style={{ color: '#666666', marginTop: '1rem' }}>No routes yet. Create your first route above!</p>
+            ) : filteredRoutes.length === 0 ? (
+              <p style={{ color: '#666666', marginTop: '1rem' }}>No routes match the selected filters.</p>
             ) : (
               <div style={{ overflowX: 'auto' }}>
                 <table className="rp-table">

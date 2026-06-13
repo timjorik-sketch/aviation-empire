@@ -85,6 +85,10 @@ router.get('/', authMiddleware, async (req, res) => {
         r.economy_price, r.business_price, r.first_price,
         dep.name as departure_name,
         arr.name as arrival_name,
+        dep.country as departure_country,
+        arr.country as arrival_country,
+        dep.continent as departure_continent,
+        arr.continent as arrival_continent,
         COALESCE((
           SELECT COUNT(ws.id)
           FROM weekly_schedule ws
@@ -110,6 +114,10 @@ router.get('/', authMiddleware, async (req, res) => {
       first_price: row.first_price,
       departure_name: row.departure_name,
       arrival_name: row.arrival_name,
+      departure_country: row.departure_country,
+      arrival_country: row.arrival_country,
+      departure_continent: row.departure_continent,
+      arrival_continent: row.arrival_continent,
       weekly_flights: parseInt(row.weekly_flights),
     }));
 

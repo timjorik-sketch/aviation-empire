@@ -126,14 +126,12 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
   // The "destination" endpoints of a route — i.e. those that are NOT hubs. This
   // is what the region filter looks at, so both the outbound (hub → dest) and the
   // return (dest → hub) match on the destination's continent/country, while the
-  // hub's own region is ignored. If both endpoints are hubs, fall back to both.
+  // hub's own region is ignored. A hub-to-hub route (both endpoints are hubs) has
+  // no destination, so it matches no region filter — only "All" and the hub filter.
   const destEndpoints = (r) => {
-    const depIsDest = !hubCodeSet.has(r.departure_airport);
-    const arrIsDest = !hubCodeSet.has(r.arrival_airport);
-    const bothHubs = !depIsDest && !arrIsDest;
     const out = [];
-    if (depIsDest || bothHubs) out.push({ continent: r.departure_continent, country: r.departure_country });
-    if (arrIsDest || bothHubs) out.push({ continent: r.arrival_continent, country: r.arrival_country });
+    if (!hubCodeSet.has(r.departure_airport)) out.push({ continent: r.departure_continent, country: r.departure_country });
+    if (!hubCodeSet.has(r.arrival_airport)) out.push({ continent: r.arrival_continent, country: r.arrival_country });
     return out;
   };
 

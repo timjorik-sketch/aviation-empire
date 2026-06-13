@@ -103,26 +103,35 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
     else { setSortCol(col); setSortDir('asc'); }
   };
 
-  // Distinct destination continents present in the routes
+  // Distinct continents present on either endpoint (so hubs are selectable too)
   const continentOptions = useMemo(() => {
     const set = new Set();
-    routes.forEach(r => { if (r.arrival_continent) set.add(r.arrival_continent); });
+    routes.forEach(r => {
+      if (r.arrival_continent) set.add(r.arrival_continent);
+      if (r.departure_continent) set.add(r.departure_continent);
+    });
     return [...set].sort((a, b) => a.localeCompare(b));
   }, [routes]);
 
-  // Distinct destination countries — narrowed to the selected continent, if any
+  // Distinct countries on either endpoint — narrowed to the selected continent, if any
   const countryOptions = useMemo(() => {
     const set = new Set();
     routes.forEach(r => {
-      if (filterContinent && r.arrival_continent !== filterContinent) return;
-      if (r.arrival_country) set.add(r.arrival_country);
+      if (!filterContinent || r.arrival_continent === filterContinent) {
+        if (r.arrival_country) set.add(r.arrival_country);
+      }
+      if (!filterContinent || r.departure_continent === filterContinent) {
+        if (r.departure_country) set.add(r.departure_country);
+      }
     });
     return [...set].sort((a, b) => a.localeCompare(b));
   }, [routes, filterContinent]);
 
+  // A route matches if EITHER endpoint is in the selected region, so the
+  // return leg (destination → hub) shows alongside the outbound (hub → destination).
   const filteredRoutes = routes.filter(r => {
-    if (filterContinent && r.arrival_continent !== filterContinent) return false;
-    if (filterCountry && r.arrival_country !== filterCountry) return false;
+    if (filterContinent && r.arrival_continent !== filterContinent && r.departure_continent !== filterContinent) return false;
+    if (filterCountry && r.arrival_country !== filterCountry && r.departure_country !== filterCountry) return false;
     return true;
   });
 

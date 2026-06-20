@@ -1361,7 +1361,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   };
 
   const fillNextDepMaint = (m) => {
-    const rawMin = (m.start_minutes ?? 0) + (m.duration_minutes ?? 0);
+    // Earliest valid departure = maintenance end + turnaround (boarding/fuelling
+    // for the next flight). Mirrors the backend's `dep - turnaround` overlap check
+    // and the hatched ground band drawn after the block.
+    const rawMin = (m.start_minutes ?? 0) + (m.duration_minutes ?? 0) + groundMin;
     const dayOffset = Math.floor(rawMin / 1440);
     const endMin = rawMin % 1440;
     const newDay = (m.dayIndex + dayOffset) % 7; // dayIndex is 0-6

@@ -252,9 +252,11 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [activePage, setActivePage] = useState(0);
+  const [filterHub, setFilterHub]                   = useState(null);
   const [filterAircraftType, setFilterAircraftType] = useState(null);
   const [filterHaul, setFilterHaul]                 = useState(null);
   const [filterContinent, setFilterContinent]       = useState(null);
+  const [hubOpen, setHubOpen]         = useState(false);
   const [acTypeOpen, setAcTypeOpen]   = useState(false);
   const [haulOpen, setHaulOpen]       = useState(false);
   const [continentOpen, setContinentOpen] = useState(false);
@@ -342,7 +344,7 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
   // Reset to first page whenever filters change so the user sees the head of
   // the result set. Must stay above any conditional return to satisfy the
   // Rules of Hooks.
-  useEffect(() => { setActivePage(0); }, [filterAircraftType, filterHaul, filterContinent]);
+  useEffect(() => { setActivePage(0); }, [filterHub, filterAircraftType, filterHaul, filterContinent]);
 
   const patch = async (url, body, successMsg) => {
     setSaving(true); setError(''); setSuccess('');
@@ -399,6 +401,14 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
   const activeFlights = flights.filter(fl => fl.status === 'in-flight');
 
   // Counts on the *unfiltered* set so each filter shows total options.
+  const hubOptions = (() => {
+    const map = new Map();
+    for (const fl of activeFlights) {
+      if (!fl.departure_airport) continue;
+      map.set(fl.departure_airport, (map.get(fl.departure_airport) || 0) + 1);
+    }
+    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  })();
   const aircraftTypeOptions = (() => {
     const map = new Map();
     for (const fl of activeFlights) {
@@ -426,13 +436,15 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
   })();
 
   const filteredActive = activeFlights.filter(fl => {
+    if (filterHub && fl.departure_airport !== filterHub) return false;
     if (filterAircraftType && fl.aircraft_type !== filterAircraftType) return false;
     if (filterHaul && haulOf(fl.distance_km) !== filterHaul) return false;
     if (filterContinent && fl.arrival_continent !== filterContinent) return false;
     return true;
   });
-  const hasActiveFilters = !!(filterAircraftType || filterHaul || filterContinent);
+  const hasActiveFilters = !!(filterHub || filterAircraftType || filterHaul || filterContinent);
   const resetActiveFilters = () => {
+    setFilterHub(null);
     setFilterAircraftType(null);
     setFilterHaul(null);
     setFilterContinent(null);
@@ -470,6 +482,7 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
           </div>
           <LiveFlightMap
             mapStyle={mapStyle}
+            filterHub={filterHub}
             filterAircraftType={filterAircraftType}
             filterHaul={filterHaul}
             filterContinent={filterContinent}
@@ -489,6 +502,34 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
           <div className="occ-fl-layout">
             {/* Filter sidebar */}
             <aside className="occ-fl-sidebar">
+              <div className="occ-fl-sb-section">
+                <button className="occ-fl-sb-toggle" onClick={() => setHubOpen(o => !o)}>
+                  <span className="occ-fl-sb-label">Hub</span>
+                  <span className="occ-fl-sb-arrow">{hubOpen ? '▲' : '▼'}</span>
+                </button>
+                {(hubOpen || filterHub) && (
+                  <>
+                    <button
+                      className={`occ-fl-sb-item${!filterHub ? ' occ-fl-sb-item--active' : ''}`}
+                      onClick={() => setFilterHub(null)}
+                    >
+                      <span>All Hubs</span>
+                      <span className="occ-fl-sb-count">{activeFlights.length}</span>
+                    </button>
+                    {hubOptions.map(([hub, count]) => (
+                      <button
+                        key={hub}
+                        className={`occ-fl-sb-item${filterHub === hub ? ' occ-fl-sb-item--active' : ''}`}
+                        onClick={() => setFilterHub(filterHub === hub ? null : hub)}
+                      >
+                        <span>{hub}</span>
+                        <span className="occ-fl-sb-count">{count}</span>
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+
               <div className="occ-fl-sb-section">
                 <button className="occ-fl-sb-toggle" onClick={() => setAcTypeOpen(o => !o)}>
                   <span className="occ-fl-sb-label">Aircraft Type</span>

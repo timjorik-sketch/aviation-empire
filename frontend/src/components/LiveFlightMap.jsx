@@ -86,6 +86,7 @@ function haulOf(km) {
 
 export default function LiveFlightMap({
   mapStyle = 'dark',
+  filterHub = null,
   filterAircraftType = null,
   filterHaul = null,
   filterContinent = null,
@@ -107,6 +108,7 @@ export default function LiveFlightMap({
     if (!map || !group) return;
 
     const flights = rawFlights.filter(f => {
+      if (filterHub && f.origin_iata !== filterHub) return false;
       if (filterAircraftType && f.aircraft_type !== filterAircraftType) return false;
       if (filterHaul && haulOf(f.distance_km) !== filterHaul) return false;
       if (filterContinent && f.arrival_continent !== filterContinent) return false;
@@ -301,7 +303,7 @@ export default function LiveFlightMap({
       );
       group.addLayer(marker);
     }
-  }, [filterAircraftType, filterHaul, filterContinent]);
+  }, [filterHub, filterAircraftType, filterHaul, filterContinent]);
 
   // Keep a ref to the current drawFlights so the polling interval (set up once)
   // always uses the latest filter values without needing to be re-created.

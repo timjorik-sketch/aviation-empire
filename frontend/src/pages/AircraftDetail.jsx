@@ -1889,7 +1889,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                 </span>
               )}
               {homeOffsetHours != null && homeOffsetHours !== BERLIN_LON_OFFSET && (
-                <button className="ad-tz-toggle" onClick={() => setViewLocal(v => !v)}>Switch Time</button>
+                <button className="ad-btn-clear-sched" onClick={() => setViewLocal(v => !v)}>Switch Time</button>
               )}
             </span>
             <button className="ad-btn-clear-sched" onClick={handleClearSchedule}>Clear All</button>
@@ -3622,8 +3622,6 @@ const styles = `
   }
   .ad-grid-card { background: white; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden; position: relative; }
   .ad-tz-label { color: #fff; } /* inherits the title's size/weight/spacing/uppercase */
-  .ad-tz-toggle { background: none; border: 1px solid #93C5FD; color: #1D4ED8; border-radius: 5px; padding: 0.15rem 0.5rem; font-size: 0.72rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
-  .ad-tz-toggle:hover { background: #DBEAFE; }
   .ad-grid-header { display: flex; border-bottom: 2px solid #E0E0E0; background: #FAFAFA; position: sticky; top: 0; z-index: 5; }
   .ad-grid-gutter-hd { width: ${GUTTER_W}px; min-width: ${GUTTER_W}px; border-right: 1px solid #E0E0E0; flex-shrink: 0; }
   .ad-grid-day-hd { flex: 1; text-align: center; padding: 0.45rem 0.25rem; font-size: 0.75rem; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: 0.06em; border-right: 1px solid #EEEEEE; }

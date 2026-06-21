@@ -80,19 +80,51 @@ function formatRunway(m) {
   return m.toLocaleString() + ' m';
 }
 
-function formatBoardTime(isoStr) {
+// Approximate UTC offset (whole hours) from longitude — nautical time zones, no DST,
+// no political borders. Matches the schedule/aircraft local-time displays. Null when
+// longitude is unknown, in which case the boards fall back to game time (Berlin).
+function lonOffsetHours(lon) {
+  if (lon == null || isNaN(lon)) return null;
+  return Math.round(lon / 15);
+}
+
+// Real Europe/Berlin UTC offset (minutes) for an instant — DST-aware.
+function berlinOffsetMin(d) {
+  const s = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Berlin', timeZoneName: 'shortOffset' }).format(d);
+  const m = s.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);
+  if (!m) return 60;
+  return (m[1] === '+' ? 1 : -1) * (parseInt(m[2]) * 60 + parseInt(m[3] || '0'));
+}
+
+// Re-express a stored UTC instant in the airport's local wall-clock, consistent with
+// the schedule grid: recover the Berlin wall-clock (DST-aware, = the planned "HH:MM")
+// then apply the nautical airport shift (offsetH − BERLIN_LON_OFFSET=1). Formatting the
+// result in UTC then yields the airport-local time. At offsetH=1 this reduces exactly to
+// the previous Berlin display, so European boards are unchanged.
+function airportLocalDate(isoStr, offsetH) {
+  const d = new Date(isoStr);
+  const shiftMin = berlinOffsetMin(d) + (offsetH - 1) * 60;
+  return new Date(d.getTime() + shiftMin * 60000);
+}
+
+function formatBoardTime(isoStr, offsetH) {
   if (!isoStr) return '—';
-  const d = new Date(isoStr);
-  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Europe/Berlin' });
+  if (offsetH == null) {
+    return new Date(isoStr).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Europe/Berlin' });
+  }
+  return airportLocalDate(isoStr, offsetH).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' });
 }
 
-function formatDayHeader(isoStr) {
-  const d = new Date(isoStr);
-  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'Europe/Berlin' });
+function formatDayHeader(isoStr, offsetH) {
+  if (offsetH == null) {
+    return new Date(isoStr).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'Europe/Berlin' });
+  }
+  return airportLocalDate(isoStr, offsetH).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 }
 
-function flightDate(isoStr) {
-  return new Date(isoStr).toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' });
+function flightDate(isoStr, offsetH) {
+  if (offsetH == null) return new Date(isoStr).toLocaleDateString('en-CA', { timeZone: 'Europe/Berlin' });
+  return airportLocalDate(isoStr, offsetH).toLocaleDateString('en-CA', { timeZone: 'UTC' });
 }
 
 // Departure board status, view_type-aware.
@@ -210,7 +242,7 @@ function AirlineChip({ code, logoFilename, dark = true, onClick, size = 'normal'
   return <span className={`ap-chip ${dark ? 'ap-chip-dark' : 'ap-chip-board'}`} style={style} onClick={onClick}>{code}</span>;
 }
 
-function BoardTable({ type, flights, now, onNavigateToAirport, onAirlineClick }) {
+function BoardTable({ type, flights, now, onNavigateToAirport, onAirlineClick, offsetH }) {
   const isArr = type === 'arrivals';
   const containerRef = useRef(null);
   const mode = useBoardMode(containerRef);
@@ -230,9 +262,9 @@ function BoardTable({ type, flights, now, onNavigateToAirport, onAirlineClick })
   let lastDate = null;
   for (const f of rows) {
     const timeKey = isArr ? f.arrival_time : f.departure_time;
-    const dateStr = flightDate(timeKey);
+    const dateStr = flightDate(timeKey, offsetH);
     if (dateStr !== lastDate) {
-      items.push({ type: 'sep', label: formatDayHeader(timeKey), key: `sep-${dateStr}` });
+      items.push({ type: 'sep', label: formatDayHeader(timeKey, offsetH), key: `sep-${dateStr}` });
       lastDate = dateStr;
     }
     items.push({ type: 'row', flight: f, key: f.id });
@@ -266,7 +298,7 @@ function BoardTable({ type, flights, now, onNavigateToAirport, onAirlineClick })
           return (
             <tr key={f.id}>
               <td><AirlineChip code={f.airline_code} logoFilename={f.logo_filename} dark={false} size={mode === 'code-only' ? 'small' : 'normal'} onClick={onAirlineClick ? () => onAirlineClick(f.airline_code) : undefined} /></td>
-              <td className="ap-time">{formatBoardTime(time)}</td>
+              <td className="ap-time">{formatBoardTime(time, offsetH)}</td>
               <td className="ap-apt-col" title={airportName || airportCode}>
                 <DestinationLabel
                   code={airportCode}
@@ -432,6 +464,12 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
     const t = setInterval(() => setNow(Date.now()), 15000);
     return () => clearInterval(t);
   }, []);
+
+  // Boards show this airport's local time (nautical longitude approximation).
+  const boardOffsetH = lonOffsetHours(airport?.longitude);
+  const boardTzLabel = boardOffsetH != null
+    ? `Local Time UTC${boardOffsetH >= 0 ? '+' : ''}${boardOffsetH}`
+    : 'Game Time UTC+1';
 
   return (
     <div className="ap-page">
@@ -609,9 +647,10 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
                 <div className="ap-board-titlebar dep">
                   <img src="/icon/icon_departures.png" alt="" style={{ width: 18, height: 18, objectFit: 'contain', flexShrink: 0 }} />
                   <span className="ap-board-title">DEPARTURES</span>
+                  <span className="ap-board-tz">{boardTzLabel}</span>
                   <span className="ap-board-ct">{departures.length} shown</span>
                 </div>
-                <BoardTable type="departures" flights={departures} now={now} onNavigateToAirport={onNavigateToAirport} onAirlineClick={setProfilePopupCode} />
+                <BoardTable type="departures" flights={departures} now={now} onNavigateToAirport={onNavigateToAirport} onAirlineClick={setProfilePopupCode} offsetH={boardOffsetH} />
               </div>
 
               {/* Arrivals */}
@@ -619,9 +658,10 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
                 <div className="ap-board-titlebar arr">
                   <img src="/icon/icon_landing.png" alt="" style={{ width: 18, height: 18, objectFit: 'contain', flexShrink: 0 }} />
                   <span className="ap-board-title">ARRIVALS</span>
+                  <span className="ap-board-tz">{boardTzLabel}</span>
                   <span className="ap-board-ct">{arrivals.length} shown</span>
                 </div>
-                <BoardTable type="arrivals" flights={arrivals} now={now} onNavigateToAirport={onNavigateToAirport} onAirlineClick={setProfilePopupCode} />
+                <BoardTable type="arrivals" flights={arrivals} now={now} onNavigateToAirport={onNavigateToAirport} onAirlineClick={setProfilePopupCode} offsetH={boardOffsetH} />
               </div>
 
             </div>
@@ -993,6 +1033,7 @@ export default function AirportPage({ code, onBack, onNavigateToAirport, airline
         .ap-board-titlebar.arr { background: #0F2819; }
         .ap-board-arrow { font-size: 1rem; font-weight: 900; }
         .ap-board-title { flex: 1; }
+        .ap-board-tz { font-size: 0.62rem; color: rgba(255,255,255,0.55); font-weight: 600; letter-spacing: 0.04em; }
         .ap-board-ct { font-size: 0.65rem; color: rgba(255,255,255,0.3); font-weight: 400; letter-spacing: 0; }
 
         .ap-board-empty {

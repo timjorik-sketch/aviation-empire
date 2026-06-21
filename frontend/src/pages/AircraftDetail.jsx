@@ -1082,7 +1082,8 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       if (!res.ok) throw new Error(data.error || 'Failed to load fleet');
       const typeId = aircraft?.type_id;
       const list = (Array.isArray(data) ? data : data.fleet || [])
-        .filter(a => Number(a.id) !== Number(aircraftId) && a.type_id === typeId);
+        .filter(a => Number(a.id) !== Number(aircraftId) && a.type_id === typeId)
+        .sort((a, b) => (a.name || a.registration || '').localeCompare(b.name || b.registration || ''));
       setCopyFleet(list);
     } catch (err) { setError(err.message); }
     finally { setCopyFleetLoading(false); }

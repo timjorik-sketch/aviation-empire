@@ -1878,27 +1878,22 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         {/* ── Weekly Schedule + Form side by side ── */}
         <div className="ad-schedule-layout">
         <div className="ad-grid-card">
-          <div className="ad-sidebar-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>Weekly Schedule</span>
+          <div className="ad-sidebar-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <span>Weekly Schedule</span>
+              {homeOffsetHours != null && (
+                <span className="ad-tz-label">
+                  ({viewLocal
+                    ? `${aircraft?.home_airport || 'Home base'} Local Time UTC${homeOffsetHours >= 0 ? '+' : ''}${homeOffsetHours}`
+                    : 'Game Time UTC+1'})
+                </span>
+              )}
+              {homeOffsetHours != null && homeOffsetHours !== BERLIN_LON_OFFSET && (
+                <button className="ad-tz-toggle" onClick={() => setViewLocal(v => !v)}>Switch Time</button>
+              )}
+            </span>
             <button className="ad-btn-clear-sched" onClick={handleClearSchedule}>Clear All</button>
           </div>
-          {homeOffsetHours != null && (
-            <div className="ad-tz-bar">
-              <span>
-                🕒 Times shown in{' '}
-                <strong>
-                  {viewLocal
-                    ? `${aircraft?.home_airport || 'home base'} local (UTC${homeOffsetHours >= 0 ? '+' : ''}${homeOffsetHours})`
-                    : 'game time (UTC+1)'}
-                </strong>
-              </span>
-              {homeOffsetHours !== BERLIN_LON_OFFSET && (
-                <button className="ad-tz-toggle" onClick={() => setViewLocal(v => !v)}>
-                  Switch to {viewLocal ? 'game time' : 'home base local'}
-                </button>
-              )}
-            </div>
-          )}
           <div className="ad-grid-header">
             <div className="ad-grid-gutter-hd" />
             {DAY_SHORT.map((d, i) => <div key={i} className="ad-grid-day-hd">{d}</div>)}
@@ -3626,8 +3621,7 @@ const styles = `
     .ad-schedule-layout > .ad-form-card { flex: 1 1 0; min-width: 0; position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow-y: auto; }
   }
   .ad-grid-card { background: white; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden; position: relative; }
-  .ad-tz-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.4rem 0.75rem; background: #EFF6FF; border-bottom: 1px solid #DBEAFE; font-size: 0.78rem; color: #1E3A5F; }
-  .ad-tz-bar strong { font-weight: 700; }
+  .ad-tz-label { font-size: 0.8rem; font-weight: 500; color: #1D4ED8; }
   .ad-tz-toggle { background: none; border: 1px solid #93C5FD; color: #1D4ED8; border-radius: 5px; padding: 0.15rem 0.5rem; font-size: 0.72rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
   .ad-tz-toggle:hover { background: #DBEAFE; }
   .ad-grid-header { display: flex; border-bottom: 2px solid #E0E0E0; background: #FAFAFA; position: sticky; top: 0; z-index: 5; }

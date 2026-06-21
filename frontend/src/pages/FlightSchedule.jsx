@@ -12,6 +12,30 @@ const fmt = {
   reg: (r) => r ? r.replace('-', '–') : r,
 };
 
+// Schedule times are stored as Europe/Berlin wall-clock "HH:MM" (the single
+// game-time source). For the Time Distribution boards we re-derive each
+// airport's local wall-clock via the same longitude approximation used across
+// the app (Berlin ≈ UTC+1 under round(lon/15)).
+const BERLIN_LON_OFFSET = 1;
+function lonOffsetHours(lon) {
+  if (lon == null || isNaN(lon)) return null;
+  return Math.round(lon / 15);
+}
+// Shift a Berlin "HH:MM" on weekday `day` (0=Mon) into local time at `lon`,
+// rolling the weekday column when the shift crosses midnight.
+function toAirportLocal(berlinHHMM, day, lon) {
+  const off = lonOffsetHours(lon);
+  const [h, m] = (berlinHHMM || '00:00').split(':').map(Number);
+  let total = h * 60 + m;
+  if (off != null) total += (off - BERLIN_LON_OFFSET) * 60;
+  const dayShift = Math.floor(total / 1440);
+  total = ((total % 1440) + 1440) % 1440;
+  const nd = (((day + dayShift) % 7) + 7) % 7;
+  const hh = String(Math.floor(total / 60)).padStart(2, '0');
+  const mm = String(total % 60).padStart(2, '0');
+  return { day: nd, time: `${hh}:${mm}` };
+}
+
 // Classify a flight by great-circle distance into haul category
 function haulCategory(distance_km) {
   if (distance_km == null) return null;
@@ -74,6 +98,7 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState('routes'); // 'routes' | 'distribution'
   const [selectedAirport, setSelectedAirport] = useState(null);
+  const [distMode, setDistMode] = useState('departure'); // 'departure' | 'arrival'
   const [haulFilter, setHaulFilter] = useState('all'); // 'all' | 'short' | 'medium' | 'long'
 
   useEffect(() => {
@@ -85,16 +110,24 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
       .finally(() => setLoading(false));
   }, []);
 
-  // Distribution view: unique departure airports
+  // Distribution view: every airport we touch (as origin or destination), with longitude
   const distAirports = useMemo(() => {
     const map = new Map();
     for (const e of entries) {
       if (!map.has(e.departure_airport)) {
-        map.set(e.departure_airport, { iata: e.departure_airport, name: e.departure_name });
+        map.set(e.departure_airport, { iata: e.departure_airport, name: e.departure_name, longitude: e.departure_longitude });
+      }
+      if (!map.has(e.arrival_airport)) {
+        map.set(e.arrival_airport, { iata: e.arrival_airport, name: e.arrival_name, longitude: e.arrival_longitude });
       }
     }
     return [...map.values()].sort((a, b) => a.iata.localeCompare(b.iata));
   }, [entries]);
+
+  const selectedAirportLon = useMemo(
+    () => distAirports.find(a => a.iata === selectedAirport)?.longitude ?? null,
+    [distAirports, selectedAirport]
+  );
 
   // Default selectedAirport once entries load
   useEffect(() => {
@@ -105,29 +138,42 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
     setSelectedAirport(next);
   }, [distAirports, selectedAirport, airline]);
 
-  // Distribution rows: one row per unique departure time at selected airport.
-  // Each row has 7 day columns; each cell holds a list of departures (arrival IATA + flight + aircraft).
+  // Distribution rows: one row per unique local time at the selected airport.
+  // In 'departure' mode the time is the local departure time and the pill shows
+  // the destination; in 'arrival' mode it is the local arrival time and the pill
+  // shows the origin. Times are converted to the selected airport's local zone,
+  // rolling the weekday column when the conversion crosses midnight.
   const distRows = useMemo(() => {
     if (!selectedAirport) return [];
+    const isDep = distMode === 'departure';
     const byTime = new Map(); // "HH:MM" -> { time, days: { 0..6: [{...}] } }
     for (const e of entries) {
-      if (e.departure_airport !== selectedAirport) continue;
+      const hub = isDep ? e.departure_airport : e.arrival_airport;
+      if (hub !== selectedAirport) continue;
       if (haulFilter !== 'all' && haulCategory(e.distance_km) !== haulFilter) continue;
-      const t = fmt.time(e.departure_time);
-      if (!byTime.has(t)) byTime.set(t, { time: t, days: {} });
-      const row = byTime.get(t);
-      if (!row.days[e.day_of_week]) row.days[e.day_of_week] = [];
-      row.days[e.day_of_week].push({
+
+      const depT = fmt.time(e.departure_time);
+      const arrT = fmt.time(e.arrival_time);
+      let berlinTime = isDep ? depT : arrT;
+      let berlinDay = e.day_of_week;
+      // Arrival times stored as Berlin wall-clock: overnight legs land the next day.
+      if (!isDep && arrT !== '—' && depT !== '—' && arrT <= depT) berlinDay = (berlinDay + 1) % 7;
+
+      const local = toAirportLocal(berlinTime, berlinDay, selectedAirportLon);
+      if (!byTime.has(local.time)) byTime.set(local.time, { time: local.time, days: {} });
+      const row = byTime.get(local.time);
+      if (!row.days[local.day]) row.days[local.day] = [];
+      row.days[local.day].push({
         id: e.id,
-        arrival_airport: e.arrival_airport,
-        arrival_name: e.arrival_name,
+        airport: isDep ? e.arrival_airport : e.departure_airport,
+        airport_name: isDep ? e.arrival_name : e.departure_name,
         flight_number: e.flight_number,
         aircraft_id: e.aircraft_id,
         registration: e.registration,
       });
     }
     return [...byTime.values()].sort((a, b) => a.time.localeCompare(b.time));
-  }, [entries, selectedAirport, haulFilter]);
+  }, [entries, selectedAirport, selectedAirportLon, haulFilter, distMode]);
 
   // Group by departure_airport → flight_number
   const grouped = entries.reduce((acc, e) => {
@@ -484,7 +530,7 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
             <div className="fs-dist">
               <div className="fs-dist-controls">
                 <label className="fs-dist-label">
-                  <span>Departure Airport</span>
+                  <span>Airport</span>
                   <select
                     className="fs-dist-select"
                     value={selectedAirport || ''}
@@ -497,6 +543,22 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
                     ))}
                   </select>
                 </label>
+                <div className="fs-haul-filter" role="group" aria-label="Departures or arrivals">
+                  {[
+                    { key: 'departure', label: 'Departures' },
+                    { key: 'arrival', label: 'Arrivals' },
+                  ].map(opt => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      className={`fs-haul-btn${distMode === opt.key ? ' fs-haul-btn--active' : ''}`}
+                      aria-pressed={distMode === opt.key}
+                      onClick={() => setDistMode(opt.key)}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
                 <div className="fs-haul-filter" role="group" aria-label="Filter by haul length">
                   {[
                     { key: 'all', label: 'All' },
@@ -516,12 +578,14 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
                   ))}
                 </div>
                 <span className="fs-dist-summary">
-                  {distRows.length} departure time{distRows.length !== 1 ? 's' : ''}
+                  {distRows.length} {distMode === 'departure' ? 'departure' : 'arrival'} time{distRows.length !== 1 ? 's' : ''} · {selectedAirport} local
                 </span>
               </div>
 
               {distRows.length === 0 ? (
-                <div className="fs-empty">No departures from {selectedAirport}.</div>
+                <div className="fs-empty">
+                  No {distMode === 'departure' ? 'departures from' : 'arrivals at'} {selectedAirport}.
+                </div>
               ) : (
                 <div className="fs-dist-grid">
                   <div className="fs-dist-head">
@@ -531,40 +595,41 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
                     ))}
                   </div>
                   {distRows.map(row => {
-                    // Shared, stable destination order for this time row (across all days)
-                    const dests = [...new Set(
-                      DAY_LABELS.flatMap((_, di) => (row.days[di] || []).map(f => f.arrival_airport))
+                    // Shared, stable airport order for this time row (across all days)
+                    const aps = [...new Set(
+                      DAY_LABELS.flatMap((_, di) => (row.days[di] || []).map(f => f.airport))
                     )].sort();
+                    const arrow = distMode === 'departure' ? '→' : '←';
                     return (
                       <div key={row.time} className="fs-dist-row">
                         <span className="fs-dist-time">{row.time}</span>
                         {DAY_LABELS.map((_, di) => {
                           const cell = row.days[di] || [];
-                          const byDest = {};
-                          for (const f of cell) (byDest[f.arrival_airport] ||= []).push(f);
+                          const byAp = {};
+                          for (const f of cell) (byAp[f.airport] ||= []).push(f);
                           return (
                             <div key={di} className="fs-dist-cell">
-                              {dests.map(dest => {
-                                const flights = byDest[dest];
+                              {aps.map(ap => {
+                                const flights = byAp[ap];
                                 if (!flights) {
-                                  // Invisible placeholder keeps this destination's slot at the same height
+                                  // Invisible placeholder keeps this airport's slot at the same height
                                   return (
-                                    <span key={dest} className="fs-dist-slot" aria-hidden="true">
-                                      <span className="fs-dist-pill" style={{ visibility: 'hidden' }}>{dest}</span>
+                                    <span key={ap} className="fs-dist-slot" aria-hidden="true">
+                                      <span className="fs-dist-pill" style={{ visibility: 'hidden' }}>{ap}</span>
                                     </span>
                                   );
                                 }
                                 return (
-                                  <span key={dest} className="fs-dist-slot">
+                                  <span key={ap} className="fs-dist-slot">
                                     {flights.map(f => (
                                       <button
                                         key={f.id}
                                         type="button"
                                         className="fs-dist-pill"
-                                        title={`${f.flight_number} → ${f.arrival_airport} ${f.arrival_name} · ${fmt.reg(f.registration)}`}
-                                        onClick={() => onNavigateToAirport?.(f.arrival_airport)}
+                                        title={`${f.flight_number} ${arrow} ${f.airport} ${f.airport_name} · ${fmt.reg(f.registration)}`}
+                                        onClick={() => onNavigateToAirport?.(f.airport)}
                                       >
-                                        {f.arrival_airport}
+                                        {f.airport}
                                       </button>
                                     ))}
                                   </span>

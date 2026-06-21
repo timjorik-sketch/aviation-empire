@@ -2105,6 +2105,8 @@ router.get('/weekly-schedule', authMiddleware, async (req, res) => {
         at.full_name as aircraft_type,
         dep.name as departure_name,
         arr.name as arrival_name,
+        dep.longitude as departure_longitude,
+        arr.longitude as arrival_longitude,
         r.distance_km
       FROM weekly_schedule ws
       JOIN aircraft ac ON ws.aircraft_id = ac.id
@@ -2122,6 +2124,7 @@ router.get('/weekly-schedule', authMiddleware, async (req, res) => {
       departure_time: r.departure_time, arrival_time: r.arrival_time,
       aircraft_id: r.aircraft_id, registration: r.registration, is_active: r.is_active,
       aircraft_type: r.aircraft_type, departure_name: r.departure_name, arrival_name: r.arrival_name,
+      departure_longitude: r.departure_longitude, arrival_longitude: r.arrival_longitude,
       distance_km: r.distance_km,
     }));
     res.json({ entries });

@@ -751,9 +751,13 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
     };
 
     let home_airport_name = null;
+    let home_longitude = null;
     if (aircraft.home_airport) {
-      const haResult = await pool.query('SELECT name FROM airports WHERE iata_code = $1', [aircraft.home_airport]);
-      if (haResult.rows[0]) home_airport_name = haResult.rows[0].name;
+      const haResult = await pool.query('SELECT name, longitude FROM airports WHERE iata_code = $1', [aircraft.home_airport]);
+      if (haResult.rows[0]) {
+        home_airport_name = haResult.rows[0].name;
+        home_longitude = haResult.rows[0].longitude;
+      }
     }
 
     let current_flight = null;
@@ -854,7 +858,7 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
     }));
 
     res.json({
-      aircraft: { ...aircraft, home_airport_name },
+      aircraft: { ...aircraft, home_airport_name, home_longitude },
       weekly_schedule,
       current_flight, current_location,
       stats: { total_flights, total_profit, total_passengers }
@@ -1295,6 +1299,21 @@ function flightOverlapsMaintenance(depWk, arrWk, pad, mStartWk, mEndWk) {
   return false;
 }
 
+// True if two flights collide once each leg is padded by the turnaround buffer on
+// its END. Inputs are absolute "week minutes" with arrWk reconstructed so a leg that
+// lands after midnight has arrWk > depWk (can exceed the day/week). Tested on the
+// circular weekly timeline (±1 week) so the Sun→Mon seam and overnight long-haul
+// legs compare correctly — mirrors the frontend conflict highlighting.
+function flightsOverlapWeekly(depWkA, arrWkA, depWkB, arrWkB, pad) {
+  const WEEK_MIN = 7 * 1440;
+  const endA = arrWkA + pad;
+  const endB = arrWkB + pad;
+  for (const shift of [-WEEK_MIN, 0, WEEK_MIN]) {
+    if (depWkA + shift < endB && depWkB < endA + shift) return true;
+  }
+  return false;
+}
+
 async function getExpansionDepartures(airlineId, aircraftId) {
   const airlineResult = await pool.query('SELECT home_airport_code, primary_hub_airport_code FROM airlines WHERE id = $1', [airlineId]);
   const homeCode = airlineResult.rows[0]?.home_airport_code ?? '';
@@ -1534,15 +1553,19 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
       pool.query(`SELECT day_of_week, start_minutes, duration_minutes FROM maintenance_schedule WHERE aircraft_id = $1 AND airline_id = $2`, [aircraftId, airlineId]),
     ]);
 
-    // Index existing schedule and maintenance by day
-    const existByDay = new Map();
-    for (const row of existResult.rows) {
-      const d = row.day_of_week;
-      if (!existByDay.has(d)) existByDay.set(d, []);
+    // Existing schedule as absolute week-minute spans. The stored arrival wraps
+    // mod 1440, so reconstruct past-midnight legs (arr <= dep ⇒ next day) — otherwise
+    // an overnight long-haul reads as "free by morning" and lets a later same-day
+    // departure slip through.
+    const existWk = existResult.rows.map(row => {
       const [eDepH, eDepM] = row.departure_time.split(':').map(Number);
       const [eArrH, eArrM] = row.arrival_time.split(':').map(Number);
-      existByDay.get(d).push({ depMin: eDepH * 60 + eDepM, arrMin: eArrH * 60 + eArrM });
-    }
+      const depMinEx = eDepH * 60 + eDepM;
+      let arrMinEx = eArrH * 60 + eArrM;
+      if (arrMinEx <= depMinEx) arrMinEx += 1440; // crosses midnight
+      const depWk = row.day_of_week * 1440 + depMinEx;
+      return { depWk, arrWk: depWk + (arrMinEx - depMinEx) };
+    });
     // Maintenance as absolute week-minute intervals so the overlap check is
     // week-/midnight-aware (a block can start one day and run into the next).
     const maintWk = maintResult.rows.map(row => {
@@ -1603,9 +1626,14 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
       const arrMM = arrMin % 60;
       const arrTime = `${String(arrH).padStart(2, '0')}:${String(arrMM).padStart(2, '0')}`;
 
-      // Check overlap with existing schedule
-      for (const ex of (existByDay.get(dow) || [])) {
-        if (depMin < ex.arrMin + GROUND_MIN && ex.depMin < arrMin + GROUND_MIN) {
+      // Absolute week-minute span of the new flight (arrMin is dep + duration, so it
+      // already exceeds 1440 for an overnight leg — no wrap, no reconstruction needed).
+      const depWk = dow * 1440 + depMin;
+      const arrWk = dow * 1440 + arrMin;
+
+      // Check overlap with existing schedule (week-/midnight-aware)
+      for (const ex of existWk) {
+        if (flightsOverlapWeekly(depWk, arrWk, ex.depWk, ex.arrWk, GROUND_MIN)) {
           return res.status(400).json({ error: `Flight at ${departure_time} on day ${dow} overlaps with an existing entry (incl. ${GROUND_MIN}min turnaround)` });
         }
       }
@@ -1613,18 +1641,15 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
       // Check overlap with maintenance — pad the flight by turnaround on both
       // sides (same rule as the maintenance scheduler) and compare in week-minutes
       // so overnight flights and past-midnight maintenance line up at the seam.
-      const depWk = dow * 1440 + depMin;
-      const arrWk = dow * 1440 + arrMin;
       for (const m of maintWk) {
         if (flightOverlapsMaintenance(depWk, arrWk, GROUND_MIN, m.start, m.end)) {
           return res.status(400).json({ error: `Flight at ${departure_time} overlaps with a maintenance window (incl. ${GROUND_MIN}min turnaround)` });
         }
       }
 
-      // Check overlap within this batch
+      // Check overlap within this batch (week-/midnight-aware)
       for (const nw of newBatch) {
-        if (nw.dow !== dow) continue;
-        if (depMin < nw.arrMin + GROUND_MIN && nw.depMin < arrMin + GROUND_MIN) {
+        if (flightsOverlapWeekly(depWk, arrWk, nw.depWk, nw.arrWk, GROUND_MIN)) {
           return res.status(400).json({ error: `Flight at ${departure_time} overlaps with another flight in this batch` });
         }
       }
@@ -1641,7 +1666,7 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
         });
       }
 
-      newBatch.push({ dow, depMin, arrMin });
+      newBatch.push({ depWk, arrWk });
       prepared.push({
         dow, route, departure_time, arrTime,
         economy_price: parseFloat(economy_price), business_price: business_price ?? null,
@@ -1800,20 +1825,24 @@ router.patch('/:id/schedule/:entryId', authMiddleware, async (req, res) => {
         if (effectiveArrMin <= effectiveDepMin) effectiveArrMin += 1440;
       }
 
-      // Check against other schedule entries (excluding this one)
+      const editDepWk = effectiveDow * 1440 + effectiveDepMin;
+      const editArrWk = effectiveDow * 1440 + effectiveArrMin;
+
+      // Check against other schedule entries (excluding this one), week-/midnight-aware
       const otherEntries = await pool.query(
         'SELECT id, day_of_week, departure_time, arrival_time FROM weekly_schedule WHERE aircraft_id = $1 AND id != $2',
         [aircraftId, entryId]
       );
       for (const row of otherEntries.rows) {
-        if (row.day_of_week !== effectiveDow) continue;
         const [oDepH, oDepM] = row.departure_time.split(':').map(Number);
         const [oArrH, oArrM] = row.arrival_time.split(':').map(Number);
-        let oDepMin = oDepH * 60 + oDepM;
+        const oDepMin = oDepH * 60 + oDepM;
         let oArrMin = oArrH * 60 + oArrM;
-        if (oArrMin <= oDepMin) oArrMin += 1440;
-        if (effectiveDepMin < oArrMin + GROUND_MIN && oDepMin < effectiveArrMin + GROUND_MIN) {
-          return res.status(400).json({ error: `Edit would overlap with flight on day ${effectiveDow} (incl. ${GROUND_MIN}min turnaround)` });
+        if (oArrMin <= oDepMin) oArrMin += 1440; // crosses midnight
+        const oDepWk = row.day_of_week * 1440 + oDepMin;
+        const oArrWk = oDepWk + (oArrMin - oDepMin);
+        if (flightsOverlapWeekly(editDepWk, editArrWk, oDepWk, oArrWk, GROUND_MIN)) {
+          return res.status(400).json({ error: `Edit would overlap with flight on day ${row.day_of_week} (incl. ${GROUND_MIN}min turnaround)` });
         }
       }
 
@@ -1822,8 +1851,6 @@ router.patch('/:id/schedule/:entryId', authMiddleware, async (req, res) => {
         'SELECT day_of_week, start_minutes, duration_minutes FROM maintenance_schedule WHERE aircraft_id = $1 AND airline_id = $2',
         [aircraftId, airlineId]
       );
-      const editDepWk = effectiveDow * 1440 + effectiveDepMin;
-      const editArrWk = effectiveDow * 1440 + effectiveArrMin;
       for (const row of maintEntries.rows) {
         const mStartWk = row.day_of_week * 1440 + row.start_minutes;
         if (flightOverlapsMaintenance(editDepWk, editArrWk, GROUND_MIN, mStartWk, mStartWk + row.duration_minutes)) {

@@ -301,6 +301,8 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [schedule, setSchedule]     = useState([]);  // weekly_schedule entries
   const [maintenance, setMaintenance] = useState([]);
   const [isActive, setIsActive] = useState(0);
+  // Show the weekly grid in the aircraft's home-base local time (vs raw game time).
+  const [viewLocal, setViewLocal] = useState(true);
   // Cabin profile change warning modal state
   const [showCpChangeModal, setShowCpChangeModal] = useState(false);
   const [pendingCpChangeId, setPendingCpChangeId] = useState(null);
@@ -562,25 +564,65 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     }
   }, [outRouteId]);
 
+  // ─── Timezone view shift ──────────────────────────────────────────────────
+  // Schedule times are STORED as Europe/Berlin game time. When viewLocal is on
+  // and the aircraft has a home base, the whole weekly grid is re-labelled into
+  // the home base's local wall-clock so foreign schedules read intuitively.
+  // The shift is a whole-hour offset (same longitude approximation the per-airport
+  // local times use), applied on render and inverted on save — storage never moves.
+  const homeOffsetHours = useMemo(
+    () => lonOffsetHours(aircraft?.home_longitude),
+    [aircraft?.home_longitude]
+  );
+  const viewShiftMin =
+    viewLocal && homeOffsetHours != null ? (homeOffsetHours - BERLIN_LON_OFFSET) * 60 : 0;
+
+  // Berlin slot (day + local "HH:MM" displayed) → Berlin storage slot.
+  const viewToBerlin = useCallback((day, hhmm) => {
+    const s = shiftWeekSlot(day, parseHM(hhmm), -viewShiftMin, 'roll');
+    return { day: s.day, time: minutesToHHMM(s.minuteOfDay) };
+  }, [viewShiftMin]);
+
+  // Schedule re-expressed in the view timezone. Duration is timezone-invariant, so
+  // each leg is shifted as a whole and may roll to the next/previous day-column.
+  const viewSchedule = useMemo(() => schedule.map(e => {
+    const bDep = parseHM(e.departure_time);
+    const bArr = parseHM(e.arrival_time);
+    const dur  = ((bArr - bDep) + 1440) % 1440 || 1;
+    // Per-airport local wall-clock — computed from the original Berlin times.
+    const depLocal = localHMFromBerlin(bDep, e.dep_longitude);
+    const arrLocal = localHMFromBerlin(bArr, e.arr_longitude);
+    const sv   = shiftWeekSlot(e.day_of_week, bDep, viewShiftMin, 'roll');
+    const vDep  = sv.minuteOfDay;
+    const vArr  = (vDep + dur) % 1440;
+    return {
+      ...e,
+      day_of_week: sv.day,
+      departure_time: minutesToHHMM(vDep),
+      arrival_time: minutesToHHMM(vArr),
+      depLocal, arrLocal,
+    };
+  }), [schedule, viewShiftMin]);
+
+  const viewMaintenance = useMemo(() => maintenance.map(m => {
+    const sv = shiftWeekSlot(m.day_of_week, m.start_minutes, viewShiftMin, 'roll');
+    return { ...m, day_of_week: sv.day, start_minutes: sv.minuteOfDay };
+  }), [maintenance, viewShiftMin]);
+
   // ─── Computed: flight bars ────────────────────────────────────────────────
 
   const flightBars = useMemo(() => {
     const flightColor = isActive ? '#22c55e' : '#fca5a5';
     const flightTextColor = isActive ? '#fff' : '#7f1d1d';
-    return schedule.map(entry => {
+    return viewSchedule.map(entry => {
       const depMin = parseHM(entry.departure_time);
       const arrMin = parseHM(entry.arrival_time);
-      // Approximate local wall-clock at origin (departure) and destination (arrival).
-      const depLocal = localHMFromBerlin(depMin, entry.dep_longitude);
-      const arrLocal = localHMFromBerlin(arrMin, entry.arr_longitude);
       const dur    = ((arrMin - depMin) + 1440) % 1440 || 1;
       const crossesMidnight = depMin + dur > 1440;
       const seg1H = crossesMidnight ? (1440 - depMin) * PX_PER_MIN : dur * PX_PER_MIN;
       return {
         ...entry,
         dayIndex: entry.day_of_week,
-        depLocal,
-        arrLocal,
         top:      depMin * PX_PER_MIN,
         height:   Math.max(seg1H, 14),
         crossesMidnight,
@@ -596,7 +638,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         textColor: flightTextColor,
       };
     });
-  }, [schedule, isActive, groundMin]);
+  }, [viewSchedule, isActive, groundMin]);
 
   const conflictIds = useMemo(() => {
     const ids = new Set();
@@ -631,7 +673,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     return ids;
   }, [flightBars, groundMin]);
 
-  const maintBars = useMemo(() => maintenance.map(m => {
+  const maintBars = useMemo(() => viewMaintenance.map(m => {
     const crossesMidnight = m.start_minutes + m.duration_minutes > 1440;
     const seg1H = crossesMidnight ? (1440 - m.start_minutes) * PX_PER_MIN : m.duration_minutes * PX_PER_MIN;
     // Turnaround band AFTER the block: the aircraft can't depart until `groundMin`
@@ -657,7 +699,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       groundOverflowDayIndex: groundCrossesMidnight ? (endDay + 1) % 7 : null,
       groundOverflowHeight:   groundCrossesMidnight ? (endWall + groundMin - 1440) * PX_PER_MIN : 0,
     };
-  }), [maintenance, groundMin]);
+  }), [viewMaintenance, groundMin]);
 
   // ─── Series preview (pure time arithmetic — no Date objects) ─────────────
 
@@ -729,7 +771,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       const pfDep = parseHM(pf.dep);
       let pfArr = parseHM(pf.arr);
       if (pfArr <= pfDep) pfArr += 1440;
-      return schedule.some(ef => {
+      return viewSchedule.some(ef => {
         const efDep = parseHM(ef.departure_time);
         let efArr = parseHM(ef.arrival_time);
         if (efArr <= efDep) efArr += 1440;
@@ -748,7 +790,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         return false;
       });
     });
-  }, [seriesPreview, schedule, groundMin]);
+  }, [seriesPreview, viewSchedule, groundMin]);
 
   // How many round trips fit in a full week (7 × 1440 min) with current settings.
   // Simulates the actual chain (same nextDep logic as seriesPreview) starting from 0
@@ -910,6 +952,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setAircraft(prev => ({ ...prev, home_airport: v }));
+      fetchDetail(); // refresh home_longitude so the timezone view shifts to the new base
       setSuccess('Homebase gespeichert'); setTimeout(() => setSuccess(''), 3000);
     } catch (err) { setError(err.message); }
     finally { setHomebaseSaving(false); }
@@ -927,13 +970,17 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     try {
       const days    = resolveDays(sDay);
       const depTime = `${sDepHour.padStart(2,'0')}:${sDepMinute.padStart(2,'0')}`;
-      const payload = days.map(d => ({
-        route_id: parseInt(sRouteId), day_of_week: d, departure_time: depTime,
+      // Form is entered in the view timezone — store in Berlin game time.
+      const payload = days.map(d => {
+        const b = viewToBerlin(d, depTime);
+        return {
+        route_id: parseInt(sRouteId), day_of_week: b.day, departure_time: b.time,
         economy_price: parseFloat(sEcoPrice),
         business_price: sBizPrice ? parseFloat(sBizPrice) : null,
         first_price: sFirstPrice ? parseFloat(sFirstPrice) : null,
         service_profile_id: sServiceProfileId ? parseInt(sServiceProfileId) : null
-      }));
+      };
+      });
       const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/schedule`, {
         method: 'POST', headers: jsonHeaders, body: JSON.stringify({ flights: payload })
       });
@@ -956,13 +1003,17 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     if (rwyIn) { setError(rwyIn); return; }
     setSubmitting(true); setError(''); setSuccess('');
     try {
-      const payload = seriesPreview.map(pf => ({
-        route_id: pf.route.id, day_of_week: pf.day, departure_time: pf.dep,
+      // Preview is laid out in the view timezone — store in Berlin game time.
+      const payload = seriesPreview.map(pf => {
+        const b = viewToBerlin(pf.day, pf.dep);
+        return {
+        route_id: pf.route.id, day_of_week: b.day, departure_time: b.time,
         economy_price: parseFloat(rEcoPrice),
         business_price: rBizPrice ? parseFloat(rBizPrice) : null,
         first_price: rFirstPrice ? parseFloat(rFirstPrice) : null,
         service_profile_id: rServiceProfileId ? parseInt(rServiceProfileId) : null
-      }));
+      };
+      });
       if (!payload.length) { setError('No flights to schedule'); setSubmitting(false); return; }
       const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/schedule`, {
         method: 'POST', headers: jsonHeaders, body: JSON.stringify({ flights: payload })
@@ -980,9 +1031,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       const days      = resolveDays(mDay);
       const startTime = `${String(mStartHour).padStart(2,'0')}:${String(mStartMinute).padStart(2,'0')}`;
       for (const d of days) {
+        const b = viewToBerlin(d, startTime); // form is in the view timezone
         const res  = await fetch(`${API_URL}/api/maintenance`, {
           method: 'POST', headers: jsonHeaders,
-          body: JSON.stringify({ aircraft_id: aircraftId, day_of_week: d, start_time: startTime, type: 'routine' })
+          body: JSON.stringify({ aircraft_id: aircraftId, day_of_week: b.day, start_time: b.time, type: 'routine' })
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
@@ -1399,10 +1451,11 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     setEditSubmitting(true); setError('');
     try {
       const depTime = `${editHour.padStart(2,'0')}:${editMinute.padStart(2,'0')}`;
+      const b = viewToBerlin(editDay, depTime); // modal is in the view timezone
       const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/schedule/${editEntry.id}`, {
         method: 'PATCH', headers: jsonHeaders,
         body: JSON.stringify({
-          day_of_week: editDay, departure_time: depTime,
+          day_of_week: b.day, departure_time: b.time,
           economy_price: parseFloat(editEcoPrice),
           business_price: editBizPrice  ? parseFloat(editBizPrice)  : null,
           first_price:    editFirstPrice ? parseFloat(editFirstPrice) : null,
@@ -1829,6 +1882,23 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
             <span>Weekly Schedule</span>
             <button className="ad-btn-clear-sched" onClick={handleClearSchedule}>Clear All</button>
           </div>
+          {homeOffsetHours != null && (
+            <div className="ad-tz-bar">
+              <span>
+                🕒 Times shown in{' '}
+                <strong>
+                  {viewLocal
+                    ? `${aircraft?.home_airport || 'home base'} local (UTC${homeOffsetHours >= 0 ? '+' : ''}${homeOffsetHours})`
+                    : 'game time (UTC+1)'}
+                </strong>
+              </span>
+              {homeOffsetHours !== BERLIN_LON_OFFSET && (
+                <button className="ad-tz-toggle" onClick={() => setViewLocal(v => !v)}>
+                  Switch to {viewLocal ? 'game time' : 'home base local'}
+                </button>
+              )}
+            </div>
+          )}
           <div className="ad-grid-header">
             <div className="ad-grid-gutter-hd" />
             {DAY_SHORT.map((d, i) => <div key={i} className="ad-grid-day-hd">{d}</div>)}
@@ -3556,6 +3626,10 @@ const styles = `
     .ad-schedule-layout > .ad-form-card { flex: 1 1 0; min-width: 0; position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow-y: auto; }
   }
   .ad-grid-card { background: white; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden; position: relative; }
+  .ad-tz-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.4rem 0.75rem; background: #EFF6FF; border-bottom: 1px solid #DBEAFE; font-size: 0.78rem; color: #1E3A5F; }
+  .ad-tz-bar strong { font-weight: 700; }
+  .ad-tz-toggle { background: none; border: 1px solid #93C5FD; color: #1D4ED8; border-radius: 5px; padding: 0.15rem 0.5rem; font-size: 0.72rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .ad-tz-toggle:hover { background: #DBEAFE; }
   .ad-grid-header { display: flex; border-bottom: 2px solid #E0E0E0; background: #FAFAFA; position: sticky; top: 0; z-index: 5; }
   .ad-grid-gutter-hd { width: ${GUTTER_W}px; min-width: ${GUTTER_W}px; border-right: 1px solid #E0E0E0; flex-shrink: 0; }
   .ad-grid-day-hd { flex: 1; text-align: center; padding: 0.45rem 0.25rem; font-size: 0.75rem; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: 0.06em; border-right: 1px solid #EEEEEE; }

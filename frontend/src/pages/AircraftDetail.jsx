@@ -3621,7 +3621,7 @@ const styles = `
     .ad-schedule-layout > .ad-form-card { flex: 1 1 0; min-width: 0; position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow-y: auto; }
   }
   .ad-grid-card { background: white; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden; position: relative; }
-  .ad-tz-label { font-size: 0.8rem; font-weight: 500; color: #1D4ED8; }
+  .ad-tz-label { color: #fff; } /* inherits the title's size/weight/spacing/uppercase */
   .ad-tz-toggle { background: none; border: 1px solid #93C5FD; color: #1D4ED8; border-radius: 5px; padding: 0.15rem 0.5rem; font-size: 0.72rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
   .ad-tz-toggle:hover { background: #DBEAFE; }
   .ad-grid-header { display: flex; border-bottom: 2px solid #E0E0E0; background: #FAFAFA; position: sticky; top: 0; z-index: 5; }

@@ -83,9 +83,12 @@ router.get('/public/:code', authMiddleware, async (req, res) => {
     // Look up airline by code
     const alResult = await pool.query(
       `SELECT al.id, al.name, al.airline_code, al.home_airport_code, al.logo_filename,
-              ap.name AS home_airport_name, ap.latitude AS home_lat, ap.longitude AS home_lng
+              ap.name AS home_airport_name, ap.latitude AS home_lat, ap.longitude AS home_lng,
+              al.primary_hub_airport_code,
+              php.name AS ph_name, php.latitude AS ph_lat, php.longitude AS ph_lng
        FROM airlines al
        LEFT JOIN airports ap ON ap.iata_code = al.home_airport_code
+       LEFT JOIN airports php ON php.iata_code = al.primary_hub_airport_code
        WHERE al.airline_code = $1`, [code]
     );
     if (alResult.rows.length === 0) return res.status(404).json({ error: 'Airline not found' });
@@ -120,6 +123,11 @@ router.get('/public/:code', authMiddleware, async (req, res) => {
     ]);
 
     const hubs = hubResult.rows.map(r => ({ code: r.airport_code, name: r.name, lat: r.latitude, lng: r.longitude }));
+    // Primary hub (airlines.primary_hub_airport_code) isn't in airport_expansions,
+    // so add it explicitly or it gets no map dot.
+    if (al.primary_hub_airport_code && al.ph_lat != null && !hubs.some(h => h.code === al.primary_hub_airport_code)) {
+      hubs.unshift({ code: al.primary_hub_airport_code, name: al.ph_name, lat: al.ph_lat, lng: al.ph_lng });
+    }
     const fleet = fleetResult.rows.map(r => ({ full_name: r.full_name, image_filename: r.image_filename, count: parseInt(r.count), manufacturer: r.manufacturer }));
     const routes = routeResult.rows.map(r => ({ dep: r.departure_airport, arr: r.arrival_airport, depLat: r.dep_lat, depLng: r.dep_lng, arrLat: r.arr_lat, arrLng: r.arr_lng }));
 
@@ -461,6 +469,20 @@ router.get('/stats', authMiddleware, async (req, res) => {
       ORDER BY e.airport_code
     `, [req.airlineId]);
     const hubs = hubResult.rows.map(r => ({ code: r.airport_code, name: r.name, lat: r.latitude, lng: r.longitude }));
+
+    // Primary hub lives on airlines.primary_hub_airport_code (not in
+    // airport_expansions), so add it explicitly or it gets no map dot.
+    const primaryHubResult = await pool.query(`
+      SELECT al.primary_hub_airport_code AS code, ap.name, ap.latitude, ap.longitude
+      FROM airlines al
+      JOIN airports ap ON ap.iata_code = al.primary_hub_airport_code
+      WHERE al.id = $1 AND al.primary_hub_airport_code IS NOT NULL
+    `, [req.airlineId]);
+    for (const r of primaryHubResult.rows) {
+      if (!hubs.some(h => h.code === r.code)) {
+        hubs.unshift({ code: r.code, name: r.name, lat: r.latitude, lng: r.longitude });
+      }
+    }
 
     // Weekly revenue (last 7 days by arrival_time)
     const revResult = await pool.query(`

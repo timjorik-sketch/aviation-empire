@@ -272,6 +272,13 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
   ];
   const haulOf = (km) => HAUL_BUCKETS.find(b => b.test(km || 0))?.key || null;
 
+  // Hub type labels for the Hub filter.
+  const HUB_TYPE_LABEL = {
+    home_base:     'Home Base',
+    primary_hub:   'Primary Hub',
+    secondary_hub: 'Secondary Hub',
+  };
+
   const token = localStorage.getItem('token');
   const auth = useMemo(() => ({ 'Authorization': `Bearer ${token}` }), [token]);
 
@@ -401,13 +408,17 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
   const activeFlights = flights.filter(fl => fl.status === 'in-flight');
 
   // Counts on the *unfiltered* set so each filter shows total options.
+  // The Hub filter lists the airline's Home Base, Primary Hub and Secondary
+  // Hubs (from the OCC config). A flight "touches" a hub when it departs from
+  // OR arrives at it, so the count and filter both consider both directions.
   const hubOptions = (() => {
-    const map = new Map();
-    for (const fl of activeFlights) {
-      if (!fl.departure_airport) continue;
-      map.set(fl.departure_airport, (map.get(fl.departure_airport) || 0) + 1);
-    }
-    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    const hubs = data?.hubs || [];
+    return hubs.map(h => {
+      const count = activeFlights.filter(
+        fl => fl.departure_airport === h.code || fl.arrival_airport === h.code
+      ).length;
+      return { ...h, count };
+    });
   })();
   const aircraftTypeOptions = (() => {
     const map = new Map();
@@ -436,7 +447,7 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
   })();
 
   const filteredActive = activeFlights.filter(fl => {
-    if (filterHub && fl.departure_airport !== filterHub) return false;
+    if (filterHub && fl.departure_airport !== filterHub && fl.arrival_airport !== filterHub) return false;
     if (filterAircraftType && fl.aircraft_type !== filterAircraftType) return false;
     if (filterHaul && haulOf(fl.distance_km) !== filterHaul) return false;
     if (filterContinent && fl.arrival_continent !== filterContinent) return false;
@@ -516,14 +527,18 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
                       <span>All Hubs</span>
                       <span className="occ-fl-sb-count">{activeFlights.length}</span>
                     </button>
-                    {hubOptions.map(([hub, count]) => (
+                    {hubOptions.map(h => (
                       <button
-                        key={hub}
-                        className={`occ-fl-sb-item${filterHub === hub ? ' occ-fl-sb-item--active' : ''}`}
-                        onClick={() => setFilterHub(filterHub === hub ? null : hub)}
+                        key={h.code}
+                        className={`occ-fl-sb-item${filterHub === h.code ? ' occ-fl-sb-item--active' : ''}`}
+                        onClick={() => setFilterHub(filterHub === h.code ? null : h.code)}
+                        title={`${HUB_TYPE_LABEL[h.type] || 'Hub'}${h.name ? ` — ${h.name}` : ''}`}
                       >
-                        <span>{hub}</span>
-                        <span className="occ-fl-sb-count">{count}</span>
+                        <span>
+                          {h.code}
+                          <span className="occ-fl-sb-sub"> · {HUB_TYPE_LABEL[h.type] || 'Hub'}</span>
+                        </span>
+                        <span className="occ-fl-sb-count">{h.count}</span>
                       </button>
                     ))}
                   </>
@@ -841,6 +856,8 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
           padding: 1px 5px; border-radius: 8px; flex-shrink: 0;
         }
         .occ-fl-sb-item--active .occ-fl-sb-count { background: rgba(255,255,255,0.2); opacity: 0.8; }
+        .occ-fl-sb-sub { font-size: 0.7rem; opacity: 0.55; font-weight: 400; }
+        .occ-fl-sb-item--active .occ-fl-sb-sub { opacity: 0.8; }
         .occ-fl-sb-reset {
           width: 100%; padding: 0.45rem; background: #FEE2E2; color: #DC2626;
           border: none; border-radius: 6px; font-size: 0.8rem; font-weight: 600; cursor: pointer;

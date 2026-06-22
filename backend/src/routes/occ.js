@@ -21,7 +21,8 @@ router.get('/', authMiddleware, async (req, res) => {
   try {
     const airlineRes = await pool.query(
       `SELECT id, hotel_partnership,
-              maintenance_program, ground_handling_level
+              maintenance_program, ground_handling_level,
+              home_airport_code, primary_hub_airport_code
        FROM airlines WHERE id = $1`,
       [req.airlineId]
     );
@@ -36,12 +37,39 @@ router.get('/', authMiddleware, async (req, res) => {
 
     const hubCount = (await getAirlineHubCodes(req.airlineId)).size;
 
+    // Hubs for the OCC flight filter: Home Base, Primary Hub, Secondary Hubs
+    // (airports that carry an expansion). A flight "touches" a hub when it
+    // departs from OR arrives at it, so the frontend filters both directions.
+    const homeCode = airline.home_airport_code ?? null;
+    const primaryHubCode = airline.primary_hub_airport_code ?? null;
+    const hubsRes = await pool.query(`
+      SELECT d.airport_code, d.destination_type, ap.name,
+             COALESCE((SELECT ae.expansion_level FROM airport_expansions ae
+               WHERE ae.airline_id = d.airline_id AND ae.airport_code = d.airport_code), 0) AS expansion_level
+      FROM airline_destinations d
+      JOIN airports ap ON d.airport_code = ap.iata_code
+      WHERE d.airline_id = $1
+    `, [req.airlineId]);
+    const HUB_ORDER = { home_base: 0, primary_hub: 1, secondary_hub: 2 };
+    const hubs = hubsRes.rows
+      .map(r => {
+        const isHome = r.destination_type === 'home_base' || r.airport_code === homeCode;
+        const isPrimary = primaryHubCode && r.airport_code === primaryHubCode;
+        const hasExpansion = (parseInt(r.expansion_level) || 0) > 0;
+        const type = isHome ? 'home_base' : isPrimary ? 'primary_hub' : hasExpansion ? 'secondary_hub' : null;
+        if (!type) return null;
+        return { code: r.airport_code, name: r.name, type };
+      })
+      .filter(Boolean)
+      .sort((a, b) => (HUB_ORDER[a.type] - HUB_ORDER[b.type]) || a.code.localeCompare(b.code));
+
     res.json({
       hotel_partnership:     airline.hotel_partnership     || 'none',
       maintenance_program:   airline.maintenance_program   || 'basic',
       ground_handling_level: airline.ground_handling_level || 'standard',
       fleet_count: fleetCount,
       hub_count:   hubCount,
+      hubs,
       catalog: {
         maintenance_programs:   MAINTENANCE_PROGRAMS,
         ground_handling_levels: GROUND_HANDLING_LEVELS,

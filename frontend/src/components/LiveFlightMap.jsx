@@ -108,7 +108,7 @@ export default function LiveFlightMap({
     if (!map || !group) return;
 
     const flights = rawFlights.filter(f => {
-      if (filterHub && f.origin_iata !== filterHub) return false;
+      if (filterHub && f.origin_iata !== filterHub && f.destination_iata !== filterHub) return false;
       if (filterAircraftType && f.aircraft_type !== filterAircraftType) return false;
       if (filterHaul && haulOf(f.distance_km) !== filterHaul) return false;
       if (filterContinent && f.arrival_continent !== filterContinent) return false;

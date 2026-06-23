@@ -9,6 +9,7 @@ import {
   getAirlineHubCodes,
   calcCancelCosts,
   logDelayEvent,
+  diversionGeoFraction,
 } from '../utils/delaySystem.js';
 import { getAirports } from '../utils/airportCache.js';
 import { FLIGHT_PROCESSOR_MS } from '../config/intervals.js';
@@ -150,11 +151,15 @@ router.get('/', authMiddleware, async (req, res) => {
         arr.continent as arrival_continent, arr.country as arrival_country,
         ac.registration, at.full_name as aircraft_type, f.aircraft_id,
         f.satisfaction_score, f.violated_rules,
-        f.delay_minutes, f.delay_reason, f.diversion_airport_code, f.is_wet_leased
+        f.delay_minutes, f.delay_reason, f.diversion_airport_code, f.is_wet_leased,
+        dep.latitude as dep_lat, dep.longitude as dep_lon,
+        arr.latitude as arr_lat, arr.longitude as arr_lon,
+        div_apt.latitude as div_lat, div_apt.longitude as div_lon
       FROM flights f
       JOIN routes r ON f.route_id = r.id
       JOIN airports dep ON r.departure_airport = dep.iata_code
       JOIN airports arr ON r.arrival_airport = arr.iata_code
+      LEFT JOIN airports div_apt ON f.diversion_airport_code = div_apt.iata_code
       JOIN aircraft ac ON f.aircraft_id = ac.id
       JOIN aircraft_types at ON ac.aircraft_type_id = at.id
       WHERE f.airline_id = $1
@@ -190,6 +195,12 @@ router.get('/', authMiddleware, async (req, res) => {
       delay_minutes: row.delay_minutes,
       delay_reason: row.delay_reason,
       diversion_airport_code: row.diversion_airport_code,
+      diversion_lat: row.div_lat,
+      diversion_lon: row.div_lon,
+      diversion_fraction: diversionGeoFraction(
+        row.dep_lat, row.dep_lon, row.arr_lat, row.arr_lon, row.div_lat, row.div_lon
+      ),
+      diversion_stop_min: row.delay_minutes,
       is_wet_leased: row.is_wet_leased,
     }));
 
@@ -347,13 +358,15 @@ router.get('/active', authMiddleware, async (req, res) => {
              ac.registration,
              at.full_name as aircraft_type,
              f.delay_reason, f.diversion_airport_code,
-             f.turnback_fraction, f.delay_minutes
+             f.turnback_fraction, f.delay_minutes,
+             div_apt.latitude as div_lat, div_apt.longitude as div_lon
       FROM flights f
       LEFT JOIN routes r          ON f.route_id           = r.id
       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
       LEFT JOIN routes ws_r ON ws.route_id = ws_r.id
       LEFT JOIN airports dep ON COALESCE(r.departure_airport, ws.departure_airport) = dep.iata_code
       LEFT JOIN airports arr ON COALESCE(r.arrival_airport,   ws.arrival_airport)   = arr.iata_code
+      LEFT JOIN airports div_apt ON f.diversion_airport_code = div_apt.iata_code
       LEFT JOIN aircraft ac  ON f.aircraft_id = ac.id
       LEFT JOIN aircraft_types at ON ac.aircraft_type_id = at.id
       WHERE f.airline_id = $1 AND f.status = 'in-flight'
@@ -397,6 +410,12 @@ router.get('/active', authMiddleware, async (req, res) => {
         remaining_ms,
         delay_reason: row.delay_reason,
         diversion_airport_code: row.diversion_airport_code,
+        diversion_lat: row.div_lat,
+        diversion_lon: row.div_lon,
+        diversion_fraction: diversionGeoFraction(
+          row.origin_lat, row.origin_lon, row.dest_lat, row.dest_lon, row.div_lat, row.div_lon
+        ),
+        diversion_stop_min: totalDelayMin,
         turnback_fraction: row.turnback_fraction,
         departure_time: row.departure_time,
         original_flight_min: originalFlightMin,

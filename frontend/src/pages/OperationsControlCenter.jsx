@@ -5,6 +5,7 @@ import Loader from '../components/Loader.jsx';
 import LiveFlightMap from '../components/LiveFlightMap.jsx';
 import { getEventFlavor } from '../utils/delayFlavor.js';
 import { useVisiblePolling } from '../utils/useVisiblePolling.js';
+import { diversionProgress } from '../utils/diversionProgress.js';
 import { POLL } from '../config/pollingIntervals.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -179,10 +180,8 @@ function formatDelayLabel(min) {
 // hover tooltip — keeps the row a single line even for disrupted flights.
 function FlightListRow({ flight, onNavigateToAirport, onNavigateToAircraft }) {
   const now   = Date.now();
-  const dep   = new Date(flight.departure_time).getTime();
   const arr   = new Date(flight.arrival_time).getTime();
-  const total = arr - dep;
-  const pct   = total > 0 ? Math.max(0, Math.min(100, ((now - dep) / total) * 100)) : 0;
+  const { pct, divPct, atStop } = diversionProgress(flight, now);
   const remMs = Math.max(0, arr - now);
   const remH  = Math.floor(remMs / 3600000);
   const remM  = Math.floor((remMs % 3600000) / 60000);
@@ -222,8 +221,16 @@ function FlightListRow({ flight, onNavigateToAirport, onNavigateToAircraft }) {
       </button>
       <div className="occ-lr-bar">
         <div className="occ-lr-line" />
+        {isDiverted && divPct != null && (
+          <span
+            className="occ-lr-divdot"
+            data-tip={`Diversion stop: ${flight.diversion_airport_code}`}
+            aria-label={`Diversion stop ${flight.diversion_airport_code}`}
+            style={{ left: `calc(${divPct}% - var(--line-right-inset, 0px) * ${divPct / 100} - 4px)` }}
+          />
+        )}
         <span
-          className="occ-lr-plane"
+          className={`occ-lr-plane${atStop ? ' occ-lr-plane--stopped' : ''}`}
           style={{ left: `calc(${pct}% - var(--line-right-inset, 0px) * ${pct / 100} - 7px)` }}
         >✈</span>
       </div>
@@ -970,7 +977,14 @@ export default function OperationsControlCenter({ airline, onBack, backLabel = '
         }
         .occ-lr-line::before { left: 0; }
         .occ-lr-line::after  { right: 0; }
-        .occ-lr-plane { position: absolute; font-size: 13px; line-height: 1; top: 50%; transform: translateY(-50%); color: #2C2C2C; z-index: 1; }
+        .occ-lr-plane { position: absolute; font-size: 13px; line-height: 1; top: 50%; transform: translateY(-50%); color: #2C2C2C; z-index: 2; }
+        .occ-lr-plane--stopped { color: #b45309; }
+        .occ-lr-divdot {
+          position: absolute; top: 50%; transform: translateY(-50%);
+          width: 8px; height: 8px; border-radius: 50%;
+          background: #f59e0b; border: 1.5px solid #fff; box-shadow: 0 0 0 1px #b45309;
+          z-index: 1;
+        }
         .occ-lr-time { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.2; min-width: 0; }
         .occ-lr-time-label { font-size: 0.58rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #999; }
         .occ-lr-time-value { font-size: 0.82rem; font-weight: 700; color: #2C2C2C; font-variant-numeric: tabular-nums; }

@@ -145,7 +145,7 @@ export async function getGroundHandlingLevel(airlineId) {
 // Returns the closest airport (great-circle) to a midpoint along the route
 // that can accept the aircraft (runway_length_m >= min_runway_landing_m).
 // Excludes the original departure and arrival airports.
-function haversineKm(lat1, lon1, lat2, lon2) {
+export function haversineKm(lat1, lon1, lat2, lon2) {
   if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return Infinity;
   const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -178,6 +178,20 @@ export async function findDiversionAirport(depCode, arrCode, minRunwayM, fractio
     }
   }
   return best;
+}
+
+// Where the diversion airport actually sits along the route, by great-circle
+// distance share (NOT the random roll fraction — the chosen airport is the
+// nearest capable one, which lands a bit off the exact lerp point). Returns a
+// value in 0..1 used by the UI to place the waypoint dot and split the
+// cruise time into a DUB→DIV leg and a DIV→DEST leg. null if any coord missing.
+export function diversionGeoFraction(depLat, depLon, arrLat, arrLon, divLat, divLon) {
+  if ([depLat, depLon, arrLat, arrLon, divLat, divLon].some(v => v == null)) return null;
+  const d1 = haversineKm(depLat, depLon, divLat, divLon);
+  const d2 = haversineKm(divLat, divLon, arrLat, arrLon);
+  const tot = d1 + d2;
+  if (!(tot > 0) || !Number.isFinite(tot)) return null;
+  return Math.min(0.95, Math.max(0.05, d1 / tot));
 }
 
 // ── The roll function ──────────────────────────────────────────────────────

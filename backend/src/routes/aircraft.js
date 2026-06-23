@@ -6,6 +6,7 @@ import adminMiddleware from '../middleware/admin.js';
 import { calculateFlightDuration } from './flights.js';
 import { validatePriceClamp } from '../utils/marketPricing.js';
 import { getAirports } from '../utils/airportCache.js';
+import { diversionGeoFraction } from '../utils/delaySystem.js';
 
 const router = express.Router();
 
@@ -766,12 +767,17 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
              COALESCE(r.departure_airport, ws.departure_airport) as dep_code,
              dep.name AS dep_name,
              COALESCE(r.arrival_airport, ws.arrival_airport) as arr_code,
-             arr.name AS arr_name
+             arr.name AS arr_name,
+             f.delay_reason, f.delay_minutes, f.diversion_airport_code,
+             dep.latitude AS dep_lat, dep.longitude AS dep_lon,
+             arr.latitude AS arr_lat, arr.longitude AS arr_lon,
+             div_apt.latitude AS div_lat, div_apt.longitude AS div_lon
       FROM flights f
       LEFT JOIN routes r ON f.route_id = r.id
       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
       LEFT JOIN airports dep ON dep.iata_code = COALESCE(r.departure_airport, ws.departure_airport)
       LEFT JOIN airports arr ON arr.iata_code = COALESCE(r.arrival_airport, ws.arrival_airport)
+      LEFT JOIN airports div_apt ON div_apt.iata_code = f.diversion_airport_code
       WHERE f.aircraft_id = $1
         AND (
           f.status = 'in-flight'
@@ -786,7 +792,14 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
       current_flight = {
         flight_number: cf.flight_number, departure_time: cf.departure_time, arrival_time: cf.arrival_time,
         departure_airport: cf.dep_code, departure_name: cf.dep_name,
-        arrival_airport: cf.arr_code, arrival_name: cf.arr_name
+        arrival_airport: cf.arr_code, arrival_name: cf.arr_name,
+        delay_reason: cf.delay_reason, delay_minutes: cf.delay_minutes,
+        diversion_airport_code: cf.diversion_airport_code,
+        diversion_lat: cf.div_lat, diversion_lon: cf.div_lon,
+        diversion_fraction: diversionGeoFraction(
+          cf.dep_lat, cf.dep_lon, cf.arr_lat, cf.arr_lon, cf.div_lat, cf.div_lon
+        ),
+        diversion_stop_min: cf.delay_minutes,
       };
     }
 

@@ -6,6 +6,7 @@ import { calculateCurrentValue, formatAircraftValue } from '../utils/aircraftVal
 import { groupAirportsForDropdown } from '../utils/airportSort.js';
 import { getEventFlavor } from '../utils/delayFlavor.js';
 import { useVisiblePolling } from '../utils/useVisiblePolling.js';
+import { diversionProgress } from '../utils/diversionProgress.js';
 import { POLL } from '../config/pollingIntervals.js';
 import SatisfactionRating, { getSatColor, scoreToRating } from '../components/SatisfactionRating.jsx';
 import Loader from '../components/Loader.jsx';
@@ -242,15 +243,14 @@ function StatusDot({ cls, pulse }) {
 
 function FlightProgress({ flight, onNavigate }) {
   const now    = Date.now();
-  const dep    = new Date(flight.departure_time).getTime();
   const arr    = new Date(flight.arrival_time).getTime();
-  const total  = arr - dep;
-  const pct    = total > 0 ? Math.max(0, Math.min(100, ((now - dep) / total) * 100)) : 0;
+  const { pct, divPct, atStop, isDiverted } = diversionProgress(flight, now);
   const remMs  = Math.max(0, arr - now);
   const remH   = Math.floor(remMs / 3600000);
   const remM   = Math.floor((remMs % 3600000) / 60000);
   const timeStr = remMs > 0 ? `${remH}h ${String(remM).padStart(2,'0')}m remaining` : 'Landing';
   const arrSt = computeArrStatus(flight.departure_time, flight.arrival_time, now);
+  const divCode = flight.diversion_airport_code;
   return (
     <div className="ad-fp-wrap">
       <div className="ad-fp-route">
@@ -265,11 +265,24 @@ function FlightProgress({ flight, onNavigate }) {
       </div>
       <div className="ad-fp-bar">
         <div className="ad-fp-line" />
+        {isDiverted && (
+          <button
+            className="ad-fp-divdot"
+            style={{ left: `calc(${divPct}% - 5px)` }}
+            onClick={() => onNavigate?.(divCode)}
+            title={`Diversion stop: ${divCode}`}
+            aria-label={`Diversion stop ${divCode}`}
+          >
+            <span className="ad-fp-divlabel">{divCode}</span>
+          </button>
+        )}
         <span className="ad-fp-plane" style={{ left: `calc(${pct}% - 9px)` }}>✈</span>
       </div>
       <div className="ad-fp-meta">
-        <StatusDot cls={arrSt.cls} pulse={arrSt.cls === 'inflight'} />
-        <span className="ad-fp-status-label" style={{ color: arrSt.color }}>{arrSt.label}</span>
+        <StatusDot cls={atStop ? 'boarding' : arrSt.cls} pulse={!atStop && arrSt.cls === 'inflight'} />
+        <span className="ad-fp-status-label" style={{ color: atStop ? '#a16207' : arrSt.color }}>
+          {atStop ? `On ground at ${divCode}` : isDiverted ? `Diverting via ${divCode}` : arrSt.label}
+        </span>
         <span className="ad-fp-fn" style={{ marginLeft: 'auto' }}>{flight.flight_number}</span>
         <span className="ad-fp-time">{timeStr}</span>
       </div>
@@ -3473,7 +3486,18 @@ const styles = `
   .ad-fp-line::after  { right: 0; }
   .ad-fp-plane {
     position: absolute; font-size: 16px; line-height: 1;
-    top: 50%; transform: translateY(-50%); z-index: 1;
+    top: 50%; transform: translateY(-50%); z-index: 2;
+  }
+  .ad-fp-divdot {
+    position: absolute; top: 50%; transform: translateY(-50%);
+    width: 10px; height: 10px; padding: 0; border-radius: 50%;
+    background: #f59e0b; border: 2px solid #fff; box-shadow: 0 0 0 1px #b45309;
+    cursor: pointer; z-index: 1;
+  }
+  .ad-fp-divlabel {
+    position: absolute; left: 50%; bottom: 13px; transform: translateX(-50%);
+    font-size: 0.6rem; font-weight: 700; letter-spacing: 0.04em; color: #b45309;
+    font-family: monospace; pointer-events: none;
   }
   .ad-fp-meta { display: flex; align-items: center; gap: 8px; }
   .ad-fp-fn {

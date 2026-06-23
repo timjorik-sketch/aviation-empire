@@ -207,6 +207,57 @@ export default function LiveFlightMap({
         bear = bearing(arc[arcIdx][0], arc[arcIdx][1], arc[arcIdx + 1][0], arc[arcIdx + 1][1]);
         if (backward) bear = (bear + 180) % 360;
       } else if (
+        f.delay_reason === 'medical' && f.diversion_lat != null &&
+        f.diversion_fraction != null && f.original_flight_min
+      ) {
+        // Medical diversion: fly to the diversion airport, sit on the ground
+        // for the diversion delay, then continue to the destination. Two
+        // great-circle legs (origin→DIV, DIV→dest) joined at the waypoint.
+        //   A: origin → diversion airport   (forward, leg 1)
+        //   B: parked at diversion airport   (ground stop)
+        //   C: diversion airport → dest      (forward, leg 2)
+        const arc1 = greatCirclePoints(f.origin_lat, f.origin_lon, f.diversion_lat, f.diversion_lon, 200);
+        const arc2 = greatCirclePoints(f.diversion_lat, f.diversion_lon, f.dest_lat, f.dest_lon, 200);
+        const F = f.original_flight_min;            // total cruise minutes
+        const frac = f.diversion_fraction;
+        const stopMin = f.diversion_stop_min || 0;
+        const phaseEndA = F * frac;
+        const phaseEndB = phaseEndA + stopMin;
+        const phaseEndC = phaseEndB + F * (1 - frac);
+        const elapsedMin = (Date.now() - new Date(f.departure_time).getTime()) / 60000;
+
+        const onArc = (arcPts, t) => {
+          const i = Math.max(0, Math.min(Math.floor(t * 200), 198));
+          return [arcPts[i][0], arcPts[i][1],
+            bearing(arcPts[i][0], arcPts[i][1], arcPts[i + 1][0], arcPts[i + 1][1])];
+        };
+
+        let p;
+        if (elapsedMin < phaseEndA) {
+          p = onArc(arc1, phaseEndA > 0 ? elapsedMin / phaseEndA : 1);
+          phaseLabel = `Diverting to ${f.diversion_airport_code}`;
+        } else if (elapsedMin < phaseEndB) {
+          p = [f.diversion_lat, f.diversion_lon, 0];
+          phaseLabel = `On ground at ${f.diversion_airport_code}`;
+        } else if (elapsedMin < phaseEndC) {
+          const local = (phaseEndC - phaseEndB) > 0 ? (elapsedMin - phaseEndB) / (phaseEndC - phaseEndB) : 1;
+          p = onArc(arc2, local);
+          phaseLabel = `Continuing to ${f.destination_iata}`;
+        } else {
+          p = onArc(arc2, 1);
+          phaseLabel = 'Arriving';
+        }
+        lat = p[0]; lon = p[1]; bear = p[2];
+
+        // Waypoint dot at the diversion airport.
+        const divDot = L.circleMarker([f.diversion_lat, f.diversion_lon], {
+          radius: 5, color: '#b45309', weight: 2, fillColor: '#f59e0b', fillOpacity: 1,
+        });
+        divDot.bindTooltip(`${f.diversion_airport_code} · diversion stop`, {
+          direction: 'top', offset: [0, -6],
+        });
+        group.addLayer(divDot);
+      } else if (
         f.origin_heading != null && f.dest_heading != null &&
         f.delay_reason !== 'medical' &&
         (f.remaining_ms / (1 - f.progress)) >= MIN_FLIGHT_MIN_FOR_PATTERN * 60_000
@@ -263,7 +314,8 @@ export default function LiveFlightMap({
 
       let divNote = '';
       if (f.delay_reason === 'medical' && f.diversion_airport_code) {
-        divNote = `<div style="margin-top:6px;font-size:0.68rem;font-weight:700;color:#a16207;background:rgba(234,179,8,0.18);border:1px solid rgba(234,179,8,0.4);padding:2px 6px;border-radius:3px;text-transform:uppercase;letter-spacing:0.04em;display:inline-block">Diverted → ${f.diversion_airport_code}</div>`;
+        const medLabel = phaseLabel || `Diverted → ${f.diversion_airport_code}`;
+        divNote = `<div style="margin-top:6px;font-size:0.68rem;font-weight:700;color:#a16207;background:rgba(234,179,8,0.18);border:1px solid rgba(234,179,8,0.4);padding:2px 6px;border-radius:3px;text-transform:uppercase;letter-spacing:0.04em;display:inline-block">${medLabel}</div>`;
       } else if (f.delay_reason === 'medical') {
         divNote = `<div style="margin-top:6px;font-size:0.68rem;font-weight:700;color:#a16207;background:rgba(234,179,8,0.18);border:1px solid rgba(234,179,8,0.4);padding:2px 6px;border-radius:3px;text-transform:uppercase;letter-spacing:0.04em;display:inline-block">Medical diversion</div>`;
       } else if (f.delay_reason === 'technical_air' && phaseLabel) {

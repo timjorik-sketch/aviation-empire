@@ -162,6 +162,10 @@ export default function LiveFlightMap({
       let lon = arc[arcIdx][1];
       let bear = bearing(arc[arcIdx][0], arc[arcIdx][1], arc[arcIdx + 1][0], arc[arcIdx + 1][1]);
       let phaseLabel = null;
+      // Medical flights only flag as "disrupted" (orange) once the aircraft is
+      // within ~30 flight-minutes of the diversion airport — before that it
+      // cruises as a normal flight.
+      let medicalOrange = false;
 
       // Tech Air gets a multi-phase position computation that reflects the
       // out-and-back-and-out-again choreography:
@@ -210,20 +214,22 @@ export default function LiveFlightMap({
         f.delay_reason === 'medical' && f.diversion_lat != null &&
         f.diversion_fraction != null && f.original_flight_min
       ) {
-        // Medical diversion: fly to the diversion airport, sit on the ground
-        // for the diversion delay, then continue to the destination. Two
-        // great-circle legs (origin→DIV, DIV→dest) joined at the waypoint.
-        //   A: origin → diversion airport   (forward, leg 1)
-        //   B: parked at diversion airport   (ground stop)
-        //   C: diversion airport → dest      (forward, leg 2)
-        const arc1 = greatCirclePoints(f.origin_lat, f.origin_lon, f.diversion_lat, f.diversion_lon, 200);
+        // Medical diversion. The aircraft flies the NORMAL route and only peels
+        // off toward the diversion airport in the final ~30 minutes, lands,
+        // waits out the ground stop, then flies directly to the destination:
+        //   A1: origin → dest cruise (normal great-circle)       [0 .. reach-LEAD]
+        //   A2: peel off to diversion airport (last LEAD minutes)[reach-LEAD .. reach]
+        //   B : parked at diversion airport (ground stop)        [reach .. leave]
+        //   C : diversion airport → dest (direct)                [leave .. end]
+        const LEAD = 30;
         const arc2 = greatCirclePoints(f.diversion_lat, f.diversion_lon, f.dest_lat, f.dest_lon, 200);
         const F = f.original_flight_min;            // total cruise minutes
         const frac = f.diversion_fraction;
         const stopMin = f.diversion_stop_min || 0;
-        const phaseEndA = F * frac;
-        const phaseEndB = phaseEndA + stopMin;
-        const phaseEndC = phaseEndB + F * (1 - frac);
+        const reach = F * frac;                     // arrive at diversion airport
+        const divertStart = Math.max(0, reach - LEAD);
+        const leave = reach + stopMin;
+        const end = leave + F * (1 - frac);
         const elapsedMin = (Date.now() - new Date(f.departure_time).getTime()) / 60000;
 
         const onArc = (arcPts, t) => {
@@ -233,15 +239,25 @@ export default function LiveFlightMap({
         };
 
         let p;
-        if (elapsedMin < phaseEndA) {
-          p = onArc(arc1, phaseEndA > 0 ? elapsedMin / phaseEndA : 1);
+        if (elapsedMin < divertStart) {
+          // Normal cruise along the original route.
+          p = onArc(arc, F > 0 ? elapsedMin / F : 0);
+        } else if (elapsedMin < reach) {
+          // Peel off: straight leg from the breakaway point to the diversion airport.
+          const from = onArc(arc, F > 0 ? divertStart / F : 0);
+          const t = (reach - divertStart) > 0 ? (elapsedMin - divertStart) / (reach - divertStart) : 1;
+          p = [
+            from[0] + (f.diversion_lat - from[0]) * t,
+            from[1] + (f.diversion_lon - from[1]) * t,
+            bearing(from[0], from[1], f.diversion_lat, f.diversion_lon),
+          ];
           phaseLabel = `Diverting to ${f.diversion_airport_code}`;
-        } else if (elapsedMin < phaseEndB) {
+        } else if (elapsedMin < leave) {
           p = [f.diversion_lat, f.diversion_lon, 0];
           phaseLabel = `On ground at ${f.diversion_airport_code}`;
-        } else if (elapsedMin < phaseEndC) {
-          const local = (phaseEndC - phaseEndB) > 0 ? (elapsedMin - phaseEndB) / (phaseEndC - phaseEndB) : 1;
-          p = onArc(arc2, local);
+        } else if (elapsedMin < end) {
+          const t = (end - leave) > 0 ? (elapsedMin - leave) / (end - leave) : 1;
+          p = onArc(arc2, t);
           phaseLabel = `Continuing to ${f.destination_iata}`;
         } else {
           p = onArc(arc2, 1);
@@ -249,14 +265,9 @@ export default function LiveFlightMap({
         }
         lat = p[0]; lon = p[1]; bear = p[2];
 
-        // Waypoint dot at the diversion airport.
-        const divDot = L.circleMarker([f.diversion_lat, f.diversion_lon], {
-          radius: 5, color: '#b45309', weight: 2, fillColor: '#f59e0b', fillOpacity: 1,
-        });
-        divDot.bindTooltip(`${f.diversion_airport_code} · diversion stop`, {
-          direction: 'top', offset: [0, -6],
-        });
-        group.addLayer(divDot);
+        // Orange only once the aircraft begins peeling off (final ~30 min) and
+        // for the remainder of the disrupted flight.
+        medicalOrange = elapsedMin >= divertStart;
       } else if (
         f.origin_heading != null && f.dest_heading != null &&
         f.delay_reason !== 'medical' &&
@@ -303,8 +314,10 @@ export default function LiveFlightMap({
         }
       }
 
-      // Orange highlight for any disrupted flight currently in the air
-      const isDisrupted = f.delay_reason === 'medical' || f.delay_reason === 'technical_air';
+      // Orange highlight for any disrupted flight currently in the air.
+      // Medical flights stay blue until ~30min before the diversion airport.
+      const isDisrupted = f.delay_reason === 'technical_air' ||
+        (f.delay_reason === 'medical' && medicalOrange);
       const color = isDisrupted ? '#facc15' : '#26A9F0';
       const marker = L.marker([lat, lon], { icon: planeIcon(bear, color) });
       const remH = Math.floor(f.remaining_ms / 3600000);

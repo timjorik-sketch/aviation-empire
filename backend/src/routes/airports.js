@@ -2,8 +2,26 @@ import express from 'express';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 import { calcGroundStaff } from './personnel.js';
+import { diversionGeoFraction } from '../utils/delaySystem.js';
 
 const router = express.Router();
+
+// For a medical-diverted flight, the stored departure_time/arrival_time are the
+// ORIGINAL endpoints (origin→dest). On the diversion airport's boards we must
+// instead show when it actually touches down here and departs again. The cruise
+// time (total minus the ground stop) is split by the diversion's geographic
+// position along the route. Returns { arrival, departure } Date objects, or null.
+function diversionStopTimes(depTime, arrTime, delayMin, depLat, depLon, arrLat, arrLon, divLat, divLon) {
+  const frac = diversionGeoFraction(depLat, depLon, arrLat, arrLon, divLat, divLon);
+  if (frac == null) return null;
+  const dep = new Date(depTime).getTime();
+  const arr = new Date(arrTime).getTime();
+  const stopMs = Math.max(0, (delayMin || 0) * 60000);
+  const cruiseMs = Math.max(0, (arr - dep) - stopMs);
+  const arrival = new Date(dep + cruiseMs * frac);     // touchdown at diversion airport
+  const departure = new Date(arrival.getTime() + stopMs); // continues onward
+  return { arrival, departure };
+}
 
 // ── Board query helpers ───────────────────────────────────────────────────────
 // Shared by the individual /departures, /arrivals, /airlines endpoints and by
@@ -21,6 +39,9 @@ async function queryDepartures(code) {
            ap_dest.name AS destination_name,
            al.name AS airline_name, al.airline_code,
            at.model AS aircraft_model, al.logo_filename,
+           ap_dep.latitude AS dep_lat, ap_dep.longitude AS dep_lon,
+           ap_dest.latitude AS dest_lat, ap_dest.longitude AS dest_lon,
+           ap_div.latitude AS div_lat, ap_div.longitude AS div_lon,
            CASE
              WHEN f.diversion_airport_code = $1 THEN 'diversion'
              ELSE 'normal'
@@ -29,6 +50,8 @@ async function queryDepartures(code) {
     LEFT JOIN routes r        ON f.route_id = r.id
     LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
     LEFT JOIN airports ap_dest ON ap_dest.iata_code = COALESCE(r.arrival_airport, ws.arrival_airport)
+    LEFT JOIN airports ap_dep  ON ap_dep.iata_code  = COALESCE(r.departure_airport, ws.departure_airport)
+    LEFT JOIN airports ap_div  ON ap_div.iata_code  = f.diversion_airport_code
     JOIN airlines al    ON f.airline_id = al.id
     JOIN aircraft ac    ON f.aircraft_id = ac.id
     JOIN aircraft_types at ON ac.aircraft_type_id = at.id
@@ -43,18 +66,28 @@ async function queryDepartures(code) {
     ORDER BY f.departure_time ASC
     LIMIT 30
   `, [code]);
-  return result.rows.map(r => ({
-    id: r.id, flight_number: r.flight_number,
-    departure_time: r.departure_time, arrival_time: r.arrival_time,
-    status: r.status, destination: r.destination,
-    destination_name: r.destination_name, airline_name: r.airline_name,
-    airline_code: r.airline_code, aircraft_model: r.aircraft_model,
-    logo_filename: r.logo_filename ?? null,
-    delay_reason: r.delay_reason,
-    delay_minutes: r.delay_minutes,
-    diversion_airport_code: r.diversion_airport_code,
-    view_type: r.view_type,
-  }));
+  return result.rows.map(r => {
+    // On the diversion airport's board, show the onward (continuation) departure
+    // time, not the original origin departure.
+    let departure_time = r.departure_time;
+    if (r.view_type === 'diversion') {
+      const t = diversionStopTimes(r.departure_time, r.arrival_time, r.delay_minutes,
+        r.dep_lat, r.dep_lon, r.dest_lat, r.dest_lon, r.div_lat, r.div_lon);
+      if (t) departure_time = t.departure;
+    }
+    return {
+      id: r.id, flight_number: r.flight_number,
+      departure_time, arrival_time: r.arrival_time,
+      status: r.status, destination: r.destination,
+      destination_name: r.destination_name, airline_name: r.airline_name,
+      airline_code: r.airline_code, aircraft_model: r.aircraft_model,
+      logo_filename: r.logo_filename ?? null,
+      delay_reason: r.delay_reason,
+      delay_minutes: r.delay_minutes,
+      diversion_airport_code: r.diversion_airport_code,
+      view_type: r.view_type,
+    };
+  });
 }
 
 async function queryArrivals(code) {
@@ -71,6 +104,9 @@ async function queryArrivals(code) {
            ap_orig.name AS origin_name,
            al.name AS airline_name, al.airline_code,
            at.model AS aircraft_model, al.logo_filename,
+           ap_orig.latitude AS dep_lat, ap_orig.longitude AS dep_lon,
+           ap_dest.latitude AS dest_lat, ap_dest.longitude AS dest_lon,
+           ap_div.latitude  AS div_lat, ap_div.longitude  AS div_lon,
            CASE
              WHEN COALESCE(r.arrival_airport, ws.arrival_airport) = $1 THEN 'normal'
              WHEN COALESCE(r.departure_airport, ws.departure_airport) = $1
@@ -82,6 +118,8 @@ async function queryArrivals(code) {
     LEFT JOIN routes r        ON f.route_id = r.id
     LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
     LEFT JOIN airports ap_orig ON ap_orig.iata_code = COALESCE(r.departure_airport, ws.departure_airport)
+    LEFT JOIN airports ap_dest ON ap_dest.iata_code = COALESCE(r.arrival_airport,   ws.arrival_airport)
+    LEFT JOIN airports ap_div  ON ap_div.iata_code  = f.diversion_airport_code
     JOIN airlines al    ON f.airline_id = al.id
     JOIN aircraft ac    ON f.aircraft_id = ac.id
     JOIN aircraft_types at ON ac.aircraft_type_id = at.id
@@ -99,18 +137,28 @@ async function queryArrivals(code) {
     ORDER BY f.arrival_time ASC
     LIMIT 30
   `, [code]);
-  return result.rows.map(r => ({
-    id: r.id, flight_number: r.flight_number,
-    departure_time: r.departure_time, arrival_time: r.arrival_time,
-    status: r.status, origin: r.origin, origin_name: r.origin_name,
-    scheduled_dest: r.scheduled_dest,
-    airline_name: r.airline_name, airline_code: r.airline_code,
-    aircraft_model: r.aircraft_model, logo_filename: r.logo_filename ?? null,
-    delay_reason: r.delay_reason,
-    delay_minutes: r.delay_minutes,
-    diversion_airport_code: r.diversion_airport_code,
-    view_type: r.view_type,
-  }));
+  return result.rows.map(r => {
+    // On the diversion airport's board, show when the flight actually lands
+    // here, not the original destination arrival.
+    let arrival_time = r.arrival_time;
+    if (r.view_type === 'diversion') {
+      const t = diversionStopTimes(r.departure_time, r.arrival_time, r.delay_minutes,
+        r.dep_lat, r.dep_lon, r.dest_lat, r.dest_lon, r.div_lat, r.div_lon);
+      if (t) arrival_time = t.arrival;
+    }
+    return {
+      id: r.id, flight_number: r.flight_number,
+      departure_time: r.departure_time, arrival_time,
+      status: r.status, origin: r.origin, origin_name: r.origin_name,
+      scheduled_dest: r.scheduled_dest,
+      airline_name: r.airline_name, airline_code: r.airline_code,
+      aircraft_model: r.aircraft_model, logo_filename: r.logo_filename ?? null,
+      delay_reason: r.delay_reason,
+      delay_minutes: r.delay_minutes,
+      diversion_airport_code: r.diversion_airport_code,
+      view_type: r.view_type,
+    };
+  });
 }
 
 async function queryAirlinesAt(code) {

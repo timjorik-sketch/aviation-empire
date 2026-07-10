@@ -25,6 +25,7 @@ import leaderboardsRoutes from './routes/leaderboards.js';
 import adminRoutes from './routes/admin.js';
 import interestRoutes from './routes/interest.js';
 import occRoutes from './routes/occ.js';
+import banksRoutes from './routes/banks.js';
 import { globalLimiter, authLimiter, interestLimiter } from './middleware/rateLimiters.js';
 
 dotenv.config();
@@ -105,6 +106,7 @@ app.use('/api/leaderboards', leaderboardsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/interest', interestRoutes);
 app.use('/api/occ', occRoutes);
+app.use('/api/banks', banksRoutes);
 
 // Alias routes for convenience
 app.use('/api/fleet', aircraftRoutes);

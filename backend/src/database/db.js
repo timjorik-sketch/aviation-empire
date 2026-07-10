@@ -339,6 +339,21 @@ async function initDatabase() {
     `CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log (created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_audit_log_actor ON audit_log (actor_user_id)`,
     `CREATE INDEX IF NOT EXISTS idx_audit_log_event_type ON audit_log (event_type)`,
+    // Hub-banking "banks": reusable arrival/departure wave windows at a hub.
+    // Times are minutes-since-midnight (0..1439) in the hub's local schedule clock.
+    `CREATE TABLE IF NOT EXISTS airline_banks (
+      id SERIAL PRIMARY KEY,
+      airline_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      hub_airport_code TEXT NOT NULL,
+      earliest_arrival INTEGER NOT NULL,
+      latest_arrival INTEGER NOT NULL,
+      earliest_departure INTEGER NOT NULL,
+      latest_departure INTEGER NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      FOREIGN KEY (airline_id) REFERENCES airlines(id) ON DELETE CASCADE
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_airline_banks_airline ON airline_banks (airline_id)`,
   ];
   await runStatements(extraTables, 'extra tables');
 

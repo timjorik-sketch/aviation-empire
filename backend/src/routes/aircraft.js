@@ -7,6 +7,7 @@ import { calculateFlightDuration } from './flights.js';
 import { validatePriceClamp } from '../utils/marketPricing.js';
 import { getAirports } from '../utils/airportCache.js';
 import { diversionGeoFraction } from '../utils/delaySystem.js';
+import { planBanks } from '../utils/bankPlanner.js';
 
 const router = express.Router();
 
@@ -1722,6 +1723,225 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error('Schedule aircraft flights error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ── Bank planning (hub-banking) ───────────────────────────────────────────────
+// Plan a bank-aligned weekly rotation for ONE aircraft on ONE round-trip route.
+// `commit:false` (default) computes a preview only; `commit:true` writes the
+// generated legs + one weekly maintenance block in a single transaction.
+function bankMaintenanceDuration(seats) {
+  if (seats <= 100) return 90;
+  if (seats <= 250) return 150;
+  return 240;
+}
+const BANK_TURNAROUND = { L: 25, M: 40, H: 60 };
+
+router.post('/:id/bank-plan', authMiddleware, async (req, res) => {
+  try {
+    const aircraftId = parseInt(req.params.id);
+    const airlineId = req.airlineId;
+    if (!airlineId) return res.status(400).json({ error: 'No active airline' });
+
+    const {
+      forward_route_id, return_route_id, bank_ids,
+      economy_price, business_price, first_price, service_profile_id,
+      commit,
+    } = req.body;
+
+    if (!forward_route_id || !return_route_id) {
+      return res.status(400).json({ error: 'forward_route_id and return_route_id are required' });
+    }
+    if (!Array.isArray(bank_ids) || bank_ids.length === 0) {
+      return res.status(400).json({ error: 'Select at least one bank' });
+    }
+
+    // Aircraft + type
+    const acResult = await pool.query(`
+      SELECT a.id, a.is_active, t.wake_turbulence_category, t.range_km, t.full_name,
+             t.max_passengers, t.min_runway_takeoff_m, t.min_runway_landing_m
+      FROM aircraft a JOIN aircraft_types t ON a.aircraft_type_id = t.id
+      WHERE a.id = $1 AND a.airline_id = $2
+    `, [aircraftId, airlineId]);
+    if (!acResult.rows[0]) return res.status(404).json({ error: 'Aircraft not found' });
+    const ac = acResult.rows[0];
+    if (commit && ac.is_active) {
+      return res.status(400).json({ error: 'Aircraft must be inactive to write a schedule. Deactivate the aircraft first.' });
+    }
+    const wake = ac.wake_turbulence_category || 'M';
+    const turnaround = BANK_TURNAROUND[wake] || 40;
+
+    // Routes (forward + return), both owned by the airline
+    const routeResult = await pool.query(
+      `SELECT id, flight_number, distance_km, departure_airport, arrival_airport
+       FROM routes WHERE id = ANY($1) AND airline_id = $2`,
+      [[forward_route_id, return_route_id], airlineId]
+    );
+    const fwd = routeResult.rows.find(r => r.id === forward_route_id);
+    const ret = routeResult.rows.find(r => r.id === return_route_id);
+    if (!fwd || !ret) return res.status(400).json({ error: 'Route not found' });
+    if (fwd.departure_airport !== ret.arrival_airport || fwd.arrival_airport !== ret.departure_airport) {
+      return res.status(400).json({ error: 'Return route must be the reverse of the outbound route' });
+    }
+
+    // Range + runway checks (both airports, both directions)
+    if (ac.range_km && fwd.distance_km > ac.range_km) {
+      return res.status(400).json({ error: `Route exceeds aircraft range (${fwd.distance_km}km > ${ac.range_km}km)` });
+    }
+    const airports = [fwd.departure_airport, fwd.arrival_airport];
+    const apRes = await pool.query(`SELECT iata_code, runway_length_m FROM airports WHERE iata_code = ANY($1)`, [airports]);
+    const rwy = new Map(apRes.rows.map(r => [r.iata_code, r.runway_length_m]));
+    for (const code of airports) {
+      const len = rwy.get(code) ?? 0;
+      if (ac.min_runway_takeoff_m && len < ac.min_runway_takeoff_m) {
+        return res.status(400).json({ error: `Runway at ${code} too short for takeoff (${len}m < ${ac.min_runway_takeoff_m}m)` });
+      }
+      if (ac.min_runway_landing_m && len < ac.min_runway_landing_m) {
+        return res.status(400).json({ error: `Runway at ${code} too short for landing (${len}m < ${ac.min_runway_landing_m}m)` });
+      }
+    }
+
+    // Banks (owned by airline) whose hub matches the outbound origin
+    const bankResult = await pool.query(
+      `SELECT id, name, hub_airport_code, earliest_arrival, latest_arrival, earliest_departure, latest_departure
+       FROM airline_banks WHERE id = ANY($1) AND airline_id = $2`,
+      [bank_ids, airlineId]
+    );
+    const banks = bankResult.rows.filter(b => b.hub_airport_code === fwd.departure_airport);
+    if (banks.length === 0) {
+      return res.status(400).json({ error: `Selected banks must belong to the hub ${fwd.departure_airport}` });
+    }
+
+    const oneWay = calculateFlightDuration(fwd.distance_km);
+    const maintDuration = bankMaintenanceDuration(ac.max_passengers);
+
+    const plan = planBanks({ oneWayMinutes: oneWay, turnaround, banks, maintDuration });
+    if (!plan.feasible || plan.roundTrips.length === 0) {
+      return res.status(400).json({ error: plan.note || 'No feasible plan for these banks', feasible: false });
+    }
+
+    // Convert a week-minute into { day_of_week, time 'HH:MM' }
+    const toDayTime = (wk) => {
+      const day = Math.floor(wk / 1440) % 7;
+      const m = ((wk % 1440) + 1440) % 1440;
+      return { day, time: `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}` };
+    };
+
+    // Build the leg list (2 per round trip: outbound + return)
+    const legs = [];
+    for (const rt of plan.roundTrips) {
+      const out = toDayTime(rt.depWk);
+      const outArr = toDayTime(rt.depWk + oneWay);
+      legs.push({
+        direction: 'out', route_id: fwd.id, flight_number: fwd.flight_number,
+        departure_airport: fwd.departure_airport, arrival_airport: fwd.arrival_airport,
+        day_of_week: out.day, departure_time: out.time, arrival_time: outArr.time,
+      });
+      const inDepWk = rt.arrWk - oneWay;
+      const inDep = toDayTime(inDepWk);
+      const inArr = toDayTime(rt.arrWk);
+      legs.push({
+        direction: 'in', route_id: ret.id, flight_number: ret.flight_number,
+        departure_airport: ret.departure_airport, arrival_airport: ret.arrival_airport,
+        day_of_week: inDep.day, departure_time: inDep.time, arrival_time: inArr.time,
+      });
+    }
+
+    let maintenance = null;
+    if (plan.maintStartWk != null) {
+      const ms = toDayTime(plan.maintStartWk);
+      maintenance = {
+        day_of_week: ms.day,
+        start_time: ms.time,
+        start_minutes: (plan.maintStartWk % 1440 + 1440) % 1440,
+        duration_minutes: plan.maintDuration,
+      };
+    }
+
+    const totalFlightHours = +(plan.roundTrips.length * 2 * oneWay / 60).toFixed(1);
+    const summary = {
+      round_trips: plan.roundTrips.length,
+      one_way_minutes: oneWay,
+      turnaround, maint_duration: maintDuration,
+      total_flight_hours: totalFlightHours,
+      note: plan.note || '',
+    };
+
+    // ── Preview only ──
+    if (!commit) {
+      return res.json({ preview: true, legs, maintenance, summary });
+    }
+
+    // ── Commit: price clamp, then write legs + maintenance in a transaction ──
+    const priceErr = validatePriceClamp({ eco: economy_price, biz: business_price, first: first_price });
+    if (priceErr) return res.status(400).json({ error: priceErr.error });
+    if (!economy_price) return res.status(400).json({ error: 'Economy price is required' });
+
+    const eco = parseFloat(economy_price);
+    const biz = business_price != null && business_price !== '' ? parseFloat(business_price) : null;
+    const fir = first_price != null && first_price !== '' ? parseFloat(first_price) : null;
+    const sp = service_profile_id || null;
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Wipe the aircraft's current weekly schedule + maintenance so the bank plan
+      // fully replaces it (this is a "plan the whole week" action).
+      await client.query('DELETE FROM weekly_schedule WHERE aircraft_id = $1', [aircraftId]);
+      await client.query('DELETE FROM maintenance_schedule WHERE aircraft_id = $1 AND airline_id = $2', [aircraftId, airlineId]);
+
+      const values = [];
+      const placeholders = [];
+      let idx = 1;
+      for (const l of legs) {
+        placeholders.push(`($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`);
+        values.push(aircraftId, l.day_of_week, l.flight_number, l.departure_airport, l.arrival_airport,
+          l.departure_time, l.arrival_time, eco, biz, fir, l.route_id, sp);
+      }
+      await client.query(`
+        INSERT INTO weekly_schedule
+          (aircraft_id, day_of_week, flight_number, departure_airport, arrival_airport,
+           departure_time, arrival_time, economy_price, business_price, first_price, route_id, service_profile_id)
+        VALUES ${placeholders.join(', ')}
+      `, values);
+
+      if (maintenance) {
+        // Mirror maintenance.js: pre-mark last_completed_at if this week's slot
+        // already passed so the processor bills it next week, not instantly.
+        const now = new Date();
+        const jsDay = now.getDay();
+        const currentDow = jsDay === 0 ? 6 : jsDay - 1;
+        const currentWeekMin = currentDow * 1440 + now.getHours() * 60 + now.getMinutes();
+        const trigger = maintenance.day_of_week * 1440 + maintenance.start_minutes;
+        const alreadyPassed = currentWeekMin >= trigger;
+        await client.query(`
+          INSERT INTO maintenance_schedule
+            (aircraft_id, airline_id, day_of_week, start_minutes, duration_minutes, type, status, last_completed_at)
+          VALUES ($1, $2, $3, $4, $5, 'routine', 'scheduled', $6)
+        `, [aircraftId, airlineId, maintenance.day_of_week, maintenance.start_minutes, maintenance.duration_minutes,
+            alreadyPassed ? now.toISOString() : null]);
+      }
+
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    // Sync the two routes' prices (outside the transaction, same as schedule POST)
+    await syncRoutePrices(fwd.id, eco, biz, fir, sp);
+    await syncRoutePrices(ret.id, eco, biz, fir, sp);
+
+    res.status(201).json({
+      message: `Bank plan written: ${legs.length} flight(s)${maintenance ? ' + 1 maintenance block' : ''}`,
+      legs, maintenance, summary,
+    });
+  } catch (error) {
+    console.error('Bank plan error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });

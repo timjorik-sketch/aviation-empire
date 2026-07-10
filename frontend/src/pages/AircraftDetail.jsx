@@ -370,6 +370,29 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [alignOffset, setAlignOffset] = useState(0);  // Offset xx:MM (0-59): where the rounding grid sits on the clock
   const [repeatCount, setRepeatCount]     = useState(1);
 
+  // Banks (hub-banking) planner
+  const [banks, setBanks]                 = useState([]);
+  const [bankForwardRouteId, setBankForwardRouteId] = useState('');
+  const [bankReturnRouteId, setBankReturnRouteId]   = useState('');
+  const [selectedBankIds, setSelectedBankIds]       = useState([]);
+  const [bankEcoPrice, setBankEcoPrice]   = useState('');
+  const [bankBizPrice, setBankBizPrice]   = useState('');
+  const [bankFirstPrice, setBankFirstPrice] = useState('');
+  const [bankServiceProfileId, setBankServiceProfileId] = useState('');
+  const [bankPlan, setBankPlan]           = useState(null);  // { legs, maintenance, summary }
+  const [bankComputing, setBankComputing] = useState(false);
+  const [bankConfirming, setBankConfirming] = useState(false);
+  // Bank create/edit modal
+  const [showBankModal, setShowBankModal] = useState(false);
+  const [editingBankId, setEditingBankId] = useState(null);
+  const [bankName, setBankName]           = useState('');
+  const [bankHub, setBankHub]             = useState('');
+  const [bankEarlyArr, setBankEarlyArr]   = useState('04:00');
+  const [bankLateArr, setBankLateArr]     = useState('06:00');
+  const [bankEarlyDep, setBankEarlyDep]   = useState('07:00');
+  const [bankLateDep, setBankLateDep]     = useState('09:00');
+  const [bankSaving, setBankSaving]       = useState(false);
+
   const groundMin = useMemo(
     () => WAKE_TURNAROUND[aircraft?.wake_turbulence_category] ?? 40,
     [aircraft?.wake_turbulence_category]
@@ -516,6 +539,15 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
   useEffect(() => { fetchSchedule(); }, [fetchSchedule]);
 
+  const fetchBanks = useCallback(async () => {
+    try {
+      const res  = await fetch(`${API_URL}/api/banks`, { headers });
+      const data = await res.json();
+      if (res.ok) setBanks(data.banks || []);
+    } catch {}
+  }, []);
+  useEffect(() => { fetchBanks(); }, [fetchBanks]);
+
   useEffect(() => {
     fetch(`${API_URL}/api/service-profiles`, { headers })
       .then(r => r.json())
@@ -554,6 +586,22 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       }
     }
   }, [outRouteId]);
+
+  // Banks planner: auto-pick the reverse route for the chosen outbound.
+  useEffect(() => {
+    if (bankForwardRouteId) {
+      const out = routes.find(r => r.id === parseInt(bankForwardRouteId));
+      if (out) {
+        const reverse = routes.find(r =>
+          r.departure_airport === out.arrival_airport && r.arrival_airport === out.departure_airport
+        );
+        setBankReturnRouteId(reverse ? String(reverse.id) : '');
+      }
+    } else {
+      setBankReturnRouteId('');
+    }
+    setBankPlan(null); // route change invalidates any preview
+  }, [bankForwardRouteId, routes]);
 
   useEffect(() => {
     if (sRouteId) {
@@ -713,6 +761,62 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       groundOverflowHeight:   groundCrossesMidnight ? (endWall + groundMin - 1440) * PX_PER_MIN : 0,
     };
   }), [viewMaintenance, groundMin]);
+
+  // ─── Bank plan ghost preview bars (rendered half-transparent in the grid) ──
+
+  const ghostBars = useMemo(() => {
+    if (!bankPlan?.legs) return [];
+    return bankPlan.legs.map((l, i) => {
+      const bDep = parseHM(l.departure_time);
+      const bArr = parseHM(l.arrival_time);
+      const dur  = ((bArr - bDep) + 1440) % 1440 || 1;
+      const sv   = shiftWeekSlot(l.day_of_week, bDep, viewShiftMin, 'roll');
+      const depMin = sv.minuteOfDay;
+      const day    = sv.day;
+      const arrMin = (depMin + dur) % 1440;
+      const crossesMidnight = depMin + dur > 1440;
+      const seg1H = crossesMidnight ? (1440 - depMin) * PX_PER_MIN : dur * PX_PER_MIN;
+      return {
+        key: `ghost-${i}`,
+        flight_number: l.flight_number,
+        departure_airport: l.departure_airport, arrival_airport: l.arrival_airport,
+        departure_time: minutesToHHMM(depMin), arrival_time: minutesToHHMM(arrMin),
+        dayIndex: day,
+        top: depMin * PX_PER_MIN,
+        height: Math.max(seg1H, 14),
+        overflowDayIndex: crossesMidnight ? (day + 1) % 7 : null,
+        overflowHeight:   crossesMidnight ? Math.max(arrMin * PX_PER_MIN, 14) : 0,
+      };
+    });
+  }, [bankPlan, viewShiftMin]);
+
+  const ghostMaint = useMemo(() => {
+    if (!bankPlan?.maintenance) return null;
+    const m = bankPlan.maintenance;
+    const sv = shiftWeekSlot(m.day_of_week, m.start_minutes, viewShiftMin, 'roll');
+    const start = sv.minuteOfDay, day = sv.day;
+    const crossesMidnight = start + m.duration_minutes > 1440;
+    const seg1H = crossesMidnight ? (1440 - start) * PX_PER_MIN : m.duration_minutes * PX_PER_MIN;
+    return {
+      dayIndex: day,
+      top: start * PX_PER_MIN,
+      height: Math.max(seg1H, 14),
+      overflowDayIndex: crossesMidnight ? (day + 1) % 7 : null,
+      overflowHeight:   crossesMidnight ? (start + m.duration_minutes - 1440) * PX_PER_MIN : 0,
+      start_minutes: start, duration_minutes: m.duration_minutes,
+    };
+  }, [bankPlan, viewShiftMin]);
+
+  const bankForwardRoute = useMemo(
+    () => routes.find(r => r.id === parseInt(bankForwardRouteId)) || null,
+    [routes, bankForwardRouteId]
+  );
+  const bankHubCode = bankForwardRoute?.departure_airport || null;
+  // Only banks at the outbound origin (the hub) apply to this plan.
+  const visibleBanks = useMemo(
+    () => bankHubCode ? banks.filter(b => b.hub_airport_code === bankHubCode) : banks,
+    [banks, bankHubCode]
+  );
 
   // ─── Series preview (pure time arithmetic — no Date objects) ─────────────
 
@@ -1036,6 +1140,108 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       setSuccess(data.message); fetchSchedule();
     } catch (err) { setError(err.message); }
     finally { setSubmitting(false); }
+  };
+
+  // ─── Banks planner handlers ──────────────────────────────────────────────
+
+  const bankPlanBody = (commit) => ({
+    forward_route_id: parseInt(bankForwardRouteId),
+    return_route_id: parseInt(bankReturnRouteId),
+    bank_ids: selectedBankIds,
+    economy_price: bankEcoPrice || undefined,
+    business_price: bankBizPrice || undefined,
+    first_price: bankFirstPrice || undefined,
+    service_profile_id: bankServiceProfileId ? parseInt(bankServiceProfileId) : undefined,
+    commit,
+  });
+
+  const computeBankPlan = async () => {
+    setError(''); setSuccess('');
+    if (!bankForwardRouteId || !bankReturnRouteId) { setError('Select an outbound route that has a matching return route.'); return; }
+    if (selectedBankIds.length === 0) { setError('Select at least one bank.'); return; }
+    setBankComputing(true);
+    try {
+      const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/bank-plan`, {
+        method: 'POST', headers: jsonHeaders, body: JSON.stringify(bankPlanBody(false)),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || 'Could not compute plan'); setBankPlan(null); }
+      else setBankPlan(data);
+    } catch { setError('Network error'); setBankPlan(null); }
+    finally { setBankComputing(false); }
+  };
+
+  const confirmBankPlan = async () => {
+    if (!bankPlan) return;
+    if (!bankEcoPrice) { setError('Enter an economy price before writing the plan.'); return; }
+    setBankConfirming(true); setError(''); setSuccess('');
+    try {
+      const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/bank-plan`, {
+        method: 'POST', headers: jsonHeaders, body: JSON.stringify(bankPlanBody(true)),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || 'Could not write plan'); }
+      else { setSuccess(data.message); setBankPlan(null); fetchSchedule(); }
+    } catch { setError('Network error'); }
+    finally { setBankConfirming(false); }
+  };
+
+  const discardBankPlan = () => { setBankPlan(null); setError(''); };
+
+  const toggleBankSelected = (id) => {
+    setBankPlan(null);
+    setSelectedBankIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]);
+  };
+
+  const openBankModal = (bank = null) => {
+    setError('');
+    if (bank) {
+      setEditingBankId(bank.id);
+      setBankName(bank.name);
+      setBankHub(bank.hub_airport_code);
+      setBankEarlyArr(minutesToHHMM(bank.earliest_arrival));
+      setBankLateArr(minutesToHHMM(bank.latest_arrival));
+      setBankEarlyDep(minutesToHHMM(bank.earliest_departure));
+      setBankLateDep(minutesToHHMM(bank.latest_departure));
+    } else {
+      setEditingBankId(null);
+      setBankName('');
+      setBankHub(bankForwardRoute?.departure_airport || '');
+      setBankEarlyArr('04:00'); setBankLateArr('06:00');
+      setBankEarlyDep('07:00'); setBankLateDep('09:00');
+    }
+    setShowBankModal(true);
+  };
+
+  const saveBank = async () => {
+    if (!bankName.trim()) { setError('Bank name is required'); return; }
+    if (!bankHub) { setError('Select a hub airport'); return; }
+    setBankSaving(true); setError('');
+    try {
+      const body = {
+        name: bankName.trim(), hub_airport_code: bankHub,
+        earliest_arrival: parseHM(bankEarlyArr), latest_arrival: parseHM(bankLateArr),
+        earliest_departure: parseHM(bankEarlyDep), latest_departure: parseHM(bankLateDep),
+      };
+      const url = editingBankId ? `${API_URL}/api/banks/${editingBankId}` : `${API_URL}/api/banks`;
+      const res = await fetch(url, { method: editingBankId ? 'PUT' : 'POST', headers: jsonHeaders, body: JSON.stringify(body) });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || 'Could not save bank'); }
+      else { setShowBankModal(false); fetchBanks(); }
+    } catch { setError('Network error'); }
+    finally { setBankSaving(false); }
+  };
+
+  const deleteBank = async (id) => {
+    if (!window.confirm('Delete this bank?')) return;
+    try {
+      const res = await fetch(`${API_URL}/api/banks/${id}`, { method: 'DELETE', headers });
+      if (res.ok) {
+        setSelectedBankIds(ids => ids.filter(x => x !== id));
+        setBankPlan(null);
+        fetchBanks();
+      }
+    } catch {}
   };
 
   const handleMaintenanceSubmit = async () => {
@@ -1907,6 +2113,22 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
             </span>
             <button className="ad-btn-clear-sched" onClick={handleClearSchedule}>Clear All</button>
           </div>
+          {bankPlan && (
+            <div className="ad-bank-ghost-bar">
+              <div className="ad-bank-ghost-info">
+                <strong>Bank plan preview</strong> — {bankPlan.summary.round_trips} round trip(s)
+                {bankPlan.maintenance ? ' + 1 maintenance block' : ''} · {bankPlan.summary.total_flight_hours}h/week
+                {bankPlan.summary.note && <div className="ad-bank-ghost-note">{bankPlan.summary.note}</div>}
+                <div className="ad-bank-ghost-note">Confirming replaces this aircraft's entire weekly schedule. The aircraft must be grounded.</div>
+              </div>
+              <div className="ad-bank-ghost-actions">
+                <button className="ad-btn-clear-sched" onClick={discardBankPlan}>Discard</button>
+                <button className="ad-bank-confirm-btn" disabled={bankConfirming} onClick={confirmBankPlan}>
+                  {bankConfirming ? 'Writing…' : 'Confirm & write'}
+                </button>
+              </div>
+            </div>
+          )}
           <div className="ad-grid-header">
             <div className="ad-grid-gutter-hd" />
             {DAY_SHORT.map((d, i) => <div key={i} className="ad-grid-day-hd">{d}</div>)}
@@ -1930,6 +2152,8 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                 const mOverflowBars    = maintBars.filter(m => m.overflowDayIndex === di);
                 const mGroundBars      = maintBars.filter(m => m.groundDayIndex === di);
                 const mGroundOverflowBars = maintBars.filter(m => m.groundOverflowDayIndex === di);
+                const gBars            = ghostBars.filter(g => g.dayIndex === di);
+                const gOverflowBars    = ghostBars.filter(g => g.overflowDayIndex === di);
                 return (
                   <div key={di} className="ad-grid-col">
                     {Array.from({ length: 24 }, (_, h) => (
@@ -2064,6 +2288,39 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                         </button>
                       </div>
                     ))}
+                    {/* Bank plan ghost preview — half-transparent, non-interactive */}
+                    {gBars.map(g => (
+                      <div key={g.key} className="ad-grid-ghost"
+                        style={{ top: g.top, height: g.height }}
+                        title={`${g.flight_number}: ${g.departure_airport}→${g.arrival_airport}\nDep ${g.departure_time}  Arr ${g.arrival_time}`}>
+                        <span className="ad-grid-fn">{g.flight_number}</span>
+                        {g.height > 24 && <span className="ad-grid-rt">{g.departure_airport}→{g.arrival_airport}</span>}
+                        {g.height > 38 && <span className="ad-grid-tm">{g.departure_time}</span>}
+                      </div>
+                    ))}
+                    {gOverflowBars.map(g => (
+                      <div key={`${g.key}-ov`} className="ad-grid-ghost"
+                        style={{ top: 0, height: g.overflowHeight, borderTop: '2px dashed #1d4ed8' }}
+                        title={`${g.flight_number}: ${g.departure_airport}→${g.arrival_airport} (cont.)`}>
+                        <span className="ad-grid-fn">{g.flight_number}</span>
+                        {g.overflowHeight > 24 && <span className="ad-grid-rt">→{g.arrival_airport}</span>}
+                      </div>
+                    ))}
+                    {ghostMaint && ghostMaint.dayIndex === di && (
+                      <div className="ad-grid-ghost ad-grid-ghost--maint"
+                        style={{ top: ghostMaint.top, height: ghostMaint.height }}
+                        title="Planned maintenance (A-Check)">
+                        <span className="ad-grid-fn">A-Check</span>
+                        {ghostMaint.height > 24 && <span className="ad-grid-rt">{minsToHM(ghostMaint.start_minutes)}</span>}
+                      </div>
+                    )}
+                    {ghostMaint && ghostMaint.overflowDayIndex === di && (
+                      <div className="ad-grid-ghost ad-grid-ghost--maint"
+                        style={{ top: 0, height: ghostMaint.overflowHeight, borderTop: '2px dashed #6b7280' }}
+                        title="Planned maintenance (A-Check, cont.)">
+                        <span className="ad-grid-fn">A-Check</span>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -2088,10 +2345,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
             </div>
           </div>
           <div className="sched-tabs">
-            {['single','series','maintenance'].map(tab => (
+            {['single','series','banks','maintenance'].map(tab => (
               <button key={tab} className={`sched-tab ${scheduleTab === tab ? 'active' : ''}`}
                 onClick={() => { setScheduleTab(tab); setError(''); setSuccess(''); }}>
-                {tab === 'single' ? 'Single Flight' : tab === 'series' ? 'Series Flight' : 'Maintenance'}
+                {tab === 'single' ? 'Single Flight' : tab === 'series' ? 'Series Flight' : tab === 'banks' ? 'Banks' : 'Maintenance'}
               </button>
             ))}
           </div>
@@ -2389,6 +2646,108 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                   disabled={submitting || !outRouteId || !rEcoPrice || seriesHasConflict || !routeInRange(outRouteId) || !routeInRange(inRouteId)}>
                   {submitting ? 'Scheduling...' : `Schedule ${seriesPreview.length || ''} Entries`}
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* Banks (hub-banking planner) */}
+          {scheduleTab === 'banks' && selectedCabinProfileId && (
+            <div className="sched-form-body">
+              <div className="sched-section-hd">Route</div>
+              <div className="sched-section-body">
+                <div className="sched-form-row">
+                  <label>
+                    Outbound route (round trip)
+                    {bankForwardRouteId && !routeInRange(bankForwardRouteId) && (
+                      <span className="sched-range-warn"> ⚠ Exceeds aircraft range</span>
+                    )}
+                  </label>
+                  <select value={bankForwardRouteId} onChange={e => setBankForwardRouteId(e.target.value)}>
+                    <option value="">— select route —</option>
+                    {recentRoutes.length > 0 && (
+                      <optgroup label="Recent">{recentRoutes.map(r => renderRouteOption(r, 'bank-recent-'))}</optgroup>
+                    )}
+                    <optgroup label="All routes">{routes.map(r => renderRouteOption(r, 'bank-all-'))}</optgroup>
+                  </select>
+                </div>
+                {bankForwardRouteId && (
+                  <div className="sched-bank-return">
+                    {bankReturnRouteId
+                      ? <>Return leg: <strong>{bankForwardRoute?.arrival_airport} → {bankForwardRoute?.departure_airport}</strong> · Hub: <strong>{bankHubCode}</strong></>
+                      : <span className="sched-range-warn">⚠ No return route found for this pairing. Create the reverse route first.</span>}
+                  </div>
+                )}
+              </div>
+
+              <div className="sched-section-hd">
+                Banks at {bankHubCode || 'the hub'}
+                <button className="sched-bank-add" onClick={() => openBankModal(null)}>+ New bank</button>
+              </div>
+              <div className="sched-section-body">
+                {!bankHubCode && <div className="sched-bank-hint">Select an outbound route to see the banks at its hub.</div>}
+                {bankHubCode && visibleBanks.length === 0 && (
+                  <div className="sched-bank-hint">No banks defined at {bankHubCode} yet. Create one with “+ New bank”.</div>
+                )}
+                {bankHubCode && visibleBanks.map(b => (
+                  <div key={b.id} className={`sched-bank-item ${selectedBankIds.includes(b.id) ? 'selected' : ''}`}>
+                    <label className="sched-bank-check">
+                      <input type="checkbox" checked={selectedBankIds.includes(b.id)} onChange={() => toggleBankSelected(b.id)} />
+                      <span className="sched-bank-name">{b.name}</span>
+                    </label>
+                    <span className="sched-bank-times">
+                      Arr {minutesToHHMM(b.earliest_arrival)}–{minutesToHHMM(b.latest_arrival)} · Dep {minutesToHHMM(b.earliest_departure)}–{minutesToHHMM(b.latest_departure)}
+                    </span>
+                    <span className="sched-bank-item-actions">
+                      <button onClick={() => openBankModal(b)} title="Edit bank">✎</button>
+                      <button onClick={() => deleteBank(b.id)} title="Delete bank">×</button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="sched-section-hd">Pricing</div>
+              <div className="sched-section-body">
+                <div className="sched-3col">
+                  <div className="sched-form-row">
+                    <label>Economy</label>
+                    <input type="number" min="1" placeholder="$" value={bankEcoPrice} onChange={e => setBankEcoPrice(e.target.value)} />
+                  </div>
+                  <div className={`sched-form-row ${!hasBusiness ? 'price-disabled' : ''}`}>
+                    <label>Business</label>
+                    <input type="number" min="1" placeholder={hasBusiness ? '$' : 'N/A'} value={bankBizPrice}
+                      onChange={e => setBankBizPrice(e.target.value)} disabled={!hasBusiness} />
+                  </div>
+                  <div className={`sched-form-row ${!hasFirst ? 'price-disabled' : ''}`}>
+                    <label>First</label>
+                    <input type="number" min="1" placeholder={hasFirst ? '$' : 'N/A'} value={bankFirstPrice}
+                      onChange={e => setBankFirstPrice(e.target.value)} disabled={!hasFirst} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="sched-section-hd">Service</div>
+              <div className="sched-section-body">
+                <div className="sched-form-row">
+                  <label>Service Profile</label>
+                  <select value={bankServiceProfileId} onChange={e => setBankServiceProfileId(e.target.value)}>
+                    <option value="">— None —</option>
+                    {serviceProfiles.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} (E${p.economy_cost}{p.business_cost ? ` / B$${p.business_cost}` : ''}{p.first_cost ? ` / F$${p.first_cost}` : ''}/pax)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="sched-form-actions">
+                <button className="sched-btn-submit" onClick={computeBankPlan}
+                  disabled={bankComputing || !bankForwardRouteId || !bankReturnRouteId || selectedBankIds.length === 0 || !routeInRange(bankForwardRouteId)}>
+                  {bankComputing ? 'Calculating…' : 'Calculate plan'}
+                </button>
+                <div className="sched-bank-calc-hint">
+                  Generates a half-transparent preview in the grid. Nothing is written until you confirm it above the grid.
+                </div>
               </div>
             </div>
           )}
@@ -3074,6 +3433,61 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         </div>
       )}
 
+      {showBankModal && (
+        <div className="decomm-modal-overlay" onClick={() => setShowBankModal(false)}>
+          <div className="decomm-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
+            <div className="decomm-modal-head">
+              <h3>{editingBankId ? 'Edit bank' : 'New bank'}</h3>
+              <button className="decomm-modal-close" onClick={() => setShowBankModal(false)}>&times;</button>
+            </div>
+            <div className="decomm-modal-body">
+              <div className="sched-form-row" style={{ marginBottom: '0.9rem' }}>
+                <label>Name</label>
+                <input type="text" value={bankName} placeholder="e.g. Morning bank" onChange={e => setBankName(e.target.value)} />
+              </div>
+              <div className="sched-form-row" style={{ marginBottom: '0.9rem' }}>
+                <label>Hub airport</label>
+                <select value={bankHub} onChange={e => setBankHub(e.target.value)}>
+                  <option value="">— select hub —</option>
+                  {airports.map(ap => (
+                    <option key={ap.iata_code} value={ap.iata_code}>{ap.iata_code} – {ap.name}</option>
+                  ))}
+                </select>
+              </div>
+              <p style={{ fontSize: '0.78rem', color: '#888', margin: '0 0 0.6rem' }}>
+                All times are in game time (the schedule's storage clock), same as the grid before switching to local view.
+              </p>
+              <div className="sched-3col" style={{ marginBottom: '0.5rem' }}>
+                <div className="sched-form-row">
+                  <label>Earliest arrival</label>
+                  <input type="time" value={bankEarlyArr} onChange={e => setBankEarlyArr(e.target.value)} />
+                </div>
+                <div className="sched-form-row">
+                  <label>Latest arrival</label>
+                  <input type="time" value={bankLateArr} onChange={e => setBankLateArr(e.target.value)} />
+                </div>
+              </div>
+              <div className="sched-3col" style={{ marginBottom: '1rem' }}>
+                <div className="sched-form-row">
+                  <label>Earliest departure</label>
+                  <input type="time" value={bankEarlyDep} onChange={e => setBankEarlyDep(e.target.value)} />
+                </div>
+                <div className="sched-form-row">
+                  <label>Latest departure</label>
+                  <input type="time" value={bankLateDep} onChange={e => setBankLateDep(e.target.value)} />
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                <button className="sched-btn-cancel" onClick={() => setShowBankModal(false)}>Cancel</button>
+                <button className="sched-btn-submit" disabled={bankSaving} onClick={saveBank}>
+                  {bankSaving ? 'Saving…' : editingBankId ? 'Save changes' : 'Create bank'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Expansion capacity exceeded modal ── */}
       {slotViolations && (
         <div className="decomm-modal-overlay" onClick={() => setSlotViolations(null)}>
@@ -3673,6 +4087,31 @@ const styles = `
   .ad-grid-del:hover { background: rgba(239,68,68,0.5); border-color: rgba(239,68,68,0.7); }
   .ad-grid-del--maint { color: rgba(255,255,255,0.9); }
   .ad-grid-flight.conflict { outline: 2px solid #FF4444; outline-offset: -2px; }
+  /* Bank plan ghost preview bars */
+  .ad-grid-ghost { position: absolute; left: 2px; right: 2px; border-radius: 3px; padding: 2px 4px; overflow: hidden; z-index: 4; display: flex; flex-direction: column; gap: 1px; pointer-events: none; background: #3b82f6; opacity: 0.42; border: 1.5px dashed #1d4ed8; box-sizing: border-box; }
+  .ad-grid-ghost--maint { background: #9ca3af; border-color: #4b5563; }
+  .ad-grid-ghost .ad-grid-fn, .ad-grid-ghost .ad-grid-rt, .ad-grid-ghost .ad-grid-tm { color: #fff; }
+  /* Bank plan confirm/discard banner */
+  .ad-bank-ghost-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 8px; padding: 10px 14px; background: #eff6ff; border: 1px solid #bfdbfe; border-left: 4px solid #3b82f6; border-radius: 6px; }
+  .ad-bank-ghost-info { font-size: 0.82rem; color: #1e3a5f; }
+  .ad-bank-ghost-note { font-size: 0.72rem; color: #64748b; margin-top: 2px; }
+  .ad-bank-ghost-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  .ad-bank-confirm-btn { background: #2563eb; color: #fff; border: none; padding: 0.5rem 1.1rem; border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer; }
+  .ad-bank-confirm-btn:hover { background: #1d4ed8; }
+  .ad-bank-confirm-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+  /* Banks tab list */
+  .sched-bank-add { float: right; margin-top: -3px; background: none; border: none; color: #2563eb; font-size: 0.7rem; font-weight: 700; cursor: pointer; text-transform: none; letter-spacing: 0; }
+  .sched-bank-hint { font-size: 0.8rem; color: #888; padding: 4px 0; }
+  .sched-bank-return { font-size: 0.8rem; color: #555; margin-top: 6px; }
+  .sched-bank-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid #E0E0E0; border-radius: 6px; margin-bottom: 6px; }
+  .sched-bank-item.selected { border-color: #3b82f6; background: #eff6ff; }
+  .sched-bank-check { display: flex; align-items: center; gap: 6px; cursor: pointer; flex-shrink: 0; }
+  .sched-bank-name { font-weight: 600; font-size: 0.84rem; color: #2C2C2C; }
+  .sched-bank-times { font-size: 0.72rem; color: #666; font-family: monospace; flex: 1; text-align: right; }
+  .sched-bank-item-actions { display: flex; gap: 4px; flex-shrink: 0; }
+  .sched-bank-item-actions button { background: none; border: 1px solid #E0E0E0; border-radius: 4px; width: 22px; height: 22px; cursor: pointer; color: #666; line-height: 1; }
+  .sched-bank-item-actions button:hover { background: #f3f4f6; }
+  .sched-bank-calc-hint { font-size: 0.72rem; color: #888; margin-top: 6px; }
   .ad-grid-fn { font-size: 9px; font-weight: 700; color: white; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
   .ad-grid-rt { font-size: 8px; color: rgba(255,255,255,0.85); white-space: nowrap; overflow: hidden; line-height: 1.2; }
   .ad-grid-tm { font-size: 8px; color: rgba(255,255,255,0.7); white-space: nowrap; overflow: hidden; font-family: monospace; line-height: 1.2; }

@@ -3434,55 +3434,53 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       )}
 
       {showBankModal && (
-        <div className="decomm-modal-overlay" onClick={() => setShowBankModal(false)}>
-          <div className="decomm-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
-            <div className="decomm-modal-head">
-              <h3>{editingBankId ? 'Edit bank' : 'New bank'}</h3>
-              <button className="decomm-modal-close" onClick={() => setShowBankModal(false)}>&times;</button>
+        <div className="sched-modal-overlay" onClick={() => setShowBankModal(false)}>
+          <div className="sched-modal" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+            <div className="sched-modal-header" style={{ background: '#2C2C2C', borderBottom: 'none' }}>
+              <h2 style={{ color: 'white', fontSize: '1rem' }}>{editingBankId ? 'Edit Bank' : 'New Bank'}</h2>
+              <button className="sched-modal-close" style={{ color: 'rgba(255,255,255,0.6)' }} onClick={() => setShowBankModal(false)}>×</button>
             </div>
-            <div className="decomm-modal-body">
+            <div className="sched-modal-body">
               <div className="sched-form-row" style={{ marginBottom: '0.9rem' }}>
-                <label>Name</label>
-                <input type="text" value={bankName} placeholder="e.g. Morning bank" onChange={e => setBankName(e.target.value)} />
+                <label className="bank-modal-label">Bank Name</label>
+                <input type="text" className="bank-modal-inp" value={bankName} placeholder="e.g. Morning bank" onChange={e => setBankName(e.target.value)} />
               </div>
-              <div className="sched-form-row" style={{ marginBottom: '0.9rem' }}>
-                <label>Hub airport</label>
-                <select value={bankHub} onChange={e => setBankHub(e.target.value)}>
+              <div className="sched-form-row" style={{ marginBottom: '1rem' }}>
+                <label className="bank-modal-label">Hub Airport</label>
+                <select className="bank-modal-inp" value={bankHub} onChange={e => setBankHub(e.target.value)}>
                   <option value="">— select hub —</option>
                   {airports.map(ap => (
                     <option key={ap.iata_code} value={ap.iata_code}>{ap.iata_code} – {ap.name}</option>
                   ))}
                 </select>
               </div>
-              <p style={{ fontSize: '0.78rem', color: '#888', margin: '0 0 0.6rem' }}>
-                All times are in game time (the schedule's storage clock), same as the grid before switching to local view.
-              </p>
-              <div className="sched-3col" style={{ marginBottom: '0.5rem' }}>
-                <div className="sched-form-row">
-                  <label>Earliest arrival</label>
-                  <input type="time" value={bankEarlyArr} onChange={e => setBankEarlyArr(e.target.value)} />
-                </div>
-                <div className="sched-form-row">
-                  <label>Latest arrival</label>
-                  <input type="time" value={bankLateArr} onChange={e => setBankLateArr(e.target.value)} />
+
+              <div className="bank-modal-window">
+                <div className="bank-modal-window-hd">Arrival Window</div>
+                <div className="bank-modal-times">
+                  <input type="time" className="bank-modal-inp" value={bankEarlyArr} onChange={e => setBankEarlyArr(e.target.value)} />
+                  <span className="bank-modal-dash">–</span>
+                  <input type="time" className="bank-modal-inp" value={bankLateArr} onChange={e => setBankLateArr(e.target.value)} />
                 </div>
               </div>
-              <div className="sched-3col" style={{ marginBottom: '1rem' }}>
-                <div className="sched-form-row">
-                  <label>Earliest departure</label>
-                  <input type="time" value={bankEarlyDep} onChange={e => setBankEarlyDep(e.target.value)} />
-                </div>
-                <div className="sched-form-row">
-                  <label>Latest departure</label>
-                  <input type="time" value={bankLateDep} onChange={e => setBankLateDep(e.target.value)} />
+              <div className="bank-modal-window">
+                <div className="bank-modal-window-hd">Departure Window</div>
+                <div className="bank-modal-times">
+                  <input type="time" className="bank-modal-inp" value={bankEarlyDep} onChange={e => setBankEarlyDep(e.target.value)} />
+                  <span className="bank-modal-dash">–</span>
+                  <input type="time" className="bank-modal-inp" value={bankLateDep} onChange={e => setBankLateDep(e.target.value)} />
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-                <button className="sched-btn-cancel" onClick={() => setShowBankModal(false)}>Cancel</button>
-                <button className="sched-btn-submit" disabled={bankSaving} onClick={saveBank}>
-                  {bankSaving ? 'Saving…' : editingBankId ? 'Save changes' : 'Create bank'}
-                </button>
+
+              <div style={{ fontSize: '0.76rem', color: '#888', marginTop: '0.9rem', lineHeight: 1.5 }}>
+                Times are in game time (the schedule's storage clock) — the same clock the grid shows before switching to local view.
               </div>
+            </div>
+            <div className="sched-modal-footer">
+              <button className="sched-btn-cancel" onClick={() => setShowBankModal(false)}>Cancel</button>
+              <button className="sched-btn-submit" disabled={bankSaving} onClick={saveBank}>
+                {bankSaving ? 'Saving…' : editingBankId ? 'Save Changes' : 'Create Bank'}
+              </button>
             </div>
           </div>
         </div>
@@ -4112,6 +4110,15 @@ const styles = `
   .sched-bank-item-actions button { background: none; border: 1px solid #E0E0E0; border-radius: 4px; width: 22px; height: 22px; cursor: pointer; color: #666; line-height: 1; }
   .sched-bank-item-actions button:hover { background: #f3f4f6; }
   .sched-bank-calc-hint { font-size: 0.72rem; color: #888; margin-top: 6px; }
+  /* Bank modal fields (match game modal language) */
+  .bank-modal-label { display: block; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #666; margin-bottom: 6px; }
+  .bank-modal-inp { width: 100%; padding: 0.5rem 0.6rem; border: 1px solid #E0E0E0; border-radius: 6px; font-size: 0.88rem; color: #2C2C2C; background: white; box-sizing: border-box; }
+  .bank-modal-inp:focus { outline: none; border-color: #2C2C2C; }
+  .bank-modal-window { background: #F5F5F5; border: 1px solid #E0E0E0; border-radius: 6px; padding: 10px 12px; margin-bottom: 0.75rem; }
+  .bank-modal-window-hd { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #888; margin-bottom: 8px; }
+  .bank-modal-times { display: flex; align-items: center; gap: 10px; }
+  .bank-modal-times .bank-modal-inp { flex: 1; }
+  .bank-modal-dash { color: #999; font-weight: 600; }
   .ad-grid-fn { font-size: 9px; font-weight: 700; color: white; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
   .ad-grid-rt { font-size: 8px; color: rgba(255,255,255,0.85); white-space: nowrap; overflow: hidden; line-height: 1.2; }
   .ad-grid-tm { font-size: 8px; color: rgba(255,255,255,0.7); white-space: nowrap; overflow: hidden; font-family: monospace; line-height: 1.2; }

@@ -327,8 +327,11 @@ export default function LiveFlightMap({
 
       let divNote = '';
       if (f.delay_reason === 'medical' && f.diversion_airport_code) {
-        const medLabel = phaseLabel || `Diverted → ${f.diversion_airport_code}`;
-        divNote = `<div style="margin-top:6px;font-size:0.68rem;font-weight:700;color:#a16207;background:rgba(234,179,8,0.18);border:1px solid rgba(234,179,8,0.4);padding:2px 6px;border-radius:3px;text-transform:uppercase;letter-spacing:0.04em;display:inline-block">${medLabel}</div>`;
+        // Only surface the diversion badge once the aircraft actually peels off
+        // (~30 min out); before that it's a normal-looking cruise.
+        if (medicalOrange && phaseLabel) {
+          divNote = `<div style="margin-top:6px;font-size:0.68rem;font-weight:700;color:#a16207;background:rgba(234,179,8,0.18);border:1px solid rgba(234,179,8,0.4);padding:2px 6px;border-radius:3px;text-transform:uppercase;letter-spacing:0.04em;display:inline-block">${phaseLabel}</div>`;
+        }
       } else if (f.delay_reason === 'medical') {
         divNote = `<div style="margin-top:6px;font-size:0.68rem;font-weight:700;color:#a16207;background:rgba(234,179,8,0.18);border:1px solid rgba(234,179,8,0.4);padding:2px 6px;border-radius:3px;text-transform:uppercase;letter-spacing:0.04em;display:inline-block">Medical diversion</div>`;
       } else if (f.delay_reason === 'technical_air' && phaseLabel) {

@@ -7,8 +7,11 @@
 // the next departure, and extended turnaround at the destination so the return
 // lands inside an arrival window).
 //
-// This is a greedy earliest-fit heuristic. For one aircraft on one route it is
-// optimal or within ±1 round trip of optimal — the right cost for a game.
+// It searches: for each anchor it builds a week two ways — earliest-fit (max
+// count) and minimum-layover (tries different banks per day, pushes idle time to
+// the hub) — then keeps the week with the most effective flights (a maintenance-
+// forced drop counts against it), then least destination layover. Days may differ
+// when that's better; they come out identical when one bank is consistently best.
 //
 // All times are absolute "week minutes": Mon 00:00 = 0 … Sun 23:59 = 10079.
 
@@ -51,28 +54,70 @@ function earliestInWindow(windows, minT) {
   return best;
 }
 
-// Build the round-trip chain anchored at an exact departure instant.
-// oneWay = one-way flight minutes (incl. taxi); turnaround = min ground minutes.
-function buildChain(anchorDep, depWindows, arrWindows, oneWay, turnaround) {
+// Build a round-trip chain anchored at a departure instant.
+//
+// `mode` decides how each rotation's DEPARTURE bank is chosen among the ones
+// reachable at that point:
+//   'earliest'   — take the earliest possible departure (packs tightest → max
+//                  count; but can dump the slack into a long destination layover).
+//   'minlayover' — among departures reachable within the next day, take the one
+//                  whose return lands soonest after the minimum round trip, i.e.
+//                  the smallest destination layover. This makes the planner try
+//                  *different* banks on different days when that lines up better,
+//                  and pushes idle time to the HUB (where maintenance can use it)
+//                  instead of the destination.
+function buildChain(anchorDep, depWindows, arrWindows, oneWay, turnaround, mode) {
   const Lmin = 2 * oneWay + turnaround; // shortest hub-dep → hub-arr round trip
   const limit = anchorDep + WEEK;       // one full cycle; next week's first dep sits at `limit`
   const legs = [];
   let cursor = anchorDep;
-  // Hard cap iterations as a runaway guard.
-  for (let i = 0; i < 1000; i++) {
-    const D = earliestInWindow(depWindows, cursor);
-    if (D === null || D.t >= limit) break;
-    const A = earliestInWindow(arrWindows, D.t + Lmin);
-    if (A === null) break;
-    if (A.t + turnaround > limit) break;  // return + turnaround must close before the cycle wraps
-    legs.push({
-      depWk: D.t, arrWk: A.t,
-      depWin: { lo: D.lo, hi: D.hi },     // absolute bounds the hub departure may move within
-      arrWin: { lo: A.lo, hi: A.hi },     // absolute bounds the hub arrival may move within
-    });
-    cursor = A.t + turnaround;
+
+  for (let i = 0; i < 1000; i++) {       // hard cap as a runaway guard
+    let pick = null;      // best candidate under the mode's rule (within horizon)
+    let earliest = null;  // earliest feasible candidate overall (fallback / earliest mode)
+
+    for (const dw of depWindows) {
+      if (dw.end < cursor) continue;                 // window already passed
+      const D = Math.max(cursor, dw.start);
+      if (D >= limit) continue;                       // would spill into next week
+      const A = earliestInWindow(arrWindows, D + Lmin);
+      if (A === null || A.t + turnaround > limit) continue; // must close before wrap
+      const cand = {
+        depWk: D, arrWk: A.t,
+        depWin: { lo: dw.start, hi: dw.end },
+        arrWin: { lo: A.lo, hi: A.hi },
+        layover: A.t - D - Lmin,                      // idle time beyond the minimum round trip
+      };
+      if (earliest === null || cand.depWk < earliest.depWk) earliest = cand;
+      if (mode === 'minlayover') {
+        // Only weigh departures reachable within ~a day so we never skip a whole
+        // rotation just to shave layover.
+        if (dw.start > cursor + DAY) continue;
+        if (pick === null || cand.layover < pick.layover ||
+            (cand.layover === pick.layover && cand.depWk < pick.depWk)) pick = cand;
+      }
+    }
+
+    const chosen = mode === 'minlayover' ? (pick || earliest) : earliest;
+    if (!chosen) break;
+    legs.push({ depWk: chosen.depWk, arrWk: chosen.arrWk, depWin: chosen.depWin, arrWin: chosen.arrWin });
+    cursor = chosen.arrWk + turnaround;
   }
   return legs;
+}
+
+// Total destination idle time across a chain (idle beyond the minimum round trip).
+function totalLayover(legs, Lmin) {
+  return legs.reduce((s, l) => s + (l.arrWk - l.depWk - Lmin), 0);
+}
+
+// Does a maintenance block fit into some hub gap without dropping a round trip?
+function maintFits(legs, turnaround, duration) {
+  if (!duration) return true;
+  if (!legs.length) return false;
+  const need = duration + 2 * turnaround;
+  const gaps = computeGaps(legs, turnaround);
+  return gaps.some(g => g.size >= need);
 }
 
 // Gaps (in week minutes) available for maintenance between consecutive round
@@ -150,18 +195,36 @@ export function planBanks({ oneWayMinutes, turnaround, banks, maintDuration }) {
   const depWindows = expandWindows(banks, 'earliest_departure', 'latest_departure', 2);
   const arrWindows = expandWindows(banks, 'earliest_arrival', 'latest_arrival', 2);
 
-  // Try anchoring at each bank's departure-window start on day 0. Because windows
-  // repeat daily, these phases cover the distinct chain shapes.
-  let best = [];
+  // Search: anchor at each bank's departure-window start (day 0), and for each
+  // anchor try both strategies. Score every resulting week and keep the best.
+  // Score priority:
+  //   1. effective flights — round trips minus one if maintenance can't fit
+  //      without dropping a rotation (so "maintenance fits" beats "one more flight
+  //      that then gets cut");
+  //   2. least total destination layover (cleaner rhythm, slack at the hub);
+  //   3. earliest first departure (deterministic, Monday-first).
+  let best = null;
   for (const b of banks) {
     const anchor = b.earliest_departure; // day 0
-    const chain = buildChain(anchor, depWindows, arrWindows, oneWay, turnaround);
-    if (chain.length > best.length) best = chain;
+    for (const mode of ['earliest', 'minlayover']) {
+      const chain = buildChain(anchor, depWindows, arrWindows, oneWay, turnaround, mode);
+      if (!chain.length) continue;
+      const fits = maintFits(chain, turnaround, maintDuration);
+      const eff = chain.length - (fits ? 0 : 1);
+      const lay = totalLayover(chain, Lmin);
+      const firstDep = Math.min(...chain.map(l => l.depWk));
+      if (best === null || eff > best.eff ||
+          (eff === best.eff && (lay < best.lay ||
+          (lay === best.lay && firstDep < best.firstDep)))) {
+        best = { chain, eff, lay, firstDep };
+      }
+    }
   }
 
-  if (best.length === 0) {
+  if (!best || best.chain.length === 0) {
     return { roundTrips: [], maintStartWk: null, maintDuration: 0, feasible: false, note: 'No bank-compliant round trip fits' };
   }
+  best = best.chain;
 
   let roundTrips = best;
   let maintStartWk = null;

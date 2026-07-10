@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import AirportLink from '../components/AirportLink.jsx';
 import TopBar from '../components/TopBar.jsx';
 import Toast from '../components/Toast.jsx';
@@ -379,7 +379,11 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [bankBizPrice, setBankBizPrice]   = useState('');
   const [bankFirstPrice, setBankFirstPrice] = useState('');
   const [bankServiceProfileId, setBankServiceProfileId] = useState('');
-  const [bankPlan, setBankPlan]           = useState(null);  // { legs, maintenance, summary }
+  const [bankPlan, setBankPlan]           = useState(null);  // server response { legs, maintenance, summary }
+  const [planLegs, setPlanLegs]           = useState([]);    // editable legs (absolute game week-minutes)
+  const [planMeta, setPlanMeta]           = useState(null);  // { oneWay, turnaround, maintDuration }
+  const dragRef  = useRef(null);
+  const metaRef  = useRef(null);
   const [bankComputing, setBankComputing] = useState(false);
   const [bankConfirming, setBankConfirming] = useState(false);
   // Bank create/edit modal
@@ -603,7 +607,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     } else {
       setBankReturnRouteId('');
     }
-    setBankPlan(null); // route change invalidates any preview
+    setBankPlan(null); setPlanLegs([]); setPlanMeta(null); // route change invalidates any preview
   }, [bankForwardRouteId, routes]);
 
   useEffect(() => {
@@ -767,23 +771,29 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
   // ─── Bank plan ghost preview bars (rendered half-transparent in the grid) ──
 
+  // Convert an absolute game week-minute into a view-shifted bar {day, minuteOfDay}.
+  const wkToView = (wk) => {
+    const dow = Math.floor(wk / 1440) % 7;
+    const mod = ((wk % 1440) + 1440) % 1440;
+    return shiftWeekSlot(dow, mod, viewShiftMin, 'roll');
+  };
+
   const ghostBars = useMemo(() => {
-    if (!bankPlan?.legs) return [];
-    return bankPlan.legs.map((l, i) => {
-      const bDep = parseHM(l.departure_time);
-      const bArr = parseHM(l.arrival_time);
-      const dur  = ((bArr - bDep) + 1440) % 1440 || 1;
-      // Per-airport local wall-clock — from the original Berlin times (same as viewSchedule).
-      const depLocal = localHMFromBerlin(bDep, l.dep_longitude);
-      const arrLocal = localHMFromBerlin(bArr, l.arr_longitude);
-      const sv   = shiftWeekSlot(l.day_of_week, bDep, viewShiftMin, 'roll');
+    return planLegs.map((l, i) => {
+      const dur    = Math.max(1, l.week_arr - l.week_dep);
+      const bDepMod = ((l.week_dep % 1440) + 1440) % 1440;
+      const bArrMod = ((l.week_arr % 1440) + 1440) % 1440;
+      // Per-airport local wall-clock — from the (game) times, same as viewSchedule.
+      const depLocal = localHMFromBerlin(bDepMod, l.dep_longitude);
+      const arrLocal = localHMFromBerlin(bArrMod, l.arr_longitude);
+      const sv     = wkToView(l.week_dep);
       const depMin = sv.minuteOfDay;
       const day    = sv.day;
       const arrMin = (depMin + dur) % 1440;
       const crossesMidnight = depMin + dur > 1440;
       const seg1H = crossesMidnight ? (1440 - depMin) * PX_PER_MIN : dur * PX_PER_MIN;
       return {
-        key: `ghost-${i}`,
+        key: `ghost-${i}`, legIndex: i,
         flight_number: l.flight_number,
         departure_airport: l.departure_airport, arrival_airport: l.arrival_airport,
         departure_time: minutesToHHMM(depMin), arrival_time: minutesToHHMM(arrMin),
@@ -795,24 +805,46 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         overflowHeight:   crossesMidnight ? Math.max(arrMin * PX_PER_MIN, 14) : 0,
       };
     });
-  }, [bankPlan, viewShiftMin]);
+  }, [planLegs, viewShiftMin]);
+
+  // Maintenance placement, recomputed live from the (possibly dragged) legs so the
+  // preview always matches what will be written. Mirrors the backend's largest-gap
+  // rule. Returns the absolute game week-minute start, or null if it no longer fits.
+  const planMaintWk = useMemo(() => {
+    if (!planMeta || !planMeta.maintDuration || planLegs.length < 2) return null;
+    const WK = 7 * 1440, { turnaround, duration = planMeta.maintDuration } = planMeta;
+    const rts = [];
+    for (let k = 0; k + 1 < planLegs.length; k += 2) rts.push({ dep: planLegs[k].week_dep, arr: planLegs[k + 1].week_arr });
+    if (!rts.length) return null;
+    rts.sort((a, b) => a.dep - b.dep);
+    const need = planMeta.maintDuration + 2 * turnaround;
+    let best = null;
+    for (let i = 0; i < rts.length; i++) {
+      const cur = rts[i], nx = rts[(i + 1) % rts.length];
+      const nextDep = i + 1 < rts.length ? nx.dep : nx.dep + WK;
+      const size = nextDep - cur.arr;
+      if (best === null || size > best.size) best = { start: cur.arr, size };
+    }
+    if (best && best.size >= need) return (((best.start + turnaround) % WK) + WK) % WK;
+    return null;
+  }, [planLegs, planMeta]);
 
   const ghostMaint = useMemo(() => {
-    if (!bankPlan?.maintenance) return null;
-    const m = bankPlan.maintenance;
-    const sv = shiftWeekSlot(m.day_of_week, m.start_minutes, viewShiftMin, 'roll');
+    if (planMaintWk == null || !planMeta) return null;
+    const dur = planMeta.maintDuration;
+    const sv = wkToView(planMaintWk);
     const start = sv.minuteOfDay, day = sv.day;
-    const crossesMidnight = start + m.duration_minutes > 1440;
-    const seg1H = crossesMidnight ? (1440 - start) * PX_PER_MIN : m.duration_minutes * PX_PER_MIN;
+    const crossesMidnight = start + dur > 1440;
+    const seg1H = crossesMidnight ? (1440 - start) * PX_PER_MIN : dur * PX_PER_MIN;
     return {
       dayIndex: day,
       top: start * PX_PER_MIN,
       height: Math.max(seg1H, 14),
       overflowDayIndex: crossesMidnight ? (day + 1) % 7 : null,
-      overflowHeight:   crossesMidnight ? (start + m.duration_minutes - 1440) * PX_PER_MIN : 0,
-      start_minutes: start, duration_minutes: m.duration_minutes,
+      overflowHeight:   crossesMidnight ? (start + dur - 1440) * PX_PER_MIN : 0,
+      start_minutes: start, duration_minutes: dur,
     };
-  }, [bankPlan, viewShiftMin]);
+  }, [planMaintWk, planMeta, viewShiftMin]);
 
   const bankForwardRoute = useMemo(
     () => routes.find(r => r.id === parseInt(bankForwardRouteId)) || null,
@@ -1151,6 +1183,8 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
   // ─── Banks planner handlers ──────────────────────────────────────────────
 
+  const clearBankPlan = () => { setBankPlan(null); setPlanLegs([]); setPlanMeta(null); };
+
   const bankPlanBody = (commit) => ({
     forward_route_id: parseInt(bankForwardRouteId),
     return_route_id: parseInt(bankReturnRouteId),
@@ -1172,33 +1206,105 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         method: 'POST', headers: jsonHeaders, body: JSON.stringify(bankPlanBody(false)),
       });
       const data = await res.json();
-      if (!res.ok) { setError(data.error || 'Could not compute plan'); setBankPlan(null); }
-      else setBankPlan(data);
-    } catch { setError('Network error'); setBankPlan(null); }
+      if (!res.ok) { setError(data.error || 'Could not compute plan'); clearBankPlan(); }
+      else {
+        setBankPlan(data);
+        setPlanLegs((data.legs || []).map(l => ({ ...l })));
+        setPlanMeta({ oneWay: data.summary.one_way_minutes, turnaround: data.summary.turnaround, maintDuration: data.summary.maint_duration });
+      }
+    } catch { setError('Network error'); clearBankPlan(); }
     finally { setBankComputing(false); }
   };
 
   const confirmBankPlan = async () => {
-    if (!bankPlan) return;
+    if (!planLegs.length) return;
     if (!bankEcoPrice) { setError('Enter an economy price before writing the plan.'); return; }
     setBankConfirming(true); setError(''); setSuccess('');
     try {
+      // Send the (possibly dragged) legs + maintenance explicitly so what's written
+      // matches the preview exactly.
+      const editedLegs = planLegs.map(l => {
+        const dow = Math.floor(l.week_dep / 1440) % 7;
+        const m = ((l.week_dep % 1440) + 1440) % 1440;
+        return { route_id: l.route_id, day_of_week: dow, departure_time: `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}` };
+      });
+      const editedMaint = planMaintWk != null ? {
+        day_of_week: Math.floor(planMaintWk / 1440) % 7,
+        start_minutes: ((planMaintWk % 1440) + 1440) % 1440,
+        duration_minutes: planMeta.maintDuration,
+      } : null;
       const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/bank-plan`, {
-        method: 'POST', headers: jsonHeaders, body: JSON.stringify(bankPlanBody(true)),
+        method: 'POST', headers: jsonHeaders,
+        body: JSON.stringify({ ...bankPlanBody(true), legs: editedLegs, maintenance: editedMaint }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || 'Could not write plan'); }
-      else { setSuccess(data.message); setBankPlan(null); fetchSchedule(); }
+      else { setSuccess(data.message); clearBankPlan(); fetchSchedule(); }
     } catch { setError('Network error'); }
     finally { setBankConfirming(false); }
   };
 
-  const discardBankPlan = () => { setBankPlan(null); setError(''); };
+  const discardBankPlan = () => { clearBankPlan(); setError(''); };
 
   const toggleBankSelected = (id) => {
-    setBankPlan(null);
+    clearBankPlan();
     setSelectedBankIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]);
   };
+
+  // ─── Drag a ghost leg vertically, clamped to its bank window + neighbours ───
+  useEffect(() => { metaRef.current = planMeta; }, [planMeta]);
+
+  const applyLegDrag = (legs, idx, target, meta) => {
+    if (!meta) return legs;
+    const { oneWay, turnaround } = meta;
+    const WK = 7 * 1440;
+    const n = legs.length;
+    const leg = legs[idx];
+    const next = legs[(idx + 1) % n];
+    const prev = legs[(idx - 1 + n) % n];
+    let lo, hi, val, updated;
+    if (leg.drag === 'dep') {                    // outbound: move hub departure
+      const prevArr = idx > 0 ? prev.week_arr : prev.week_arr - WK;   // previous return leg
+      lo = Math.max(leg.bound_lo, prevArr + turnaround);
+      hi = Math.min(leg.bound_hi, next.week_arr - 2 * oneWay - turnaround); // keep dest wait ≥ turnaround
+      if (hi < lo) return legs;
+      val = Math.max(lo, Math.min(hi, target));
+      updated = { ...leg, week_dep: val, week_arr: val + oneWay };
+    } else {                                      // inbound: move hub arrival
+      const nextDep = idx < n - 1 ? next.week_dep : legs[0].week_dep + WK; // next outbound leg
+      lo = Math.max(leg.bound_lo, prev.week_arr + oneWay + turnaround);    // dest wait after outbound
+      hi = Math.min(leg.bound_hi, nextDep - turnaround);
+      if (hi < lo) return legs;
+      val = Math.max(lo, Math.min(hi, target));
+      updated = { ...leg, week_arr: val, week_dep: val - oneWay };
+    }
+    const out = legs.slice();
+    out[idx] = updated;
+    return out;
+  };
+
+  const onDragMove = useCallback((e) => {
+    const d = dragRef.current; if (!d) return;
+    const deltaMin = Math.round((e.clientY - d.startY) / PX_PER_MIN);
+    setPlanLegs(prev => applyLegDrag(prev, d.idx, d.startVal + deltaMin, metaRef.current));
+  }, []);
+  const onDragUp = useCallback(() => {
+    dragRef.current = null;
+    document.body.style.userSelect = '';
+    window.removeEventListener('mousemove', onDragMove);
+    window.removeEventListener('mouseup', onDragUp);
+  }, [onDragMove]);
+  const onGhostMouseDown = useCallback((e, idx) => {
+    e.preventDefault(); e.stopPropagation();
+    setPlanLegs(prev => {
+      const leg = prev[idx];
+      dragRef.current = { idx, startY: e.clientY, startVal: leg.drag === 'dep' ? leg.week_dep : leg.week_arr };
+      return prev;
+    });
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onDragMove);
+    window.addEventListener('mouseup', onDragUp);
+  }, [onDragMove, onDragUp]);
 
   const openBankModal = (bank = null) => {
     setError('');
@@ -1245,7 +1351,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       const res = await fetch(`${API_URL}/api/banks/${id}`, { method: 'DELETE', headers });
       if (res.ok) {
         setSelectedBankIds(ids => ids.filter(x => x !== id));
-        setBankPlan(null);
+        clearBankPlan();
         fetchBanks();
       }
     } catch {}
@@ -2290,9 +2396,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     ))}
                     {/* Bank plan ghost preview — half-transparent, non-interactive */}
                     {gBars.map(g => (
-                      <div key={g.key} className="ad-grid-ghost"
+                      <div key={g.key} className="ad-grid-ghost ad-grid-ghost--drag"
                         style={{ top: g.top, height: g.height }}
-                        title={`${g.flight_number}: ${g.departure_airport}→${g.arrival_airport}\nDep ${g.departure_time}${g.depLocal ? ` (${g.depLocal} ${g.departure_airport} local)` : ''}\nArr ${g.arrival_time}${g.arrLocal ? ` (${g.arrLocal} ${g.arrival_airport} local)` : ''}`}>
+                        onMouseDown={(e) => onGhostMouseDown(e, g.legIndex)}
+                        title={`${g.flight_number}: ${g.departure_airport}→${g.arrival_airport}\nDrag to shift within the bank\nDep ${g.departure_time}${g.depLocal ? ` (${g.depLocal} ${g.departure_airport} local)` : ''}\nArr ${g.arrival_time}${g.arrLocal ? ` (${g.arrLocal} ${g.arrival_airport} local)` : ''}`}>
                         <span className="ad-grid-fn">{g.flight_number}</span>
                         {g.height > 24 && <span className="ad-grid-rt">{g.departure_airport}→{g.arrival_airport}</span>}
                         {g.height > 38 && <span className="ad-grid-tm">{g.departure_time}{g.depLocal && ` (${g.depLocal})`}</span>}
@@ -3474,7 +3581,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
               </div>
 
               <div style={{ fontSize: '0.76rem', color: '#888', marginTop: '0.9rem', lineHeight: 1.5 }}>
-                Times are in game time (the schedule's storage clock) — the same clock the grid shows before switching to local view.
+                Times are in the hub’s local time — the wall-clock at {bankHub || 'the hub'}, matching the grid’s local-time view.
               </div>
             </div>
             <div className="sched-modal-footer">
@@ -4087,7 +4194,9 @@ const styles = `
   .ad-grid-del--maint { color: rgba(255,255,255,0.9); }
   .ad-grid-flight.conflict { outline: 2px solid #FF4444; outline-offset: -2px; }
   /* Bank plan ghost preview bars — anthracite, dashed, clearly "not yet written" */
-  .ad-grid-ghost { position: absolute; left: 2px; right: 2px; border-radius: 3px; padding: 2px 4px; overflow: hidden; z-index: 4; display: flex; flex-direction: column; gap: 1px; pointer-events: none; background: #2C2C2C; opacity: 0.5; border: 1.5px dashed #2C2C2C; box-sizing: border-box; }
+  .ad-grid-ghost { position: absolute; left: 2px; right: 2px; border-radius: 3px; padding: 2px 4px; overflow: hidden; z-index: 5; display: flex; flex-direction: column; gap: 1px; pointer-events: none; background: #2C2C2C; opacity: 0.5; border: 1.5px dashed #2C2C2C; box-sizing: border-box; }
+  .ad-grid-ghost--drag { pointer-events: auto; cursor: ns-resize; }
+  .ad-grid-ghost--drag:hover { opacity: 0.68; }
   .ad-grid-ghost--maint { background: #6b7280; border-color: #4b5563; }
   .ad-grid-ghost .ad-grid-fn, .ad-grid-ghost .ad-grid-rt, .ad-grid-ghost .ad-grid-tm { color: #fff; }
   /* Bank plan confirm overlay — floats over the grid, dark toolbar language */

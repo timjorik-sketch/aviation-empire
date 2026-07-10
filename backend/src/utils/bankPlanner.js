@@ -36,15 +36,17 @@ function expandWindows(banks, startKey, endKey, weeks) {
   return occ;
 }
 
-// Earliest instant >= minT that lies inside one of the windows. Returns the
-// instant (clamped into the window) or null if none within the expanded range.
+// Earliest instant >= minT that lies inside one of the windows. Returns
+// { t, lo, hi } — the chosen instant plus the absolute bounds of the window it
+// landed in (so callers know how far the endpoint may later be dragged) — or
+// null if none within the expanded range.
 function earliestInWindow(windows, minT) {
   let best = null;
   for (const win of windows) {
     if (win.end < minT) continue;          // window already fully passed
     const cand = Math.max(minT, win.start); // depart/arrive as early as allowed
     if (cand > win.end) continue;           // shouldn't happen given the guard
-    if (best === null || cand < best) best = cand;
+    if (best === null || cand < best.t) best = { t: cand, lo: win.start, hi: win.end };
   }
   return best;
 }
@@ -59,12 +61,16 @@ function buildChain(anchorDep, depWindows, arrWindows, oneWay, turnaround) {
   // Hard cap iterations as a runaway guard.
   for (let i = 0; i < 1000; i++) {
     const D = earliestInWindow(depWindows, cursor);
-    if (D === null || D >= limit) break;
-    const A = earliestInWindow(arrWindows, D + Lmin);
+    if (D === null || D.t >= limit) break;
+    const A = earliestInWindow(arrWindows, D.t + Lmin);
     if (A === null) break;
-    if (A + turnaround > limit) break;    // return + turnaround must close before the cycle wraps
-    legs.push({ depWk: D, arrWk: A });
-    cursor = A + turnaround;
+    if (A.t + turnaround > limit) break;  // return + turnaround must close before the cycle wraps
+    legs.push({
+      depWk: D.t, arrWk: A.t,
+      depWin: { lo: D.lo, hi: D.hi },     // absolute bounds the hub departure may move within
+      arrWin: { lo: A.lo, hi: A.hi },     // absolute bounds the hub arrival may move within
+    });
+    cursor = A.t + turnaround;
   }
   return legs;
 }

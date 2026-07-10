@@ -1817,7 +1817,22 @@ router.post('/:id/bank-plan', authMiddleware, async (req, res) => {
     const oneWay = calculateFlightDuration(fwd.distance_km);
     const maintDuration = bankMaintenanceDuration(ac.max_passengers);
 
-    const plan = planBanks({ oneWayMinutes: oneWay, turnaround, banks, maintDuration });
+    // Bank times are entered in the HUB's local time (the way the player thinks
+    // about waves). Storage/optimisation is in Berlin game time, so shift each
+    // window by the hub's offset vs Berlin (whole-hour longitude approximation —
+    // identical to the frontend's lonOffsetHours). A window that crosses midnight
+    // after the shift is handled by the planner's unwrap.
+    const hubLon = lon.get(fwd.departure_airport);
+    const hubOffsetMin = hubLon != null ? (Math.round(hubLon / 15) - 1) * 60 : 0;
+    const toGame = (localMin) => (((localMin - hubOffsetMin) % 1440) + 1440) % 1440;
+    const gameBanks = banks.map(b => ({
+      earliest_arrival: toGame(b.earliest_arrival),
+      latest_arrival: toGame(b.latest_arrival),
+      earliest_departure: toGame(b.earliest_departure),
+      latest_departure: toGame(b.latest_departure),
+    }));
+
+    const plan = planBanks({ oneWayMinutes: oneWay, turnaround, banks: gameBanks, maintDuration });
     if (!plan.feasible || plan.roundTrips.length === 0) {
       return res.status(400).json({ error: plan.note || 'No feasible plan for these banks', feasible: false });
     }
@@ -1829,7 +1844,10 @@ router.post('/:id/bank-plan', authMiddleware, async (req, res) => {
       return { day, time: `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}` };
     };
 
-    // Build the leg list (2 per round trip: outbound + return)
+    // Build the leg list (2 per round trip: outbound + return). Each leg also
+    // carries its absolute week-minute span and the bank-window bounds of its
+    // draggable endpoint (hub departure for 'out', hub arrival for 'in') so the
+    // client can let the user drag it within the bank.
     const legs = [];
     for (const rt of plan.roundTrips) {
       const out = toDayTime(rt.depWk);
@@ -1839,6 +1857,8 @@ router.post('/:id/bank-plan', authMiddleware, async (req, res) => {
         departure_airport: fwd.departure_airport, arrival_airport: fwd.arrival_airport,
         day_of_week: out.day, departure_time: out.time, arrival_time: outArr.time,
         dep_longitude: lon.get(fwd.departure_airport) ?? null, arr_longitude: lon.get(fwd.arrival_airport) ?? null,
+        week_dep: rt.depWk, week_arr: rt.depWk + oneWay,
+        drag: 'dep', bound_lo: rt.depWin.lo, bound_hi: rt.depWin.hi,
       });
       const inDepWk = rt.arrWk - oneWay;
       const inDep = toDayTime(inDepWk);
@@ -1848,6 +1868,8 @@ router.post('/:id/bank-plan', authMiddleware, async (req, res) => {
         departure_airport: ret.departure_airport, arrival_airport: ret.arrival_airport,
         day_of_week: inDep.day, departure_time: inDep.time, arrival_time: inArr.time,
         dep_longitude: lon.get(ret.departure_airport) ?? null, arr_longitude: lon.get(ret.arrival_airport) ?? null,
+        week_dep: inDepWk, week_arr: rt.arrWk,
+        drag: 'arr', bound_lo: rt.arrWin.lo, bound_hi: rt.arrWin.hi,
       });
     }
 
@@ -1886,6 +1908,60 @@ router.post('/:id/bank-plan', authMiddleware, async (req, res) => {
     const fir = first_price != null && first_price !== '' ? parseFloat(first_price) : null;
     const sp = service_profile_id || null;
 
+    // If the client edited the preview (dragged legs / maintenance), write exactly
+    // what it sends — rebuilt from the two known routes — instead of the freshly
+    // computed plan. Guard with an overlap check so a bad edit can't be persisted.
+    let writeLegs = legs;
+    let writeMaint = maintenance;
+    if (Array.isArray(req.body.legs) && req.body.legs.length) {
+      const routeById = new Map([[fwd.id, fwd], [ret.id, ret]]);
+      writeLegs = req.body.legs.map(l => {
+        const r = routeById.get(l.route_id);
+        if (!r) throw new Error('edited leg references an unknown route');
+        const dow = parseInt(l.day_of_week);
+        const [dh, dm] = String(l.departure_time).split(':').map(Number);
+        const durationMin = calculateFlightDuration(r.distance_km);
+        const arrTot = dh * 60 + dm + durationMin;
+        const arrTime = `${String(Math.floor(arrTot % 1440 / 60)).padStart(2, '0')}:${String(arrTot % 60).padStart(2, '0')}`;
+        return {
+          route_id: r.id, flight_number: r.flight_number,
+          departure_airport: r.departure_airport, arrival_airport: r.arrival_airport,
+          day_of_week: dow, departure_time: `${String(dh).padStart(2, '0')}:${String(dm).padStart(2, '0')}`,
+          arrival_time: arrTime,
+        };
+      });
+      const em = req.body.maintenance;
+      writeMaint = em && em.duration_minutes
+        ? { day_of_week: parseInt(em.day_of_week), start_minutes: parseInt(em.start_minutes), duration_minutes: parseInt(em.duration_minutes) }
+        : null;
+
+      // Overlap guard (week-/midnight-aware, turnaround-padded) — same rules the
+      // schedule endpoint enforces, so an edited plan can't write conflicts.
+      const spans = writeLegs.map(l => {
+        const [dh, dm] = l.departure_time.split(':').map(Number);
+        const [ah, am] = l.arrival_time.split(':').map(Number);
+        const depWk = l.day_of_week * 1440 + dh * 60 + dm;
+        let arrMin = ah * 60 + am; if (arrMin <= dh * 60 + dm) arrMin += 1440;
+        return { depWk, arrWk: l.day_of_week * 1440 + arrMin };
+      });
+      for (let i = 0; i < spans.length; i++) {
+        for (let j = i + 1; j < spans.length; j++) {
+          if (flightsOverlapWeekly(spans[i].depWk, spans[i].arrWk, spans[j].depWk, spans[j].arrWk, turnaround)) {
+            return res.status(400).json({ error: 'Edited plan has overlapping flights — adjust and retry' });
+          }
+        }
+      }
+      if (writeMaint) {
+        const mS = writeMaint.day_of_week * 1440 + writeMaint.start_minutes;
+        const mE = mS + writeMaint.duration_minutes;
+        for (const s of spans) {
+          if (flightOverlapsMaintenance(s.depWk, s.arrWk, turnaround, mS, mE)) {
+            return res.status(400).json({ error: 'Maintenance overlaps a flight in the edited plan' });
+          }
+        }
+      }
+    }
+
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -1898,7 +1974,7 @@ router.post('/:id/bank-plan', authMiddleware, async (req, res) => {
       const values = [];
       const placeholders = [];
       let idx = 1;
-      for (const l of legs) {
+      for (const l of writeLegs) {
         placeholders.push(`($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`);
         values.push(aircraftId, l.day_of_week, l.flight_number, l.departure_airport, l.arrival_airport,
           l.departure_time, l.arrival_time, eco, biz, fir, l.route_id, sp);
@@ -1910,20 +1986,20 @@ router.post('/:id/bank-plan', authMiddleware, async (req, res) => {
         VALUES ${placeholders.join(', ')}
       `, values);
 
-      if (maintenance) {
+      if (writeMaint) {
         // Mirror maintenance.js: pre-mark last_completed_at if this week's slot
         // already passed so the processor bills it next week, not instantly.
         const now = new Date();
         const jsDay = now.getDay();
         const currentDow = jsDay === 0 ? 6 : jsDay - 1;
         const currentWeekMin = currentDow * 1440 + now.getHours() * 60 + now.getMinutes();
-        const trigger = maintenance.day_of_week * 1440 + maintenance.start_minutes;
+        const trigger = writeMaint.day_of_week * 1440 + writeMaint.start_minutes;
         const alreadyPassed = currentWeekMin >= trigger;
         await client.query(`
           INSERT INTO maintenance_schedule
             (aircraft_id, airline_id, day_of_week, start_minutes, duration_minutes, type, status, last_completed_at)
           VALUES ($1, $2, $3, $4, $5, 'routine', 'scheduled', $6)
-        `, [aircraftId, airlineId, maintenance.day_of_week, maintenance.start_minutes, maintenance.duration_minutes,
+        `, [aircraftId, airlineId, writeMaint.day_of_week, writeMaint.start_minutes, writeMaint.duration_minutes,
             alreadyPassed ? now.toISOString() : null]);
       }
 
@@ -1940,8 +2016,8 @@ router.post('/:id/bank-plan', authMiddleware, async (req, res) => {
     await syncRoutePrices(ret.id, eco, biz, fir, sp);
 
     res.status(201).json({
-      message: `Bank plan written: ${legs.length} flight(s)${maintenance ? ' + 1 maintenance block' : ''}`,
-      legs, maintenance, summary,
+      message: `Bank plan written: ${writeLegs.length} flight(s)${writeMaint ? ' + 1 maintenance block' : ''}`,
+      legs: writeLegs, maintenance: writeMaint, summary,
     });
   } catch (error) {
     console.error('Bank plan error:', error);

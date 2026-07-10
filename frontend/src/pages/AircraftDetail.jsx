@@ -773,6 +773,9 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       const bDep = parseHM(l.departure_time);
       const bArr = parseHM(l.arrival_time);
       const dur  = ((bArr - bDep) + 1440) % 1440 || 1;
+      // Per-airport local wall-clock — from the original Berlin times (same as viewSchedule).
+      const depLocal = localHMFromBerlin(bDep, l.dep_longitude);
+      const arrLocal = localHMFromBerlin(bArr, l.arr_longitude);
       const sv   = shiftWeekSlot(l.day_of_week, bDep, viewShiftMin, 'roll');
       const depMin = sv.minuteOfDay;
       const day    = sv.day;
@@ -784,6 +787,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         flight_number: l.flight_number,
         departure_airport: l.departure_airport, arrival_airport: l.arrival_airport,
         departure_time: minutesToHHMM(depMin), arrival_time: minutesToHHMM(arrMin),
+        depLocal, arrLocal,
         dayIndex: day,
         top: depMin * PX_PER_MIN,
         height: Math.max(seg1H, 14),
@@ -2117,19 +2121,12 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
             <button className="ad-btn-clear-sched" onClick={handleClearSchedule}>Clear All</button>
           </div>
           {bankPlan && (
-            <div className="ad-bank-ghost-bar">
-              <div className="ad-bank-ghost-info">
-                <strong>Bank plan preview</strong> — {bankPlan.summary.round_trips} round trip(s)
-                {bankPlan.maintenance ? ' + 1 maintenance block' : ''} · {bankPlan.summary.total_flight_hours}h/week
-                {bankPlan.summary.note && <div className="ad-bank-ghost-note">{bankPlan.summary.note}</div>}
-                <div className="ad-bank-ghost-note">Confirming replaces this aircraft's entire weekly schedule. The aircraft must be grounded.</div>
-              </div>
-              <div className="ad-bank-ghost-actions">
-                <button className="ad-btn-clear-sched" onClick={discardBankPlan}>Discard</button>
-                <button className="ad-bank-confirm-btn" disabled={bankConfirming} onClick={confirmBankPlan}>
-                  {bankConfirming ? 'Writing…' : 'Confirm & write'}
-                </button>
-              </div>
+            <div className="ad-bank-overlay">
+              <span className="ad-bank-overlay-label">Bank Plan Preview</span>
+              <button className="ad-btn-clear-sched" onClick={discardBankPlan}>Discard</button>
+              <button className="ad-bank-confirm-btn" disabled={bankConfirming} onClick={confirmBankPlan}>
+                {bankConfirming ? 'Writing…' : 'Confirm & write'}
+              </button>
             </div>
           )}
           <div className="ad-grid-header">
@@ -2295,10 +2292,11 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     {gBars.map(g => (
                       <div key={g.key} className="ad-grid-ghost"
                         style={{ top: g.top, height: g.height }}
-                        title={`${g.flight_number}: ${g.departure_airport}→${g.arrival_airport}\nDep ${g.departure_time}  Arr ${g.arrival_time}`}>
+                        title={`${g.flight_number}: ${g.departure_airport}→${g.arrival_airport}\nDep ${g.departure_time}${g.depLocal ? ` (${g.depLocal} ${g.departure_airport} local)` : ''}\nArr ${g.arrival_time}${g.arrLocal ? ` (${g.arrLocal} ${g.arrival_airport} local)` : ''}`}>
                         <span className="ad-grid-fn">{g.flight_number}</span>
                         {g.height > 24 && <span className="ad-grid-rt">{g.departure_airport}→{g.arrival_airport}</span>}
-                        {g.height > 38 && <span className="ad-grid-tm">{g.departure_time}</span>}
+                        {g.height > 38 && <span className="ad-grid-tm">{g.departure_time}{g.depLocal && ` (${g.depLocal})`}</span>}
+                        {g.height > 50 && <span className="ad-grid-tm">{g.arrival_time}{g.arrLocal && ` (${g.arrLocal})`}</span>}
                       </div>
                     ))}
                     {gOverflowBars.map(g => (
@@ -2697,9 +2695,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                       <input type="checkbox" checked={selectedBankIds.includes(b.id)} onChange={() => toggleBankSelected(b.id)} />
                       <span className="sched-bank-name">{b.name}</span>
                     </label>
-                    <span className="sched-bank-times">
-                      Arr {minutesToHHMM(b.earliest_arrival)}–{minutesToHHMM(b.latest_arrival)} · Dep {minutesToHHMM(b.earliest_departure)}–{minutesToHHMM(b.latest_departure)}
-                    </span>
                     <span className="sched-bank-item-actions">
                       <button onClick={() => openBankModal(b)} title="Edit bank">✎</button>
                       <button onClick={() => deleteBank(b.id)} title="Delete bank">×</button>
@@ -3456,7 +3451,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
               </div>
 
               <div className="bank-modal-window">
-                <div className="bank-modal-window-hd">Arrival Window</div>
+                <div className="bank-modal-window-hd">
+                  Arrival Window
+                  {parseHM(bankLateArr) < parseHM(bankEarlyArr) && <span className="bank-modal-nextday">latest is next day</span>}
+                </div>
                 <div className="bank-modal-times">
                   <input type="time" className="bank-modal-inp" value={bankEarlyArr} onChange={e => setBankEarlyArr(e.target.value)} />
                   <span className="bank-modal-dash">–</span>
@@ -3464,7 +3462,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                 </div>
               </div>
               <div className="bank-modal-window">
-                <div className="bank-modal-window-hd">Departure Window</div>
+                <div className="bank-modal-window-hd">
+                  Departure Window
+                  {parseHM(bankLateDep) < parseHM(bankEarlyDep) && <span className="bank-modal-nextday">latest is next day</span>}
+                </div>
                 <div className="bank-modal-times">
                   <input type="time" className="bank-modal-inp" value={bankEarlyDep} onChange={e => setBankEarlyDep(e.target.value)} />
                   <span className="bank-modal-dash">–</span>
@@ -4089,14 +4090,12 @@ const styles = `
   .ad-grid-ghost { position: absolute; left: 2px; right: 2px; border-radius: 3px; padding: 2px 4px; overflow: hidden; z-index: 4; display: flex; flex-direction: column; gap: 1px; pointer-events: none; background: #2C2C2C; opacity: 0.5; border: 1.5px dashed #2C2C2C; box-sizing: border-box; }
   .ad-grid-ghost--maint { background: #6b7280; border-color: #4b5563; }
   .ad-grid-ghost .ad-grid-fn, .ad-grid-ghost .ad-grid-rt, .ad-grid-ghost .ad-grid-tm { color: #fff; }
-  /* Bank plan confirm/discard banner */
-  .ad-bank-ghost-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 8px; padding: 10px 14px; background: #F5F5F5; border: 1px solid #E0E0E0; border-left: 4px solid #2C2C2C; border-radius: 6px; }
-  .ad-bank-ghost-info { font-size: 0.82rem; color: #2C2C2C; }
-  .ad-bank-ghost-note { font-size: 0.72rem; color: #888; margin-top: 2px; }
-  .ad-bank-ghost-actions { display: flex; gap: 8px; flex-shrink: 0; }
-  .ad-bank-confirm-btn { background: #2C2C2C; color: #fff; border: none; padding: 0.5rem 1.1rem; border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer; transition: background 0.15s; }
-  .ad-bank-confirm-btn:hover { background: #444; }
-  .ad-bank-confirm-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+  /* Bank plan confirm overlay — floats over the grid, dark toolbar language */
+  .ad-bank-overlay { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 12px; background: #2C2C2C; padding: 8px 10px 8px 16px; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.28); }
+  .ad-bank-overlay-label { color: white; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
+  .ad-bank-confirm-btn { background: white; color: #2C2C2C; border: none; padding: 0.4rem 1.05rem; border-radius: 5px; font-weight: 700; font-size: 0.82rem; cursor: pointer; transition: background 0.15s; }
+  .ad-bank-confirm-btn:hover { background: #EDEDED; }
+  .ad-bank-confirm-btn:disabled { opacity: 0.55; cursor: not-allowed; }
   /* Banks tab list */
   .sched-bank-add { float: right; margin-top: -4px; background: transparent; border: 1px solid #CCCCCC; color: #555555; padding: 0.18rem 0.6rem; border-radius: 4px; font-size: 0.68rem; font-weight: 600; cursor: pointer; letter-spacing: 0.03em; text-transform: none; transition: all 0.15s; }
   .sched-bank-add:hover { background: #2C2C2C; border-color: #2C2C2C; color: #fff; }
@@ -4104,10 +4103,9 @@ const styles = `
   .sched-bank-return { font-size: 0.8rem; color: #555; margin-top: 6px; }
   .sched-bank-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid #E0E0E0; border-radius: 6px; margin-bottom: 6px; }
   .sched-bank-item.selected { border-color: #2C2C2C; background: #F5F5F5; }
-  .sched-bank-check { display: flex; align-items: center; gap: 6px; cursor: pointer; flex-shrink: 0; }
+  .sched-bank-check { display: flex; align-items: center; gap: 8px; cursor: pointer; flex: 1; min-width: 0; }
   .sched-bank-check input { accent-color: #2C2C2C; }
-  .sched-bank-name { font-weight: 600; font-size: 0.84rem; color: #2C2C2C; }
-  .sched-bank-times { font-size: 0.72rem; color: #666; font-family: monospace; flex: 1; text-align: right; }
+  .sched-bank-name { font-weight: 600; font-size: 0.86rem; color: #2C2C2C; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .sched-bank-item-actions { display: flex; gap: 4px; flex-shrink: 0; }
   .sched-bank-item-actions button { background: none; border: 1px solid #E0E0E0; border-radius: 4px; width: 22px; height: 22px; cursor: pointer; color: #666; line-height: 1; }
   .sched-bank-item-actions button:hover { background: #F5F5F5; border-color: #CCCCCC; }
@@ -4116,7 +4114,8 @@ const styles = `
   .bank-modal-inp { width: 100%; padding: 0.5rem 0.6rem; border: 1px solid #E0E0E0; border-radius: 6px; font-size: 0.88rem; color: #2C2C2C; background: white; box-sizing: border-box; }
   .bank-modal-inp:focus { outline: none; border-color: #2C2C2C; }
   .bank-modal-window { background: #F5F5F5; border: 1px solid #E0E0E0; border-radius: 6px; padding: 10px 12px; margin-bottom: 0.75rem; }
-  .bank-modal-window-hd { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #888; margin-bottom: 8px; }
+  .bank-modal-window-hd { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #888; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+  .bank-modal-nextday { font-size: 0.62rem; font-weight: 700; color: #a16207; background: rgba(234,179,8,0.15); border: 1px solid rgba(234,179,8,0.35); padding: 1px 6px; border-radius: 3px; letter-spacing: 0.02em; text-transform: none; }
   .bank-modal-times { display: flex; align-items: center; gap: 10px; }
   .bank-modal-times .bank-modal-inp { flex: 1; }
   .bank-modal-dash { color: #999; font-weight: 600; }

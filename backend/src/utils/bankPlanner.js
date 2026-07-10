@@ -24,7 +24,12 @@ function expandWindows(banks, startKey, endKey, weeks) {
   const totalDays = weeks * 7;
   for (let d = 0; d < totalDays; d++) {
     for (const b of banks) {
-      occ.push({ start: d * DAY + b[startKey], end: d * DAY + b[endKey] });
+      const s = b[startKey];
+      let e = b[endKey];
+      // Night window (end earlier than start) crosses midnight → its end is on
+      // the following day, so unwrap by +1 day.
+      if (e < s) e += DAY;
+      occ.push({ start: d * DAY + s, end: d * DAY + e });
     }
   }
   occ.sort((a, z) => a.start - z.start);

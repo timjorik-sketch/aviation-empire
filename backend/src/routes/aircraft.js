@@ -1790,8 +1790,9 @@ router.post('/:id/bank-plan', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: `Route exceeds aircraft range (${fwd.distance_km}km > ${ac.range_km}km)` });
     }
     const airports = [fwd.departure_airport, fwd.arrival_airport];
-    const apRes = await pool.query(`SELECT iata_code, runway_length_m FROM airports WHERE iata_code = ANY($1)`, [airports]);
+    const apRes = await pool.query(`SELECT iata_code, runway_length_m, longitude FROM airports WHERE iata_code = ANY($1)`, [airports]);
     const rwy = new Map(apRes.rows.map(r => [r.iata_code, r.runway_length_m]));
+    const lon = new Map(apRes.rows.map(r => [r.iata_code, r.longitude]));
     for (const code of airports) {
       const len = rwy.get(code) ?? 0;
       if (ac.min_runway_takeoff_m && len < ac.min_runway_takeoff_m) {
@@ -1837,6 +1838,7 @@ router.post('/:id/bank-plan', authMiddleware, async (req, res) => {
         direction: 'out', route_id: fwd.id, flight_number: fwd.flight_number,
         departure_airport: fwd.departure_airport, arrival_airport: fwd.arrival_airport,
         day_of_week: out.day, departure_time: out.time, arrival_time: outArr.time,
+        dep_longitude: lon.get(fwd.departure_airport) ?? null, arr_longitude: lon.get(fwd.arrival_airport) ?? null,
       });
       const inDepWk = rt.arrWk - oneWay;
       const inDep = toDayTime(inDepWk);
@@ -1845,6 +1847,7 @@ router.post('/:id/bank-plan', authMiddleware, async (req, res) => {
         direction: 'in', route_id: ret.id, flight_number: ret.flight_number,
         departure_airport: ret.departure_airport, arrival_airport: ret.arrival_airport,
         day_of_week: inDep.day, departure_time: inDep.time, arrival_time: inArr.time,
+        dep_longitude: lon.get(ret.departure_airport) ?? null, arr_longitude: lon.get(ret.arrival_airport) ?? null,
       });
     }
 

@@ -28,8 +28,9 @@ function validateBank(body) {
   if (ea === null || la === null || ed === null || ld === null) {
     return { error: 'All four times (earliest/latest arrival & departure) are required as minutes 0–1439' };
   }
-  if (la < ea) return { error: 'Latest arrival must be ≥ earliest arrival' };
-  if (ld < ed) return { error: 'Latest departure must be ≥ earliest departure' };
+  // A "latest" earlier than its "earliest" is a night window that crosses
+  // midnight (e.g. 23:30 → 02:30 the next day) — allowed. The optimizer
+  // unwraps it by treating the end as +1 day.
 
   return {
     value: {

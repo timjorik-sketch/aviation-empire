@@ -587,7 +587,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     }
   }, [outRouteId]);
 
-  // Banks planner: auto-pick the reverse route for the chosen outbound.
+  // Banks planner: auto-pick the reverse route + load the route's saved pricing.
   useEffect(() => {
     if (bankForwardRouteId) {
       const out = routes.find(r => r.id === parseInt(bankForwardRouteId));
@@ -596,6 +596,9 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
           r.departure_airport === out.arrival_airport && r.arrival_airport === out.departure_airport
         );
         setBankReturnRouteId(reverse ? String(reverse.id) : '');
+        setBankEcoPrice(out.economy_price ? String(out.economy_price) : '');
+        if (hasBusiness) setBankBizPrice(out.business_price ? String(out.business_price) : '');
+        if (hasFirst)    setBankFirstPrice(out.first_price   ? String(out.first_price)   : '');
       }
     } else {
       setBankReturnRouteId('');
@@ -2300,7 +2303,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     ))}
                     {gOverflowBars.map(g => (
                       <div key={`${g.key}-ov`} className="ad-grid-ghost"
-                        style={{ top: 0, height: g.overflowHeight, borderTop: '2px dashed #1d4ed8' }}
+                        style={{ top: 0, height: g.overflowHeight, borderTop: '2px dashed #2C2C2C' }}
                         title={`${g.flight_number}: ${g.departure_airport}→${g.arrival_airport} (cont.)`}>
                         <span className="ad-grid-fn">{g.flight_number}</span>
                         {g.overflowHeight > 24 && <span className="ad-grid-rt">→{g.arrival_airport}</span>}
@@ -2681,12 +2684,12 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
               <div className="sched-section-hd">
                 Banks at {bankHubCode || 'the hub'}
-                <button className="sched-bank-add" onClick={() => openBankModal(null)}>+ New bank</button>
+                <button className="sched-bank-add" onClick={() => openBankModal(null)}>+ New Bank</button>
               </div>
               <div className="sched-section-body">
                 {!bankHubCode && <div className="sched-bank-hint">Select an outbound route to see the banks at its hub.</div>}
                 {bankHubCode && visibleBanks.length === 0 && (
-                  <div className="sched-bank-hint">No banks defined at {bankHubCode} yet. Create one with “+ New bank”.</div>
+                  <div className="sched-bank-hint">No banks defined at {bankHubCode} yet. Create one with “+ New Bank”.</div>
                 )}
                 {bankHubCode && visibleBanks.map(b => (
                   <div key={b.id} className={`sched-bank-item ${selectedBankIds.includes(b.id) ? 'selected' : ''}`}>
@@ -2743,11 +2746,8 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
               <div className="sched-form-actions">
                 <button className="sched-btn-submit" onClick={computeBankPlan}
                   disabled={bankComputing || !bankForwardRouteId || !bankReturnRouteId || selectedBankIds.length === 0 || !routeInRange(bankForwardRouteId)}>
-                  {bankComputing ? 'Calculating…' : 'Calculate plan'}
+                  {bankComputing ? 'Calculating…' : 'Calculate Plan'}
                 </button>
-                <div className="sched-bank-calc-hint">
-                  Generates a half-transparent preview in the grid. Nothing is written until you confirm it above the grid.
-                </div>
               </div>
             </div>
           )}
@@ -4085,31 +4085,32 @@ const styles = `
   .ad-grid-del:hover { background: rgba(239,68,68,0.5); border-color: rgba(239,68,68,0.7); }
   .ad-grid-del--maint { color: rgba(255,255,255,0.9); }
   .ad-grid-flight.conflict { outline: 2px solid #FF4444; outline-offset: -2px; }
-  /* Bank plan ghost preview bars */
-  .ad-grid-ghost { position: absolute; left: 2px; right: 2px; border-radius: 3px; padding: 2px 4px; overflow: hidden; z-index: 4; display: flex; flex-direction: column; gap: 1px; pointer-events: none; background: #3b82f6; opacity: 0.42; border: 1.5px dashed #1d4ed8; box-sizing: border-box; }
-  .ad-grid-ghost--maint { background: #9ca3af; border-color: #4b5563; }
+  /* Bank plan ghost preview bars — anthracite, dashed, clearly "not yet written" */
+  .ad-grid-ghost { position: absolute; left: 2px; right: 2px; border-radius: 3px; padding: 2px 4px; overflow: hidden; z-index: 4; display: flex; flex-direction: column; gap: 1px; pointer-events: none; background: #2C2C2C; opacity: 0.5; border: 1.5px dashed #2C2C2C; box-sizing: border-box; }
+  .ad-grid-ghost--maint { background: #6b7280; border-color: #4b5563; }
   .ad-grid-ghost .ad-grid-fn, .ad-grid-ghost .ad-grid-rt, .ad-grid-ghost .ad-grid-tm { color: #fff; }
   /* Bank plan confirm/discard banner */
-  .ad-bank-ghost-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 8px; padding: 10px 14px; background: #eff6ff; border: 1px solid #bfdbfe; border-left: 4px solid #3b82f6; border-radius: 6px; }
-  .ad-bank-ghost-info { font-size: 0.82rem; color: #1e3a5f; }
-  .ad-bank-ghost-note { font-size: 0.72rem; color: #64748b; margin-top: 2px; }
+  .ad-bank-ghost-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 8px; padding: 10px 14px; background: #F5F5F5; border: 1px solid #E0E0E0; border-left: 4px solid #2C2C2C; border-radius: 6px; }
+  .ad-bank-ghost-info { font-size: 0.82rem; color: #2C2C2C; }
+  .ad-bank-ghost-note { font-size: 0.72rem; color: #888; margin-top: 2px; }
   .ad-bank-ghost-actions { display: flex; gap: 8px; flex-shrink: 0; }
-  .ad-bank-confirm-btn { background: #2563eb; color: #fff; border: none; padding: 0.5rem 1.1rem; border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer; }
-  .ad-bank-confirm-btn:hover { background: #1d4ed8; }
+  .ad-bank-confirm-btn { background: #2C2C2C; color: #fff; border: none; padding: 0.5rem 1.1rem; border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer; transition: background 0.15s; }
+  .ad-bank-confirm-btn:hover { background: #444; }
   .ad-bank-confirm-btn:disabled { opacity: 0.6; cursor: not-allowed; }
   /* Banks tab list */
-  .sched-bank-add { float: right; margin-top: -3px; background: none; border: none; color: #2563eb; font-size: 0.7rem; font-weight: 700; cursor: pointer; text-transform: none; letter-spacing: 0; }
+  .sched-bank-add { float: right; margin-top: -4px; background: transparent; border: 1px solid #CCCCCC; color: #555555; padding: 0.18rem 0.6rem; border-radius: 4px; font-size: 0.68rem; font-weight: 600; cursor: pointer; letter-spacing: 0.03em; text-transform: none; transition: all 0.15s; }
+  .sched-bank-add:hover { background: #2C2C2C; border-color: #2C2C2C; color: #fff; }
   .sched-bank-hint { font-size: 0.8rem; color: #888; padding: 4px 0; }
   .sched-bank-return { font-size: 0.8rem; color: #555; margin-top: 6px; }
   .sched-bank-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid #E0E0E0; border-radius: 6px; margin-bottom: 6px; }
-  .sched-bank-item.selected { border-color: #3b82f6; background: #eff6ff; }
+  .sched-bank-item.selected { border-color: #2C2C2C; background: #F5F5F5; }
   .sched-bank-check { display: flex; align-items: center; gap: 6px; cursor: pointer; flex-shrink: 0; }
+  .sched-bank-check input { accent-color: #2C2C2C; }
   .sched-bank-name { font-weight: 600; font-size: 0.84rem; color: #2C2C2C; }
   .sched-bank-times { font-size: 0.72rem; color: #666; font-family: monospace; flex: 1; text-align: right; }
   .sched-bank-item-actions { display: flex; gap: 4px; flex-shrink: 0; }
   .sched-bank-item-actions button { background: none; border: 1px solid #E0E0E0; border-radius: 4px; width: 22px; height: 22px; cursor: pointer; color: #666; line-height: 1; }
-  .sched-bank-item-actions button:hover { background: #f3f4f6; }
-  .sched-bank-calc-hint { font-size: 0.72rem; color: #888; margin-top: 6px; }
+  .sched-bank-item-actions button:hover { background: #F5F5F5; border-color: #CCCCCC; }
   /* Bank modal fields (match game modal language) */
   .bank-modal-label { display: block; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #666; margin-bottom: 6px; }
   .bank-modal-inp { width: 100%; padding: 0.5rem 0.6rem; border: 1px solid #E0E0E0; border-radius: 6px; font-size: 0.88rem; color: #2C2C2C; background: white; box-sizing: border-box; }

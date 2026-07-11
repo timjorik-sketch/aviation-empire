@@ -125,6 +125,24 @@ function localHMFromBerlin(berlinMin, lon) {
   return minsToHM(berlinMin + (off - BERLIN_LON_OFFSET) * 60);
 }
 
+// Clamp a maintenance start (absolute week-min) to the nearest valid spot: it
+// must sit inside some idle gap, turnaround-padded on both sides. Lets the block
+// be dragged and "snap" to the next fitting gap. Returns null if none fits.
+function clampMaint(target, gaps, duration, turnaround) {
+  const ivs = gaps
+    .filter(g => g.size >= duration + 2 * turnaround)
+    .map(g => ({ lo: g.start + turnaround, hi: g.start + g.size - duration - turnaround }))
+    .sort((a, b) => a.lo - b.lo);
+  if (!ivs.length) return null;
+  for (const iv of ivs) if (target >= iv.lo && target <= iv.hi) return target;
+  let best = ivs[0].lo, bd = Infinity;
+  for (const iv of ivs) for (const b of [iv.lo, iv.hi]) {
+    const dd = Math.abs(b - target);
+    if (dd < bd) { bd = dd; best = b; }
+  }
+  return best;
+}
+
 function formatHours(min) {
   if (!min) return '0m';
   const m = Math.round(min);
@@ -314,6 +332,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [schedule, setSchedule]     = useState([]);  // weekly_schedule entries
   const [maintenance, setMaintenance] = useState([]);
   const [isActive, setIsActive] = useState(0);
+  const [shiftingDay, setShiftingDay] = useState(false);  // ±1D whole-schedule rotation in progress
   // Show the weekly grid in the aircraft's home-base local time (vs raw game time).
   const [viewLocal, setViewLocal] = useState(true);
   // Cabin profile change warning modal state
@@ -382,6 +401,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [bankPlan, setBankPlan]           = useState(null);  // server response { legs, maintenance, summary }
   const [planLegs, setPlanLegs]           = useState([]);    // editable legs (absolute game week-minutes)
   const [planMeta, setPlanMeta]           = useState(null);  // { oneWay, turnaround, maintDuration }
+  const [maintOverride, setMaintOverride] = useState(null);  // dragged maintenance start (raw plan week-min), or null=auto
   const dragRef  = useRef(null);
   const metaRef  = useRef(null);
   const [bankComputing, setBankComputing] = useState(false);
@@ -1394,6 +1414,63 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     } catch (err) { setError(err.message); }
   };
 
+  // Rotate the ENTIRE weekly schedule (flights + maintenance) by ±1 day. The shift
+  // is rigid and rolling — everything keeps its time-of-day, and Monday wraps to
+  // Sunday (−1D) / Sunday wraps to Monday (+1D). Because it's a uniform full-day
+  // rotation, relative spacing (and therefore conflict/overlap status) is preserved
+  // in any timezone view, so we operate directly on the raw stored game-time rows.
+  const handleShiftDay = async (dir) => {
+    if (isActive) { setError('Aircraft must be inactive to edit schedule. Deactivate the aircraft first.'); return; }
+    if (schedule.length === 0 && maintenance.length === 0) { setError('Nothing to shift — the weekly schedule is empty.'); return; }
+    const shift = dir * 1440;  // one whole day, signed
+    setShiftingDay(true); setError(''); setSuccess('');
+    // Snapshot before we clear, so a failed re-post never loses the schedule silently.
+    const srcSchedule  = schedule.map(e => ({ ...e }));
+    const srcMaint     = maintenance.map(m => ({ ...m }));
+    try {
+      const clearRes  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/schedule`, { method: 'DELETE', headers });
+      const clearData = await clearRes.json();
+      if (!clearRes.ok) throw new Error(clearData.error);
+
+      const flights = srcSchedule.map(e => {
+        const s = shiftWeekSlot(e.day_of_week, parseHM(e.departure_time), shift, 'roll');
+        return {
+          route_id: e.route_id,
+          day_of_week: s.day,
+          departure_time: minutesToHHMM(s.minuteOfDay),
+          economy_price: e.economy_price,
+          business_price: e.business_price,
+          first_price: e.first_price,
+          service_profile_id: e.service_profile_id,
+        };
+      });
+      if (flights.length) {
+        const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/schedule`, {
+          method: 'POST', headers: jsonHeaders, body: JSON.stringify({ flights }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to shift flights');
+      }
+
+      let maintFailed = 0;
+      for (const mt of srcMaint) {
+        const s = shiftWeekSlot(mt.day_of_week, mt.start_minutes, shift, 'roll');
+        const res = await fetch(`${API_URL}/api/maintenance`, {
+          method: 'POST', headers: jsonHeaders,
+          body: JSON.stringify({ aircraft_id: aircraftId, day_of_week: s.day, start_time: minutesToHHMM(s.minuteOfDay), type: mt.type || 'routine' }),
+        });
+        if (!res.ok) maintFailed++;
+      }
+
+      setSuccess(
+        `Schedule shifted ${dir > 0 ? '+1 day' : '−1 day'}` +
+        (maintFailed ? ` — ${maintFailed} maintenance block(s) skipped (overlap)` : '')
+      );
+      fetchSchedule();
+    } catch (err) { setError(err.message); fetchSchedule(); }
+    finally { setShiftingDay(false); }
+  };
+
   const handleTransferSubmit = async () => {
     if (!transferAirport) { setError('Select a destination airport'); return; }
     const hh = clampHour(transferTimeH).padStart(2, '0');
@@ -2230,6 +2307,18 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
               {homeOffsetHours != null && homeOffsetHours !== BERLIN_LON_OFFSET && (
                 <button className="ad-btn-clear-sched" onClick={() => setViewLocal(v => !v)}>Switch Time</button>
               )}
+              <button
+                className="ad-btn-clear-sched"
+                onClick={() => handleShiftDay(-1)}
+                disabled={shiftingDay || isActive}
+                title="Shift the whole weekly schedule back by one day (Monday wraps to Sunday)"
+              >−1D</button>
+              <button
+                className="ad-btn-clear-sched"
+                onClick={() => handleShiftDay(1)}
+                disabled={shiftingDay || isActive}
+                title="Shift the whole weekly schedule forward by one day (Sunday wraps to Monday)"
+              >+1D</button>
             </span>
             <button className="ad-btn-clear-sched" onClick={handleClearSchedule}>Clear All</button>
           </div>

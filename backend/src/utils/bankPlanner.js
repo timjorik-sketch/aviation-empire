@@ -1,17 +1,24 @@
 // Hub-banking optimizer for a SINGLE aircraft on a SINGLE round-trip route.
 //
 // A "bank" is a hub wave: an arrival window and a departure window (minutes of
-// day). The planner packs as many bank-compliant round trips as possible into a
-// repeating week for one aircraft, then places one weekly maintenance block into
-// the largest idle hub gap. Waiting is allowed at BOTH ends (hub ground before
-// the next departure, and extended turnaround at the destination so the return
-// lands inside an arrival window).
+// day). The planner packs bank-compliant round trips into a repeating week for
+// one aircraft, then places one weekly maintenance block into the largest idle
+// gap ANYWHERE (hub ground time OR a long destination layover — the game resets
+// condition regardless of where the aircraft sits). Waiting is allowed at both
+// ends: hub ground before the next departure, and extended turnaround at the
+// destination so the return lands inside an arrival window.
 //
-// It searches: for each anchor it builds a week two ways — earliest-fit (max
-// count) and minimum-layover (tries different banks per day, pushes idle time to
-// the hub) — then keeps the week with the most effective flights (a maintenance-
-// forced drop counts against it), then least destination layover. Days may differ
-// when that's better; they come out identical when one bank is consistently best.
+// The core is a DYNAMIC-PROGRAM search over the week. State = the earliest time
+// the aircraft is next free to depart ("cursor"). From each state it branches
+// over EVERY reachable (departure bank × arrival bank) within the next day —
+// so at each step it genuinely tries "morning? midday? evening?" and keeps, per
+// cursor, the best partial (most round trips, then least destination layover).
+// Anchored at each bank's departure start, the search finds the global best.
+//
+// Objective (best full week wins): most effective flights (a maintenance-forced
+// dropped round trip counts against it) → least total destination layover →
+// earliest first departure (deterministic, Monday-first). Days differ only when
+// that's genuinely better; they come out identical when one bank is always best.
 //
 // All times are absolute "week minutes": Mon 00:00 = 0 … Sun 23:59 = 10079.
 
@@ -39,110 +46,96 @@ function expandWindows(banks, startKey, endKey, weeks) {
   return occ;
 }
 
-// Earliest instant >= minT that lies inside one of the windows. Returns
-// { t, lo, hi } — the chosen instant plus the absolute bounds of the window it
-// landed in (so callers know how far the endpoint may later be dragged) — or
-// null if none within the expanded range.
-function earliestInWindow(windows, minT) {
-  let best = null;
-  for (const win of windows) {
-    if (win.end < minT) continue;          // window already fully passed
-    const cand = Math.max(minT, win.start); // depart/arrive as early as allowed
-    if (cand > win.end) continue;           // shouldn't happen given the guard
-    if (best === null || cand < best.t) best = { t: cand, lo: win.start, hi: win.end };
-  }
-  return best;
-}
+// DP search for the best chain of round trips anchored at `anchorDep`.
+// Returns an array of complete weeks, each { legs:[{depWk,arrWk,depWin,arrWin}], lay }.
+// `lay` is total destination layover (idle beyond the minimum round trip).
+function searchWeek(anchorDep, depWindows, arrWindows, oneWay, turnaround) {
+  const Lmin = 2 * oneWay + turnaround;
+  const limit = anchorDep + WEEK;   // one full cycle; next week's first dep is here
+  const BEAM = 400;                 // safety cap on distinct states per step
 
-// Build a round-trip chain anchored at a departure instant.
-//
-// `mode` decides how each rotation's DEPARTURE bank is chosen among the ones
-// reachable at that point:
-//   'earliest'   — take the earliest possible departure (packs tightest → max
-//                  count; but can dump the slack into a long destination layover).
-//   'minlayover' — among departures reachable within the next day, take the one
-//                  whose return lands soonest after the minimum round trip, i.e.
-//                  the smallest destination layover. This makes the planner try
-//                  *different* banks on different days when that lines up better,
-//                  and pushes idle time to the HUB (where maintenance can use it)
-//                  instead of the destination.
-function buildChain(anchorDep, depWindows, arrWindows, oneWay, turnaround, mode) {
-  const Lmin = 2 * oneWay + turnaround; // shortest hub-dep → hub-arr round trip
-  const limit = anchorDep + WEEK;       // one full cycle; next week's first dep sits at `limit`
-  const legs = [];
-  let cursor = anchorDep;
+  let beam = [{ legs: [], cursor: anchorDep, lay: 0 }];
+  const complete = [];
 
-  for (let i = 0; i < 1000; i++) {       // hard cap as a runaway guard
-    let pick = null;      // best candidate under the mode's rule (within horizon)
-    let earliest = null;  // earliest feasible candidate overall (fallback / earliest mode)
+  for (let step = 0; step < 80; step++) {   // depth guard
+    const byCursor = new Map();              // dedup: future depends only on cursor
 
-    for (const dw of depWindows) {
-      if (dw.end < cursor) continue;                 // window already passed
-      const D = Math.max(cursor, dw.start);
-      if (D >= limit) continue;                       // would spill into next week
-      const A = earliestInWindow(arrWindows, D + Lmin);
-      if (A === null || A.t + turnaround > limit) continue; // must close before wrap
-      const cand = {
-        depWk: D, arrWk: A.t,
-        depWin: { lo: dw.start, hi: dw.end },
-        arrWin: { lo: A.lo, hi: A.hi },
-        layover: A.t - D - Lmin,                      // idle time beyond the minimum round trip
-      };
-      if (earliest === null || cand.depWk < earliest.depWk) earliest = cand;
-      if (mode === 'minlayover') {
-        // Only weigh departures reachable within ~a day so we never skip a whole
-        // rotation just to shave layover.
-        if (dw.start > cursor + DAY) continue;
-        if (pick === null || cand.layover < pick.layover ||
-            (cand.layover === pick.layover && cand.depWk < pick.depWk)) pick = cand;
+    for (const st of beam) {
+      let extended = false;
+      for (const dw of depWindows) {
+        if (dw.end < st.cursor) continue;          // window already passed
+        if (dw.start > st.cursor + DAY) continue;  // don't skip more than a day of departures
+        const D = Math.max(st.cursor, dw.start);
+        if (D >= limit) continue;
+        for (const aw of arrWindows) {
+          if (aw.end < D + Lmin) continue;
+          if (aw.start > D + Lmin + DAY) continue; // don't idle more than a day at the destination
+          const A = Math.max(D + Lmin, aw.start);
+          if (A > aw.end) continue;
+          if (A + turnaround > limit) continue;    // return must close before the week wraps
+          extended = true;
+          const cursor = A + turnaround;
+          const cand = {
+            legs: st.legs.concat({ depWk: D, arrWk: A, depWin: { lo: dw.start, hi: dw.end }, arrWin: { lo: aw.start, hi: aw.end } }),
+            cursor,
+            lay: st.lay + (A - D - Lmin),
+          };
+          const ex = byCursor.get(cursor);
+          // Per cursor keep the strongest partial: more round trips, then less layover.
+          if (!ex || cand.legs.length > ex.legs.length ||
+              (cand.legs.length === ex.legs.length && cand.lay < ex.lay)) {
+            byCursor.set(cursor, cand);
+          }
+        }
       }
+      if (!extended && st.legs.length) complete.push(st);
     }
 
-    const chosen = mode === 'minlayover' ? (pick || earliest) : earliest;
-    if (!chosen) break;
-    legs.push({ depWk: chosen.depWk, arrWk: chosen.arrWk, depWin: chosen.depWin, arrWin: chosen.arrWin });
-    cursor = chosen.arrWk + turnaround;
+    if (byCursor.size === 0) break;
+    beam = [...byCursor.values()];
+    if (beam.length > BEAM) {
+      beam.sort((a, b) => a.cursor - b.cursor || a.lay - b.lay);
+      beam = beam.slice(0, BEAM);
+    }
   }
-  return legs;
+  for (const st of beam) if (st.legs.length) complete.push(st);
+  return complete;
 }
 
-// Total destination idle time across a chain (idle beyond the minimum round trip).
-function totalLayover(legs, Lmin) {
-  return legs.reduce((s, l) => s + (l.arrWk - l.depWk - Lmin), 0);
-}
-
-// Does a maintenance block fit into some hub gap without dropping a round trip?
-function maintFits(legs, turnaround, duration) {
-  if (!duration) return true;
-  if (!legs.length) return false;
-  const need = duration + 2 * turnaround;
-  const gaps = computeGaps(legs, turnaround);
-  return gaps.some(g => g.size >= need);
-}
-
-// Gaps (in week minutes) available for maintenance between consecutive round
-// trips, cyclically. Each gap needs `duration + 2*turnaround` to host a block
-// (turnaround padding on both sides, matching the schedule overlap rule).
-function computeGaps(legs, turnaround) {
-  const n = legs.length;
+// Every idle ground gap across the week, cyclically: the destination layover
+// inside each round trip AND the hub gap between consecutive round trips. Each
+// entry is { start, size } in week minutes. Maintenance can use ANY of them.
+function allGaps(rts, oneWay, turnaround) {
   const gaps = [];
+  const n = rts.length;
   for (let i = 0; i < n; i++) {
-    const cur = legs[i];
-    const next = legs[(i + 1) % n];
-    const nextDep = i + 1 < n ? next.depWk : next.depWk + WEEK; // wrap gap
-    gaps.push({ afterLeg: i, start: cur.arrWk, size: nextDep - cur.arrWk });
+    const rt = rts[i];
+    // Destination layover: between the outbound arrival and the return departure.
+    gaps.push({ start: rt.depWk + oneWay, size: (rt.arrWk - oneWay) - (rt.depWk + oneWay) });
+    // Hub gap: between this return's arrival and the next round trip's departure.
+    const next = rts[(i + 1) % n];
+    const nextDep = i + 1 < n ? next.depWk : next.depWk + WEEK;
+    gaps.push({ start: rt.arrWk, size: nextDep - rt.arrWk });
   }
   return gaps;
 }
 
-// Place one maintenance block of `duration` into the largest gap. If nothing
-// fits, drop round trips (whichever removal frees the most room) until it does.
-function placeMaintenance(legs, turnaround, duration) {
+// Does a maintenance block fit into some gap (anywhere) without dropping a trip?
+function maintFits(rts, oneWay, turnaround, duration) {
+  if (!duration) return true;
+  if (!rts.length) return false;
   const need = duration + 2 * turnaround;
-  let working = legs.slice();
+  return allGaps(rts, oneWay, turnaround).some(g => g.size >= need);
+}
+
+// Place one maintenance block into the largest gap anywhere. If nothing fits,
+// drop round trips (whichever removal frees the most room) until it does.
+function placeMaintenance(rts, oneWay, turnaround, duration) {
+  const need = duration + 2 * turnaround;
+  let working = rts.slice();
 
   while (working.length > 0) {
-    const gaps = computeGaps(working, turnaround);
+    const gaps = allGaps(working, oneWay, turnaround);
     let biggest = gaps[0];
     for (const g of gaps) if (g.size > biggest.size) biggest = g;
 
@@ -151,13 +144,10 @@ function placeMaintenance(legs, turnaround, duration) {
       return { legs: working, maintStartWk: ((startWk % WEEK) + WEEK) % WEEK };
     }
 
-    // No gap fits — remove the round trip whose removal yields the largest merged
-    // gap, then retry. Removing leg i merges the gap before it, its own block, and
-    // the gap after it into one.
+    // Remove the round trip whose removal yields the largest merged hub gap.
     let dropIdx = 0, bestMerged = -1;
     for (let i = 0; i < working.length; i++) {
       const prev = working[(i - 1 + working.length) % working.length];
-      const cur = working[i];
       const next = working[(i + 1) % working.length];
       const prevArr = i === 0 ? prev.arrWk - WEEK : prev.arrWk;
       const nextDep = i + 1 < working.length ? next.depWk : next.depWk + WEEK;
@@ -178,7 +168,7 @@ function placeMaintenance(legs, turnaround, duration) {
  * @param {number} p.turnaround     minimum ground minutes (wake turnaround)
  * @param {Array}  p.banks          [{earliest_arrival, latest_arrival, earliest_departure, latest_departure}] (minutes of day)
  * @param {number} p.maintDuration  maintenance block minutes (0 to skip)
- * @returns {{roundTrips:Array<{depWk,arrWk}>, maintStartWk:number|null, maintDuration:number, feasible:boolean, note:string}}
+ * @returns {{roundTrips:Array, maintStartWk:number|null, maintDuration:number, feasible:boolean, note:string}}
  */
 export function planBanks({ oneWayMinutes, turnaround, banks, maintDuration }) {
   if (!banks || banks.length === 0) {
@@ -190,33 +180,29 @@ export function planBanks({ oneWayMinutes, turnaround, banks, maintDuration }) {
     return { roundTrips: [], maintStartWk: null, maintDuration: 0, feasible: false, note: 'Round trip is longer than a week' };
   }
 
-  // Two weeks of window occurrences so a chain anchored on day 0 can search
-  // forward across the Sun→Mon seam without running out of candidates.
+  // Two weeks of window occurrences so a search anchored on day 0 can run forward
+  // across the Sun→Mon seam without running out of candidates.
   const depWindows = expandWindows(banks, 'earliest_departure', 'latest_departure', 2);
   const arrWindows = expandWindows(banks, 'earliest_arrival', 'latest_arrival', 2);
 
-  // Search: anchor at each bank's departure-window start (day 0), and for each
-  // anchor try both strategies. Score every resulting week and keep the best.
-  // Score priority:
+  // Anchor at each bank's departure-window start (day 0) and DP-search each.
+  // Score every complete week and keep the best:
   //   1. effective flights — round trips minus one if maintenance can't fit
-  //      without dropping a rotation (so "maintenance fits" beats "one more flight
-  //      that then gets cut");
-  //   2. least total destination layover (cleaner rhythm, slack at the hub);
+  //      anywhere without dropping a rotation;
+  //   2. least total destination layover (cleaner, tighter rhythm);
   //   3. earliest first departure (deterministic, Monday-first).
   let best = null;
   for (const b of banks) {
-    const anchor = b.earliest_departure; // day 0
-    for (const mode of ['earliest', 'minlayover']) {
-      const chain = buildChain(anchor, depWindows, arrWindows, oneWay, turnaround, mode);
-      if (!chain.length) continue;
-      const fits = maintFits(chain, turnaround, maintDuration);
-      const eff = chain.length - (fits ? 0 : 1);
-      const lay = totalLayover(chain, Lmin);
-      const firstDep = Math.min(...chain.map(l => l.depWk));
+    const plans = searchWeek(b.earliest_departure, depWindows, arrWindows, oneWay, turnaround);
+    for (const pl of plans) {
+      if (!pl.legs.length) continue;
+      const fits = maintFits(pl.legs, oneWay, turnaround, maintDuration);
+      const eff = pl.legs.length - (fits ? 0 : 1);
+      const firstDep = Math.min(...pl.legs.map(l => l.depWk));
       if (best === null || eff > best.eff ||
-          (eff === best.eff && (lay < best.lay ||
-          (lay === best.lay && firstDep < best.firstDep)))) {
-        best = { chain, eff, lay, firstDep };
+          (eff === best.eff && (pl.lay < best.lay ||
+          (pl.lay === best.lay && firstDep < best.firstDep)))) {
+        best = { chain: pl.legs, eff, lay: pl.lay, firstDep };
       }
     }
   }
@@ -224,21 +210,20 @@ export function planBanks({ oneWayMinutes, turnaround, banks, maintDuration }) {
   if (!best || best.chain.length === 0) {
     return { roundTrips: [], maintStartWk: null, maintDuration: 0, feasible: false, note: 'No bank-compliant round trip fits' };
   }
-  best = best.chain;
+  const chain = best.chain;
 
-  let roundTrips = best;
+  let roundTrips = chain;
   let maintStartWk = null;
   let droppedForMaint = 0;
   if (maintDuration > 0) {
-    const placed = placeMaintenance(best, turnaround, maintDuration);
+    const placed = placeMaintenance(chain, oneWay, turnaround, maintDuration);
     if (placed.legs.length > 0) {
-      droppedForMaint = best.length - placed.legs.length;
+      droppedForMaint = chain.length - placed.legs.length;
       roundTrips = placed.legs;
       maintStartWk = placed.maintStartWk;
     } else {
-      // Couldn't fit maintenance at all — return trips without it and flag.
       return {
-        roundTrips: best, maintStartWk: null, maintDuration,
+        roundTrips: chain, maintStartWk: null, maintDuration,
         feasible: true, note: 'Could not fit a maintenance window; consider fewer/looser banks',
       };
     }

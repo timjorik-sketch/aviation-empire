@@ -812,19 +812,26 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   // rule. Returns the absolute game week-minute start, or null if it no longer fits.
   const planMaintWk = useMemo(() => {
     if (!planMeta || !planMeta.maintDuration || planLegs.length < 2) return null;
-    const WK = 7 * 1440, { turnaround, duration = planMeta.maintDuration } = planMeta;
+    const WK = 7 * 1440, { turnaround } = planMeta;
+    // Round trips as {depWk (hub dep), destArr, destDep, arrWk (hub arr)}.
     const rts = [];
-    for (let k = 0; k + 1 < planLegs.length; k += 2) rts.push({ dep: planLegs[k].week_dep, arr: planLegs[k + 1].week_arr });
+    for (let k = 0; k + 1 < planLegs.length; k += 2) {
+      rts.push({ depWk: planLegs[k].week_dep, destArr: planLegs[k].week_arr, destDep: planLegs[k + 1].week_dep, arrWk: planLegs[k + 1].week_arr });
+    }
     if (!rts.length) return null;
-    rts.sort((a, b) => a.dep - b.dep);
+    rts.sort((a, b) => a.depWk - b.depWk);
+    // All idle gaps: destination layover inside each round trip + hub gap between them.
+    const gaps = [];
+    for (let i = 0; i < rts.length; i++) {
+      const rt = rts[i];
+      gaps.push({ start: rt.destArr, size: rt.destDep - rt.destArr });        // destination layover
+      const nx = rts[(i + 1) % rts.length];
+      const nextDep = i + 1 < rts.length ? nx.depWk : nx.depWk + WK;
+      gaps.push({ start: rt.arrWk, size: nextDep - rt.arrWk });               // hub gap
+    }
     const need = planMeta.maintDuration + 2 * turnaround;
     let best = null;
-    for (let i = 0; i < rts.length; i++) {
-      const cur = rts[i], nx = rts[(i + 1) % rts.length];
-      const nextDep = i + 1 < rts.length ? nx.dep : nx.dep + WK;
-      const size = nextDep - cur.arr;
-      if (best === null || size > best.size) best = { start: cur.arr, size };
-    }
+    for (const g of gaps) if (best === null || g.size > best.size) best = g;
     if (best && best.size >= need) return (((best.start + turnaround) % WK) + WK) % WK;
     return null;
   }, [planLegs, planMeta]);

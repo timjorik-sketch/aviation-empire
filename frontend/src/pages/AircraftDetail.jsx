@@ -627,7 +627,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     } else {
       setBankReturnRouteId('');
     }
-    setBankPlan(null); setPlanLegs([]); setPlanMeta(null); // route change invalidates any preview
+    setBankPlan(null); setPlanLegs([]); setPlanMeta(null); setMaintOverride(null); // route change invalidates any preview
   }, [bankForwardRouteId, routes]);
 
   useEffect(() => {
@@ -830,17 +830,18 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   // Maintenance placement, recomputed live from the (possibly dragged) legs so the
   // preview always matches what will be written. Mirrors the backend's largest-gap
   // rule. Returns the absolute game week-minute start, or null if it no longer fits.
-  const planMaintWk = useMemo(() => {
-    if (!planMeta || !planMeta.maintDuration || planLegs.length < 2) return null;
+  // All idle gaps (destination layover inside each round trip + hub gap between
+  // them) and the auto-placed maintenance start — used both to render and to clamp
+  // dragging. Times are absolute plan week-minutes (un-normalised).
+  const maintGaps = useMemo(() => {
+    if (!planMeta || !planMeta.maintDuration || planLegs.length < 2) return { gaps: [], autoRaw: null };
     const WK = 7 * 1440, { turnaround } = planMeta;
-    // Round trips as {depWk (hub dep), destArr, destDep, arrWk (hub arr)}.
     const rts = [];
     for (let k = 0; k + 1 < planLegs.length; k += 2) {
       rts.push({ depWk: planLegs[k].week_dep, destArr: planLegs[k].week_arr, destDep: planLegs[k + 1].week_dep, arrWk: planLegs[k + 1].week_arr });
     }
-    if (!rts.length) return null;
+    if (!rts.length) return { gaps: [], autoRaw: null };
     rts.sort((a, b) => a.depWk - b.depWk);
-    // All idle gaps: destination layover inside each round trip + hub gap between them.
     const gaps = [];
     for (let i = 0; i < rts.length; i++) {
       const rt = rts[i];
@@ -851,10 +852,22 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     }
     const need = planMeta.maintDuration + 2 * turnaround;
     let best = null;
-    for (const g of gaps) if (best === null || g.size > best.size) best = g;
-    if (best && best.size >= need) return (((best.start + turnaround) % WK) + WK) % WK;
-    return null;
+    for (const g of gaps) if (g.size >= need && (best === null || g.size > best.size)) best = g;
+    return { gaps, autoRaw: best ? best.start + turnaround : null };
   }, [planLegs, planMeta]);
+
+  // Effective maintenance start (normalised week-min): the dragged override if it
+  // still fits, otherwise the auto placement.
+  const planMaintWk = useMemo(() => {
+    if (maintGaps.autoRaw == null) return null;
+    const WK = 7 * 1440;
+    let raw = maintGaps.autoRaw;
+    if (maintOverride != null) {
+      const c = clampMaint(maintOverride, maintGaps.gaps, planMeta.maintDuration, planMeta.turnaround);
+      if (c != null) raw = c;
+    }
+    return ((raw % WK) + WK) % WK;
+  }, [maintGaps, maintOverride, planMeta]);
 
   const ghostMaint = useMemo(() => {
     if (planMaintWk == null || !planMeta) return null;
@@ -1210,7 +1223,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
   // ─── Banks planner handlers ──────────────────────────────────────────────
 
-  const clearBankPlan = () => { setBankPlan(null); setPlanLegs([]); setPlanMeta(null); };
+  const clearBankPlan = () => { setBankPlan(null); setPlanLegs([]); setPlanMeta(null); setMaintOverride(null); };
 
   const bankPlanBody = (commit) => ({
     forward_route_id: parseInt(bankForwardRouteId),
@@ -1238,6 +1251,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         setBankPlan(data);
         setPlanLegs((data.legs || []).map(l => ({ ...l })));
         setPlanMeta({ oneWay: data.summary.one_way_minutes, turnaround: data.summary.turnaround, maintDuration: data.summary.maint_duration });
+        setMaintOverride(null);
       }
     } catch { setError('Network error'); clearBankPlan(); }
     finally { setBankComputing(false); }
@@ -1312,8 +1326,14 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
   const onDragMove = useCallback((e) => {
     const d = dragRef.current; if (!d) return;
-    const deltaMin = Math.round((e.clientY - d.startY) / PX_PER_MIN);
-    setPlanLegs(prev => applyLegDrag(prev, d.idx, d.startVal + deltaMin, metaRef.current));
+    let deltaMin = Math.round((e.clientY - d.startY) / PX_PER_MIN);
+    if (e.shiftKey) deltaMin = Math.round(deltaMin / 5) * 5;   // Shift = 5-minute increments
+    if (d.kind === 'maint') {
+      const raw = clampMaint(d.startVal + deltaMin, d.gaps, d.duration, d.turnaround);
+      if (raw != null) setMaintOverride(raw);
+    } else {
+      setPlanLegs(prev => applyLegDrag(prev, d.idx, d.startVal + deltaMin, metaRef.current));
+    }
   }, []);
   const onDragUp = useCallback(() => {
     dragRef.current = null;
@@ -1325,13 +1345,22 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     e.preventDefault(); e.stopPropagation();
     setPlanLegs(prev => {
       const leg = prev[idx];
-      dragRef.current = { idx, startY: e.clientY, startVal: leg.drag === 'dep' ? leg.week_dep : leg.week_arr };
+      dragRef.current = { kind: 'leg', idx, startY: e.clientY, startVal: leg.drag === 'dep' ? leg.week_dep : leg.week_arr };
       return prev;
     });
     document.body.style.userSelect = 'none';
     window.addEventListener('mousemove', onDragMove);
     window.addEventListener('mouseup', onDragUp);
   }, [onDragMove, onDragUp]);
+  const onMaintMouseDown = useCallback((e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (!planMeta || maintGaps.autoRaw == null) return;
+    const startVal = maintOverride != null ? maintOverride : maintGaps.autoRaw;
+    dragRef.current = { kind: 'maint', startY: e.clientY, startVal, gaps: maintGaps.gaps, duration: planMeta.maintDuration, turnaround: planMeta.turnaround };
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onDragMove);
+    window.addEventListener('mouseup', onDragUp);
+  }, [planMeta, maintGaps, maintOverride, onDragMove, onDragUp]);
 
   const openBankModal = (bank = null) => {
     setError('');
@@ -2495,7 +2524,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                       <div key={g.key} className="ad-grid-ghost ad-grid-ghost--drag"
                         style={{ top: g.top, height: g.height }}
                         onMouseDown={(e) => onGhostMouseDown(e, g.legIndex)}
-                        title={`${g.flight_number}: ${g.departure_airport}→${g.arrival_airport}\nDrag to shift within the bank\nDep ${g.departure_time}${g.depLocal ? ` (${g.depLocal} ${g.departure_airport} local)` : ''}\nArr ${g.arrival_time}${g.arrLocal ? ` (${g.arrLocal} ${g.arrival_airport} local)` : ''}`}>
+                        title={`${g.flight_number}: ${g.departure_airport}→${g.arrival_airport}\nDrag to shift within the bank · Shift = 5-min steps\nDep ${g.departure_time}${g.depLocal ? ` (${g.depLocal} ${g.departure_airport} local)` : ''}\nArr ${g.arrival_time}${g.arrLocal ? ` (${g.arrLocal} ${g.arrival_airport} local)` : ''}`}>
                         <span className="ad-grid-fn">{g.flight_number}</span>
                         {g.height > 24 && <span className="ad-grid-rt">{g.departure_airport}→{g.arrival_airport}</span>}
                         {g.height > 38 && <span className="ad-grid-tm">{g.departure_time}{g.depLocal && ` (${g.depLocal})`}</span>}
@@ -2511,9 +2540,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                       </div>
                     ))}
                     {ghostMaint && ghostMaint.dayIndex === di && (
-                      <div className="ad-grid-ghost ad-grid-ghost--maint"
+                      <div className="ad-grid-ghost ad-grid-ghost--maint ad-grid-ghost--drag"
                         style={{ top: ghostMaint.top, height: ghostMaint.height }}
-                        title="Planned maintenance (A-Check)">
+                        onMouseDown={onMaintMouseDown}
+                        title="Planned maintenance (A-Check)&#10;Drag to move it into another gap · Shift = 5-min steps">
                         <span className="ad-grid-fn">A-Check</span>
                         {ghostMaint.height > 24 && <span className="ad-grid-rt">{minsToHM(ghostMaint.start_minutes)}</span>}
                       </div>

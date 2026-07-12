@@ -1248,7 +1248,7 @@ router.get('/:id/schedule', authMiddleware, async (req, res) => {
              ws.departure_airport, ws.arrival_airport,
              ws.departure_time, ws.arrival_time,
              ws.economy_price, ws.business_price, ws.first_price, ws.route_id,
-             ws.service_profile_id,
+             ws.service_profile_id, ws.is_transfer, ws.distance_km,
              dep.longitude AS dep_longitude,
              arr.longitude AS arr_longitude
       FROM weekly_schedule ws
@@ -1263,6 +1263,7 @@ router.get('/:id/schedule', authMiddleware, async (req, res) => {
       departure_time: row.departure_time, arrival_time: row.arrival_time,
       economy_price: row.economy_price, business_price: row.business_price, first_price: row.first_price,
       route_id: row.route_id, service_profile_id: row.service_profile_id,
+      is_transfer: !!row.is_transfer, distance_km: row.distance_km,
       dep_longitude: row.dep_longitude, arr_longitude: row.arr_longitude
     }));
 
@@ -1337,6 +1338,7 @@ async function getExpansionDepartures(airlineId, aircraftId) {
     SELECT ws.departure_airport, COUNT(*) as cnt
     FROM weekly_schedule ws
     WHERE ws.aircraft_id = $1
+      AND ws.is_transfer = 0
       AND ws.departure_airport != $2
       AND ws.departure_airport != $3
       AND ws.arrival_airport != $2
@@ -1413,6 +1415,7 @@ router.patch('/:id/active', authMiddleware, async (req, res) => {
           SELECT COUNT(*) as cnt FROM weekly_schedule ws
           JOIN aircraft ac ON ac.id = ws.aircraft_id
           WHERE ac.airline_id = $1 AND ac.is_active = 1
+            AND ws.is_transfer = 0
             AND ws.departure_airport = $2
             AND ws.arrival_airport != $3
             AND ws.arrival_airport != $5
@@ -1723,6 +1726,180 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error('Schedule aircraft flights error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Schedule transfer (ferry/positioning) legs into the weekly template. Unlike
+// regular flights these carry no passengers, need no route (free start→destination),
+// and are exempt from hub/expansion capacity checks. Duration/arrival are derived
+// from the great-circle distance between the two airports.
+router.post('/:id/schedule-transfer', authMiddleware, async (req, res) => {
+  try {
+    const aircraftId = parseInt(req.params.id);
+    const airlineId = req.airlineId;
+    if (!airlineId) return res.status(400).json({ error: 'No active airline' });
+
+    const acResult = await pool.query(`
+      SELECT a.id, t.wake_turbulence_category, t.range_km, t.full_name, a.is_active,
+             t.min_runway_takeoff_m, t.min_runway_landing_m
+      FROM aircraft a
+      JOIN aircraft_types t ON a.aircraft_type_id = t.id
+      WHERE a.id = $1 AND a.airline_id = $2
+    `, [aircraftId, airlineId]);
+    if (!acResult.rows[0]) return res.status(404).json({ error: 'Aircraft not found' });
+    const {
+      wake_turbulence_category: wakeCategory,
+      range_km: aircraftRange,
+      full_name: aircraftName,
+      is_active: isActive,
+      min_runway_takeoff_m: acTakeoffM,
+      min_runway_landing_m: acLandingM,
+    } = acResult.rows[0];
+
+    if (isActive) {
+      return res.status(400).json({ error: 'Aircraft must be inactive to edit schedule. Deactivate the aircraft first.' });
+    }
+
+    const transfersToSchedule = req.body.flights || [req.body];
+    if (!transfersToSchedule.length) return res.status(400).json({ error: 'No transfer flights provided' });
+
+    for (const t of transfersToSchedule) {
+      const { departure_airport, arrival_airport, day_of_week, departure_time } = t;
+      if (!departure_airport || !arrival_airport || day_of_week === undefined || !departure_time) {
+        return res.status(400).json({ error: 'Each transfer requires departure_airport, arrival_airport, day_of_week, departure_time (HH:MM)' });
+      }
+      if (departure_airport === arrival_airport) {
+        return res.status(400).json({ error: 'Departure and arrival airport must differ' });
+      }
+      const dow = parseInt(day_of_week);
+      if (dow < 0 || dow > 6) return res.status(400).json({ error: 'day_of_week must be 0 (Mon) – 6 (Sun)' });
+      if (!/^\d{1,2}:\d{2}$/.test(departure_time)) return res.status(400).json({ error: 'departure_time must be HH:MM' });
+    }
+
+    const TURNAROUND_BY_CATEGORY = { L: 25, M: 40, H: 60 };
+    const GROUND_MIN = TURNAROUND_BY_CATEGORY[wakeCategory] || 40;
+
+    // Load coords + runway lengths for every airport touched by these transfers.
+    const uniqueAirports = [
+      ...new Set(transfersToSchedule.flatMap(t => [t.departure_airport, t.arrival_airport])),
+    ];
+    const apResult = await pool.query(
+      `SELECT iata_code, latitude, longitude, runway_length_m FROM airports WHERE iata_code = ANY($1)`,
+      [uniqueAirports]
+    );
+    const apMap = new Map();
+    for (const r of apResult.rows) apMap.set(r.iata_code, r);
+
+    function haversineKm(lat1, lon1, lat2, lon2) {
+      const R = 6371;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    // Existing schedule + maintenance as absolute week-minute spans (same reconstruction
+    // as the regular /schedule endpoint) so overnight/seam overlaps are caught.
+    const [existResult, maintResult] = await Promise.all([
+      pool.query(`SELECT day_of_week, departure_time, arrival_time FROM weekly_schedule WHERE aircraft_id = $1`, [aircraftId]),
+      pool.query(`SELECT day_of_week, start_minutes, duration_minutes FROM maintenance_schedule WHERE aircraft_id = $1 AND airline_id = $2`, [aircraftId, airlineId]),
+    ]);
+    const existWk = existResult.rows.map(row => {
+      const [eDepH, eDepM] = row.departure_time.split(':').map(Number);
+      const [eArrH, eArrM] = row.arrival_time.split(':').map(Number);
+      const depMinEx = eDepH * 60 + eDepM;
+      let arrMinEx = eArrH * 60 + eArrM;
+      if (arrMinEx <= depMinEx) arrMinEx += 1440;
+      const depWk = row.day_of_week * 1440 + depMinEx;
+      return { depWk, arrWk: depWk + (arrMinEx - depMinEx) };
+    });
+    const maintWk = maintResult.rows.map(row => {
+      const s = row.day_of_week * 1440 + row.start_minutes;
+      return { start: s, end: s + row.duration_minutes };
+    });
+
+    const prepared = [];
+    const newBatch = [];
+
+    for (const t of transfersToSchedule) {
+      const dep = apMap.get(t.departure_airport);
+      const arr = apMap.get(t.arrival_airport);
+      if (!dep || !arr) return res.status(400).json({ error: `Airport not found: ${!dep ? t.departure_airport : t.arrival_airport}` });
+      if (dep.latitude == null || arr.latitude == null) {
+        return res.status(400).json({ error: `Missing coordinates for ${!dep.latitude ? t.departure_airport : t.arrival_airport}` });
+      }
+
+      const distanceKm = Math.round(haversineKm(dep.latitude, dep.longitude, arr.latitude, arr.longitude));
+      if (aircraftRange && distanceKm > aircraftRange) {
+        return res.status(400).json({
+          error: `Transfer exceeds aircraft range`,
+          detail: { departure_airport: t.departure_airport, arrival_airport: t.arrival_airport, route_distance_km: distanceKm, aircraft_name: aircraftName, aircraft_range_km: aircraftRange }
+        });
+      }
+      if (acTakeoffM && (dep.runway_length_m ?? 0) < acTakeoffM) {
+        return res.status(400).json({ error: `Departure runway too short`, detail: { airport: t.departure_airport, runway_length_m: dep.runway_length_m ?? 0, required_m: acTakeoffM, aircraft_name: aircraftName } });
+      }
+      if (acLandingM && (arr.runway_length_m ?? 0) < acLandingM) {
+        return res.status(400).json({ error: `Arrival runway too short`, detail: { airport: t.arrival_airport, runway_length_m: arr.runway_length_m ?? 0, required_m: acLandingM, aircraft_name: aircraftName } });
+      }
+
+      const dow = parseInt(t.day_of_week);
+      const [depH, depM] = t.departure_time.split(':').map(Number);
+      const depMin = depH * 60 + depM;
+      const durationMin = calculateFlightDuration(distanceKm);
+      const arrMin = depMin + durationMin;
+      const arrH = Math.floor(arrMin % 1440 / 60);
+      const arrMM = arrMin % 60;
+      const arrTime = `${String(arrH).padStart(2, '0')}:${String(arrMM).padStart(2, '0')}`;
+      const depTime = `${String(depH).padStart(2, '0')}:${String(depM).padStart(2, '0')}`;
+
+      const depWk = dow * 1440 + depMin;
+      const arrWk = dow * 1440 + arrMin;
+
+      for (const ex of existWk) {
+        if (flightsOverlapWeekly(depWk, arrWk, ex.depWk, ex.arrWk, GROUND_MIN)) {
+          return res.status(400).json({ error: `Transfer at ${depTime} on day ${dow} overlaps with an existing entry (incl. ${GROUND_MIN}min turnaround)` });
+        }
+      }
+      for (const m of maintWk) {
+        if (flightOverlapsMaintenance(depWk, arrWk, GROUND_MIN, m.start, m.end)) {
+          return res.status(400).json({ error: `Transfer at ${depTime} overlaps with a maintenance window (incl. ${GROUND_MIN}min turnaround)` });
+        }
+      }
+      for (const nw of newBatch) {
+        if (flightsOverlapWeekly(depWk, arrWk, nw.depWk, nw.arrWk, GROUND_MIN)) {
+          return res.status(400).json({ error: `Transfer at ${depTime} overlaps with another transfer in this batch` });
+        }
+      }
+
+      newBatch.push({ depWk, arrWk });
+      prepared.push({ dow, dep: t.departure_airport, arr: t.arrival_airport, depTime, arrTime, distanceKm });
+    }
+
+    const values = [];
+    const placeholders = [];
+    let idx = 1;
+    for (const p of prepared) {
+      // Trailing literal `1` = is_transfer (same for every row).
+      placeholders.push(`($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, 1)`);
+      values.push(aircraftId, p.dow, 'FERRY', p.dep, p.arr, p.depTime, p.arrTime, p.distanceKm);
+    }
+    const insertResult = await pool.query(`
+      INSERT INTO weekly_schedule
+        (aircraft_id, day_of_week, flight_number, departure_airport, arrival_airport,
+         departure_time, arrival_time, distance_km, is_transfer)
+      VALUES ${placeholders.join(', ')}
+      RETURNING id, day_of_week, flight_number, departure_airport, arrival_airport,
+                departure_time, arrival_time, distance_km, is_transfer
+    `, values);
+
+    res.status(201).json({
+      message: `Successfully scheduled ${insertResult.rows.length} transfer flight(s)`,
+      flights: insertResult.rows,
+    });
+  } catch (error) {
+    console.error('Schedule transfer flights error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -2052,10 +2229,11 @@ router.patch('/:id/schedule/:entryId', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Aircraft must be inactive to edit schedule. Deactivate the aircraft first.' });
     }
 
-    const entryResult = await pool.query('SELECT id, route_id, day_of_week, departure_time, arrival_time FROM weekly_schedule WHERE id = $1 AND aircraft_id = $2', [entryId, aircraftId]);
+    const entryResult = await pool.query('SELECT id, route_id, day_of_week, departure_time, arrival_time, is_transfer, distance_km FROM weekly_schedule WHERE id = $1 AND aircraft_id = $2', [entryId, aircraftId]);
     if (!entryResult.rows[0]) return res.status(404).json({ error: 'Schedule entry not found' });
     const existing = entryResult.rows[0];
     const existingRouteId = existing.route_id;
+    const isTransferEntry = !!existing.is_transfer;
 
     if (existingRouteId) {
       const rwyCheck = await pool.query(`
@@ -2107,6 +2285,8 @@ router.patch('/:id/schedule/:entryId', authMiddleware, async (req, res) => {
       if (routeId) {
         const rResult = await pool.query('SELECT distance_km FROM routes WHERE id = $1', [routeId]);
         if (rResult.rows[0]) distKm = rResult.rows[0].distance_km;
+      } else if (isTransferEntry) {
+        distKm = existing.distance_km || 0;
       }
       const durationMin = distKm ? calculateFlightDuration(distKm) : 0;
       const [depH, depM] = departure_time.split(':').map(Number);
@@ -2253,7 +2433,8 @@ router.get('/:id/flights', authMiddleware, async (req, res) => {
              f.revenue,
              COALESCE(r.departure_airport, ws.departure_airport) as dep_airport,
              COALESCE(r.arrival_airport,   ws.arrival_airport)   as arr_airport,
-             COALESCE(r.distance_km, ws_r.distance_km) as distance_km,
+             COALESCE(r.distance_km, ws_r.distance_km, ws.distance_km) as distance_km,
+             COALESCE(ws.is_transfer, 0) as is_transfer,
              ap_dep.name as dep_airport_name,
              ap_arr.name as arr_airport_name,
              ap_dep.ground_handling_fee_light  as dep_gh_light,
@@ -2318,6 +2499,7 @@ router.get('/:id/flights', authMiddleware, async (req, res) => {
       revenue: r.revenue,
       departure_airport: r.dep_airport, arrival_airport: r.arr_airport,
       distance_km: r.distance_km,
+      is_transfer: !!r.is_transfer,
       dep_airport_name: r.dep_airport_name, arr_airport_name: r.arr_airport_name,
       dep_gh_light: r.dep_gh_light, dep_gh_medium: r.dep_gh_medium, dep_gh_heavy: r.dep_gh_heavy,
       arr_gh_light: r.arr_gh_light, arr_gh_medium: r.arr_gh_medium, arr_gh_heavy: r.arr_gh_heavy,

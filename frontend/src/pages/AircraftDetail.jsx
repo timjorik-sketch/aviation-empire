@@ -427,6 +427,15 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [mStartHour, setMStartHour]   = useState('08');
   const [mStartMinute, setMStartMinute] = useState('00');
 
+  // Transfer leg form (in-schedule ferry flight — no passengers, any airport → any)
+  const [xferFromCountry, setXferFromCountry] = useState('');
+  const [xferFrom, setXferFrom]               = useState('');
+  const [xferToCountry, setXferToCountry]     = useState('');
+  const [xferTo, setXferTo]                   = useState('');
+  const [xferDay, setXferDay]                 = useState('0');
+  const [xferHour, setXferHour]               = useState('08');
+  const [xferMinute, setXferMinute]           = useState('00');
+
   // Transfer flight modal
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [transferCountry, setTransferCountry]     = useState('');
@@ -702,6 +711,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const flightBars = useMemo(() => {
     const flightColor = isActive ? '#22c55e' : '#fca5a5';
     const flightTextColor = isActive ? '#fff' : '#7f1d1d';
+    // Transfer (ferry) legs use the same gray as maintenance so they read as
+    // non-revenue positioning rather than revenue flights.
+    const xferColor = '#6b7280';
+    const xferTextColor = '#fff';
     return viewSchedule.map(entry => {
       const depMin = parseHM(entry.departure_time);
       const arrMin = parseHM(entry.arrival_time);
@@ -722,8 +735,8 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         groundOverflowDayIndex: arrMin + groundMin > 1440 ? ((crossesMidnight ? (entry.day_of_week + 1) % 7 : entry.day_of_week) + 1) % 7 : null,
         groundOverflowHeight: arrMin + groundMin > 1440 ? (arrMin + groundMin - 1440) * PX_PER_MIN : 0,
         groundSeg1Height: arrMin + groundMin > 1440 ? (1440 - arrMin) * PX_PER_MIN : groundMin * PX_PER_MIN,
-        color:    flightColor,
-        textColor: flightTextColor,
+        color:    entry.is_transfer ? xferColor : flightColor,
+        textColor: entry.is_transfer ? xferTextColor : flightTextColor,
       };
     });
   }, [viewSchedule, isActive, groundMin]);
@@ -1187,6 +1200,28 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     finally { setSubmitting(false); }
   };
 
+  const handleTransferLegSubmit = async () => {
+    if (!xferFrom || !xferTo) { setError('Please select a departure and destination airport'); return; }
+    if (xferFrom === xferTo) { setError('Departure and destination must differ'); return; }
+    setSubmitting(true); setError(''); setSuccess('');
+    try {
+      const days    = resolveDays(xferDay);
+      const depTime = `${xferHour.padStart(2,'0')}:${xferMinute.padStart(2,'0')}`;
+      // Form is entered in the view timezone — store in Berlin game time.
+      const payload = days.map(d => {
+        const b = viewToBerlin(d, depTime);
+        return { departure_airport: xferFrom, arrival_airport: xferTo, day_of_week: b.day, departure_time: b.time };
+      });
+      const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/schedule-transfer`, {
+        method: 'POST', headers: jsonHeaders, body: JSON.stringify({ flights: payload })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail ? `${data.error} (${JSON.stringify(data.detail)})` : data.error);
+      setSuccess(data.message); fetchSchedule();
+    } catch (err) { setError(err.message); }
+    finally { setSubmitting(false); }
+  };
+
   const handleSeriesSubmit = async () => {
     if (!outRouteId || !rEcoPrice) { setError('Please fill in outbound route and economy price'); return; }
     const reOut = rangeError(outRouteId);
@@ -1329,7 +1364,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     let deltaMin = Math.round((e.clientY - d.startY) / PX_PER_MIN);
     if (e.shiftKey) deltaMin = Math.round(deltaMin / 5) * 5;   // Shift = 5-minute increments
     if (d.kind === 'maint') {
-      const raw = clampMaint(d.startVal + deltaMin, d.gaps, d.duration, d.turnaround);
+      // Horizontal movement shifts the target across day columns; clampMaint then
+      // snaps to the nearest valid gap (which may be on that other day).
+      const dayDelta = d.colWidth ? Math.round((e.clientX - d.startX) / d.colWidth) : 0;
+      const raw = clampMaint(d.startVal + dayDelta * 1440 + deltaMin, d.gaps, d.duration, d.turnaround);
       if (raw != null) setMaintOverride(raw);
     } else {
       setPlanLegs(prev => applyLegDrag(prev, d.idx, d.startVal + deltaMin, metaRef.current));
@@ -1356,7 +1394,8 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     e.preventDefault(); e.stopPropagation();
     if (!planMeta || maintGaps.autoRaw == null) return;
     const startVal = maintOverride != null ? maintOverride : maintGaps.autoRaw;
-    dragRef.current = { kind: 'maint', startY: e.clientY, startVal, gaps: maintGaps.gaps, duration: planMeta.maintDuration, turnaround: planMeta.turnaround };
+    const colWidth = e.currentTarget?.parentElement?.getBoundingClientRect().width || 0;
+    dragRef.current = { kind: 'maint', startY: e.clientY, startX: e.clientX, colWidth, startVal, gaps: maintGaps.gaps, duration: planMeta.maintDuration, turnaround: planMeta.turnaround };
     document.body.style.userSelect = 'none';
     window.addEventListener('mousemove', onDragMove);
     window.addEventListener('mouseup', onDragUp);
@@ -1461,7 +1500,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       const clearData = await clearRes.json();
       if (!clearRes.ok) throw new Error(clearData.error);
 
-      const flights = srcSchedule.map(e => {
+      const flights = srcSchedule.filter(e => !e.is_transfer).map(e => {
         const s = shiftWeekSlot(e.day_of_week, parseHM(e.departure_time), shift, 'roll');
         return {
           route_id: e.route_id,
@@ -1479,6 +1518,24 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to shift flights');
+      }
+
+      // Transfer legs re-post through their own endpoint (no route/fares).
+      const transfers = srcSchedule.filter(e => e.is_transfer).map(e => {
+        const s = shiftWeekSlot(e.day_of_week, parseHM(e.departure_time), shift, 'roll');
+        return {
+          departure_airport: e.departure_airport,
+          arrival_airport: e.arrival_airport,
+          day_of_week: s.day,
+          departure_time: minutesToHHMM(s.minuteOfDay),
+        };
+      });
+      if (transfers.length) {
+        const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/schedule-transfer`, {
+          method: 'POST', headers: jsonHeaders, body: JSON.stringify({ flights: transfers }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to shift transfer legs');
       }
 
       let maintFailed = 0;
@@ -1621,7 +1678,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       // copyReverse is on, swap each leg to its reverse route; legs without a reverse
       // route in the network are dropped (and reported below).
       let reverseSkipped = 0;
-      const flights = copySourceSchedule.map(e => {
+      const flights = copySourceSchedule.filter(e => !e.is_transfer).map(e => {
         const [h, m] = e.departure_time.split(':').map(Number);
         const s = shiftWeekSlot(e.day_of_week, h * 60 + m, copyShiftMin, copyDayMode);
         let routeId = e.route_id;
@@ -1646,6 +1703,25 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to copy flights');
+      }
+
+      // Transfer legs: clone start/destination + shifted day/time (reverse swaps ends).
+      const transfers = copySourceSchedule.filter(e => e.is_transfer).map(e => {
+        const [h, m] = e.departure_time.split(':').map(Number);
+        const s = shiftWeekSlot(e.day_of_week, h * 60 + m, copyShiftMin, copyDayMode);
+        return {
+          departure_airport: copyReverse ? e.arrival_airport : e.departure_airport,
+          arrival_airport:   copyReverse ? e.departure_airport : e.arrival_airport,
+          day_of_week: s.day,
+          departure_time: minutesToHHMM(s.minuteOfDay),
+        };
+      });
+      if (transfers.length) {
+        const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/schedule-transfer`, {
+          method: 'POST', headers: jsonHeaders, body: JSON.stringify({ flights: transfers }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to copy transfer legs');
       }
 
       // Maintenance: duration is derived from aircraft type (identical here), so we
@@ -1897,15 +1973,19 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     try {
       const depTime = `${editHour.padStart(2,'0')}:${editMinute.padStart(2,'0')}`;
       const b = viewToBerlin(editDay, depTime); // modal is in the view timezone
+      // Transfer legs have no fares/service — only day/time is editable.
+      const body = editEntry.is_transfer
+        ? { day_of_week: b.day, departure_time: b.time }
+        : {
+            day_of_week: b.day, departure_time: b.time,
+            economy_price: parseFloat(editEcoPrice),
+            business_price: editBizPrice  ? parseFloat(editBizPrice)  : null,
+            first_price:    editFirstPrice ? parseFloat(editFirstPrice) : null,
+            service_profile_id: editServiceProfileId ? parseInt(editServiceProfileId) : null
+          };
       const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/schedule/${editEntry.id}`, {
         method: 'PATCH', headers: jsonHeaders,
-        body: JSON.stringify({
-          day_of_week: b.day, departure_time: b.time,
-          economy_price: parseFloat(editEcoPrice),
-          business_price: editBizPrice  ? parseFloat(editBizPrice)  : null,
-          first_price:    editFirstPrice ? parseFloat(editFirstPrice) : null,
-          service_profile_id: editServiceProfileId ? parseInt(editServiceProfileId) : null
-        })
+        body: JSON.stringify(body)
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -2543,7 +2623,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                       <div className="ad-grid-ghost ad-grid-ghost--maint ad-grid-ghost--drag"
                         style={{ top: ghostMaint.top, height: ghostMaint.height }}
                         onMouseDown={onMaintMouseDown}
-                        title="Planned maintenance (A-Check)&#10;Drag to move it into another gap · Shift = 5-min steps">
+                        title="Planned maintenance (A-Check)&#10;Drag across days/times to any free gap · Shift = 5-min steps">
                         <span className="ad-grid-fn">A-Check</span>
                         {ghostMaint.height > 24 && <span className="ad-grid-rt">{minsToHM(ghostMaint.start_minutes)}</span>}
                       </div>
@@ -2578,17 +2658,20 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
               </button>
             </div>
           </div>
-          <div className="sched-tabs">
-            {['single','series','banks','maintenance'].map(tab => (
-              <button key={tab} className={`sched-tab ${scheduleTab === tab ? 'active' : ''}`}
-                onClick={() => { setScheduleTab(tab); setError(''); setSuccess(''); }}>
-                {tab === 'single' ? 'Single Flight' : tab === 'series' ? 'Series Flight' : tab === 'banks' ? 'Banks' : 'Maintenance'}
-              </button>
-            ))}
+          <div className="sched-typebar">
+            <label className="sched-typebar-label">Flight type</label>
+            <select className="sched-typebar-select" value={scheduleTab}
+              onChange={e => { setScheduleTab(e.target.value); setError(''); setSuccess(''); }}>
+              <option value="single">Single Flight</option>
+              <option value="series">Series Flight</option>
+              <option value="banks">Banks</option>
+              <option value="transfer">Transfer</option>
+              <option value="maintenance">Maintenance</option>
+            </select>
           </div>
 
-          {/* No cabin profile warning — blocks single & series scheduling */}
-          {!selectedCabinProfileId && scheduleTab !== 'maintenance' && (
+          {/* No cabin profile warning — blocks single & series scheduling (not maintenance/transfer) */}
+          {!selectedCabinProfileId && scheduleTab !== 'maintenance' && scheduleTab !== 'transfer' && (
             <div className="sched-no-cabin-warning">
               <div className="sched-no-cabin-icon">✈</div>
               <div className="sched-no-cabin-text">
@@ -2980,6 +3063,90 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
             </div>
           )}
 
+          {/* Transfer (ferry) leg — no passengers, any airport → any, no hub restriction */}
+          {scheduleTab === 'transfer' && (
+            <div className="sched-form-body">
+              <div className="sched-section-hd">Route</div>
+              <div className="sched-section-body">
+                <div className="sched-2col">
+                  <div className="sched-form-row">
+                    <label>From — Country</label>
+                    <select value={xferFromCountry} onChange={e => { setXferFromCountry(e.target.value); setXferFrom(''); }}>
+                      <option value="">— select country —</option>
+                      {[...new Set(allAirports.map(a => a.country))].sort().map(c => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="sched-form-row">
+                    <label>From — Airport</label>
+                    <select value={xferFrom} onChange={e => setXferFrom(e.target.value)} disabled={!xferFromCountry}>
+                      <option value="">{xferFromCountry ? '— select airport —' : '— country first —'}</option>
+                      {allAirports.filter(ap => ap.country === xferFromCountry).map(ap => (
+                        <option key={ap.iata_code} value={ap.iata_code}>{ap.iata_code} – {ap.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="sched-2col">
+                  <div className="sched-form-row">
+                    <label>To — Country</label>
+                    <select value={xferToCountry} onChange={e => { setXferToCountry(e.target.value); setXferTo(''); }}>
+                      <option value="">— select country —</option>
+                      {[...new Set(allAirports.map(a => a.country))].sort().map(c => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="sched-form-row">
+                    <label>To — Airport</label>
+                    <select value={xferTo} onChange={e => setXferTo(e.target.value)} disabled={!xferToCountry}>
+                      <option value="">{xferToCountry ? '— select airport —' : '— country first —'}</option>
+                      {allAirports.filter(ap => ap.country === xferToCountry).map(ap => (
+                        <option key={ap.iata_code} value={ap.iata_code}>{ap.iata_code} – {ap.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="sched-section-hd">Timing</div>
+              <div className="sched-section-body">
+                <div className="sched-2col">
+                  <div className="sched-form-row">
+                    <label>Day</label>
+                    <select value={xferDay} onChange={e => setXferDay(e.target.value)}>{dayOptions}</select>
+                  </div>
+                  <div className="sched-form-row">
+                    <label>Departure</label>
+                    <div className="sched-time-inputs">
+                      <input type="number" className="sched-time-inp" min="0" max="23" placeholder="HH"
+                        value={xferHour} onChange={e => setXferHour(e.target.value)}
+                        onBlur={e => setXferHour(clampHour(e.target.value))} />
+                      <span className="sched-time-sep">:</span>
+                      <input type="number" className="sched-time-inp" min="0" max="59" placeholder="MM"
+                        value={xferMinute} onChange={e => setXferMinute(e.target.value)}
+                        onBlur={e => setXferMinute(clampMinute(e.target.value))} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ fontSize: '0.76rem', color: '#888', margin: '0.25rem 0 0.75rem', lineHeight: 1.5 }}>
+                Transfer legs reposition the aircraft. They carry no passengers, need no route,
+                and are exempt from hub/expansion capacity limits. Duration is based on the great-circle
+                distance. Runway and range limits still apply.
+              </div>
+
+              <div className="sched-form-actions">
+                <button className="sched-btn-submit" onClick={handleTransferLegSubmit}
+                  disabled={submitting || !xferFrom || !xferTo || xferFrom === xferTo}>
+                  {submitting ? 'Scheduling...' : 'Schedule Transfer'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Maintenance */}
           {scheduleTab === 'maintenance' && (
             <div className="sched-form-body">
@@ -3165,7 +3332,11 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                         </td>
                         <td><span className={`ad-sf-badge ad-sf-badge--${st.cls}`} style={{ color: st.color }}>{st.label}</span></td>
                         <td className="ad-sf-pax">
-                          {(() => {
+                          {f.is_transfer ? (
+                            <span style={{ background: 'rgba(107,114,128,0.14)', color: '#4b5563', fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.04em', borderRadius: '4px', padding: '0.15rem 0.55rem', whiteSpace: 'nowrap' }}>
+                              FERRY
+                            </span>
+                          ) : (() => {
                             // Single whole-aircraft load percentage (across all classes)
                             const fillPct = f.total_seats > 0 ? Math.round((f.seats_sold ?? 0) / f.total_seats * 100) : 0;
                             const fc = fillPct >= 80 ? '#16a34a' : fillPct >= 50 ? '#ca8a04' : '#dc2626';
@@ -3553,7 +3724,14 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                   </tbody>
                 </table>
 
+                {editEntry.is_transfer && (
+                  <div style={{ margin: '0.75rem 0 0.25rem', padding: '0.6rem 0.8rem', background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: 6, fontSize: '0.82rem', color: '#374151' }}>
+                    Transfer flight — repositions the aircraft, carries no passengers. No hub/expansion limits.
+                  </div>
+                )}
+
                 {/* Tickets section */}
+                {!editEntry.is_transfer && (<>
                 <div className="sf-section-hd">Tickets</div>
                 <table className="sf-table">
                   <tbody>
@@ -3616,6 +3794,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     </tr>
                   </tbody>
                 </table>
+                </>)}
               </div>
 
               <div className="sched-modal-footer">
@@ -4404,10 +4583,11 @@ const styles = `
   .ad-sf-badge--cancelled  { background: #FEF2F2; color: #b91c1c; }
 
   /* Tabs */
-  .sched-tabs { display: flex; border-bottom: 1px solid #E0E0E0; background: #FAFAFA; }
-  .sched-tab { flex: 1; padding: 0.75rem 1rem; background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer; font-size: 0.88rem; font-weight: 500; color: #666666; transition: all 0.15s; margin-bottom: -1px; }
-  .sched-tab:hover { color: #2C2C2C; background: #F5F5F5; }
-  .sched-tab.active { color: #2C2C2C; border-bottom-color: #2C2C2C; font-weight: 700; background: #FFFFFF; }
+  .sched-typebar { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; border-bottom: 1px solid #E0E0E0; background: #FAFAFA; }
+  .sched-typebar-label { flex: 0 0 auto; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #888; }
+  .sched-typebar-select { flex: 1 1 auto; min-width: 0; padding: 0.5rem 2rem 0.5rem 0.7rem; border: 1px solid #E0E0E0; border-radius: 6px; background: #FFFFFF; font-size: 0.9rem; font-weight: 600; color: #2C2C2C; cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23666' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 0.7rem center; }
+  .sched-typebar-select:hover { border-color: #C7C7C7; }
+  .sched-typebar-select:focus { outline: none; border-color: #2C2C2C; box-shadow: 0 0 0 2px rgba(44,44,44,0.08); }
 
   /* Form body */
   .sched-form-body { padding: 0; padding-bottom: 0.25rem; }

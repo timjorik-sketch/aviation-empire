@@ -146,7 +146,10 @@ router.get('/', authMiddleware, async (req, res) => {
       SELECT
         f.id, f.flight_number, f.departure_time, f.arrival_time,
         f.ticket_price, f.total_seats, f.seats_sold, f.status, f.revenue, f.created_at,
-        r.departure_airport, r.arrival_airport, r.distance_km,
+        COALESCE(r.departure_airport, ws.departure_airport) as departure_airport,
+        COALESCE(r.arrival_airport,   ws.arrival_airport)   as arrival_airport,
+        COALESCE(r.distance_km, ws.distance_km)             as distance_km,
+        COALESCE(ws.is_transfer, 0) as is_transfer,
         dep.name as departure_name, arr.name as arrival_name,
         arr.continent as arrival_continent, arr.country as arrival_country,
         ac.registration, at.full_name as aircraft_type, f.aircraft_id,
@@ -156,9 +159,10 @@ router.get('/', authMiddleware, async (req, res) => {
         arr.latitude as arr_lat, arr.longitude as arr_lon,
         div_apt.latitude as div_lat, div_apt.longitude as div_lon
       FROM flights f
-      JOIN routes r ON f.route_id = r.id
-      JOIN airports dep ON r.departure_airport = dep.iata_code
-      JOIN airports arr ON r.arrival_airport = arr.iata_code
+      LEFT JOIN routes r ON f.route_id = r.id
+      LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
+      LEFT JOIN airports dep ON COALESCE(r.departure_airport, ws.departure_airport) = dep.iata_code
+      LEFT JOIN airports arr ON COALESCE(r.arrival_airport, ws.arrival_airport) = arr.iata_code
       LEFT JOIN airports div_apt ON f.diversion_airport_code = div_apt.iata_code
       JOIN aircraft ac ON f.aircraft_id = ac.id
       JOIN aircraft_types at ON ac.aircraft_type_id = at.id
@@ -183,6 +187,7 @@ router.get('/', authMiddleware, async (req, res) => {
       departure_airport: row.departure_airport,
       arrival_airport: row.arrival_airport,
       distance_km: row.distance_km,
+      is_transfer: !!row.is_transfer,
       departure_name: row.departure_name,
       arrival_name: row.arrival_name,
       arrival_continent: row.arrival_continent,
@@ -743,8 +748,8 @@ async function generateFlights() {
                ws.departure_airport, ws.arrival_airport,
                ws.departure_time, ws.arrival_time,
                ws.economy_price, ws.business_price, ws.first_price,
-               ws.route_id, ws.service_profile_id,
-               COALESCE(r.distance_km, 0) as distance_km
+               ws.route_id, ws.service_profile_id, ws.is_transfer,
+               COALESCE(r.distance_km, ws.distance_km, 0) as distance_km
         FROM weekly_schedule ws
         LEFT JOIN routes r ON ws.route_id = r.id
         WHERE ws.aircraft_id = $1
@@ -756,6 +761,7 @@ async function generateFlights() {
         dep_time: r.departure_time, arr_time: r.arrival_time,
         eco_price: r.economy_price, biz_price: r.business_price, first_price: r.first_price,
         route_id: r.route_id, service_profile_id: r.service_profile_id,
+        is_transfer: !!r.is_transfer,
         distance_km: r.distance_km
       }));
 
@@ -806,30 +812,38 @@ async function generateFlights() {
           );
           if (conflictResult.rows[0]) continue;
 
-          const ecoPrice   = entry.eco_price   ?? 0;
-          const bizPrice   = entry.biz_price   ?? ecoPrice;
-          const firstPrice = entry.first_price ?? ecoPrice;
-          const distKm     = entry.distance_km || 1000;
-
+          const distKm    = entry.distance_km || 1000;
           const depCat = airportCatMap.get(entry.dep_airport) ?? 4;
           const arrCat = airportCatMap.get(entry.arr_airport) ?? 4;
-
-          const mp = calcMarketPrices(distKm, depCat, arrCat);
           const atcFee = Math.round(distKm * ATC_RATE_PER_KM);
 
-          const satEcoSeats = (ecoSeats + bizSeats + firstSeats > 0) ? ecoSeats : totalSeats;
-          const { score: satisfactionScore, violations } = await calcFlightSatisfaction({
-            distKm,
-            serviceProfileId: entry.service_profile_id ?? null,
-            condition: ac.condition ?? 100,
-            ecoSeats: satEcoSeats,
-            bizSeats,
-            firstSeats,
-            ecoSeatType,
-            bizSeatType,
-            firstSeatType,
-          });
-          const violatedRulesJson = JSON.stringify(violations);
+          // Transfer (ferry) legs carry no passengers: zero seats/prices, no market
+          // demand, no satisfaction scoring. Operational costs (fuel/ATC/landing)
+          // still apply at completion — same as a real positioning flight.
+          const isXfer = entry.is_transfer;
+          const ecoPrice   = isXfer ? 0 : (entry.eco_price ?? 0);
+          const flightSeats = isXfer ? 0 : totalSeats;
+
+          let mp = { eco: 0, biz: 0, first: 0 };
+          let satisfactionScore = null;
+          let violatedRulesJson = '[]';
+          if (!isXfer) {
+            mp = calcMarketPrices(distKm, depCat, arrCat);
+            const satEcoSeats = (ecoSeats + bizSeats + firstSeats > 0) ? ecoSeats : totalSeats;
+            const sat = await calcFlightSatisfaction({
+              distKm,
+              serviceProfileId: entry.service_profile_id ?? null,
+              condition: ac.condition ?? 100,
+              ecoSeats: satEcoSeats,
+              bizSeats,
+              firstSeats,
+              ecoSeatType,
+              bizSeatType,
+              firstSeatType,
+            });
+            satisfactionScore = sat.score;
+            violatedRulesJson = JSON.stringify(sat.violations);
+          }
 
           await pool.query(`
             INSERT INTO flights (
@@ -846,9 +860,9 @@ async function generateFlights() {
           `, [
             ac.airline_id, entry.route_id ?? null, ac.id, entry.flight_number,
             depDT.toISOString(), arrDT.toISOString(),
-            ecoPrice, ecoPrice, entry.biz_price ?? null, entry.first_price ?? null,
-            totalSeats,
-            entry.id, entry.service_profile_id ?? null,
+            ecoPrice, ecoPrice, isXfer ? null : (entry.biz_price ?? null), isXfer ? null : (entry.first_price ?? null),
+            flightSeats,
+            entry.id, isXfer ? null : (entry.service_profile_id ?? null),
             atcFee, mp.eco, mp.biz, mp.first, satisfactionScore, violatedRulesJson
           ]);
 
@@ -1039,6 +1053,7 @@ async function patchNullSatisfactionScores() {
     LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
     LEFT JOIN routes ws_r ON ws.route_id = ws_r.id
     WHERE f.satisfaction_score IS NULL AND f.status != 'cancelled'
+      AND COALESCE(ws.is_transfer, 0) = 0
     LIMIT 30
   `);
   const toFix = findResult.rows.map(r => ({
@@ -1308,7 +1323,7 @@ async function processFlights() {
     // departure_time keeps them parked until their new takeoff slot.
     const boardingReadyResult = await pool.query(`
       SELECT f.id, f.flight_number,
-             COALESCE(r.distance_km, ws_r.distance_km, 0) as distance_km,
+             COALESCE(r.distance_km, ws_r.distance_km, ws.distance_km, 0) as distance_km,
              COALESCE(at.fuel_consumption_per_km, 2.8) as fuel_per_km
       FROM flights f
       LEFT JOIN routes r ON f.route_id = r.id
@@ -1351,7 +1366,7 @@ async function processFlights() {
              f.service_profile_id, f.departure_time, f.arrival_time,
              f.booking_revenue_collected, f.flight_number, COALESCE(f.revenue, 0) as flight_revenue,
              COALESCE(r.departure_airport, ws.departure_airport) as departure_airport,
-             COALESCE(r.distance_km, ws_r.distance_km, 0) as distance_km,
+             COALESCE(r.distance_km, ws_r.distance_km, ws.distance_km, 0) as distance_km,
              COALESCE(at.wake_turbulence_category, 'M') as wake_cat,
              COALESCE(f.fuel_cost, 0) as fuel_cost,
              COALESCE(f.atc_fee, 0) as atc_fee,

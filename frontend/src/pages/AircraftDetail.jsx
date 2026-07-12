@@ -428,9 +428,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [mStartMinute, setMStartMinute] = useState('00');
 
   // Transfer leg form (in-schedule ferry flight — no passengers, any airport → any)
-  const [xferFromCountry, setXferFromCountry] = useState('');
   const [xferFrom, setXferFrom]               = useState('');
-  const [xferToCountry, setXferToCountry]     = useState('');
   const [xferTo, setXferTo]                   = useState('');
   const [xferDay, setXferDay]                 = useState('0');
   const [xferHour, setXferHour]               = useState('08');
@@ -1199,6 +1197,31 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     } catch (err) { setError(err.message); }
     finally { setSubmitting(false); }
   };
+
+  // Opened destinations for the transfer picker, hubs first (home base / hub / primary hub),
+  // each group sorted by name. Both From and To draw from this same list.
+  const xferDestinations = useMemo(() => {
+    const isHub = d => d.destination_type === 'home_base' || d.destination_type === 'hub' || d.display_type === 'primary_hub';
+    const sorted = [...airports].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    return { hubs: sorted.filter(isHub), others: sorted.filter(d => !isHub(d)) };
+  }, [airports]);
+
+  const renderXferOptions = () => (
+    <>
+      {xferDestinations.hubs.length > 0 && (
+        <optgroup label="Hubs">
+          {xferDestinations.hubs.map(ap => (
+            <option key={`h-${ap.iata_code}`} value={ap.iata_code}>{ap.iata_code} – {ap.name}</option>
+          ))}
+        </optgroup>
+      )}
+      <optgroup label="Destinations">
+        {xferDestinations.others.map(ap => (
+          <option key={`d-${ap.iata_code}`} value={ap.iata_code}>{ap.iata_code} – {ap.name}</option>
+        ))}
+      </optgroup>
+    </>
+  );
 
   const handleTransferLegSubmit = async () => {
     if (!xferFrom || !xferTo) { setError('Please select a departure and destination airport'); return; }
@@ -3068,45 +3091,19 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
             <div className="sched-form-body">
               <div className="sched-section-hd">Route</div>
               <div className="sched-section-body">
-                <div className="sched-2col">
-                  <div className="sched-form-row">
-                    <label>From — Country</label>
-                    <select value={xferFromCountry} onChange={e => { setXferFromCountry(e.target.value); setXferFrom(''); }}>
-                      <option value="">— select country —</option>
-                      {[...new Set(allAirports.map(a => a.country))].sort().map(c => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="sched-form-row">
-                    <label>From — Airport</label>
-                    <select value={xferFrom} onChange={e => setXferFrom(e.target.value)} disabled={!xferFromCountry}>
-                      <option value="">{xferFromCountry ? '— select airport —' : '— country first —'}</option>
-                      {allAirports.filter(ap => ap.country === xferFromCountry).map(ap => (
-                        <option key={ap.iata_code} value={ap.iata_code}>{ap.iata_code} – {ap.name}</option>
-                      ))}
-                    </select>
-                  </div>
+                <div className="sched-form-row">
+                  <label>From</label>
+                  <select value={xferFrom} onChange={e => setXferFrom(e.target.value)}>
+                    <option value="">— select —</option>
+                    {renderXferOptions()}
+                  </select>
                 </div>
-                <div className="sched-2col">
-                  <div className="sched-form-row">
-                    <label>To — Country</label>
-                    <select value={xferToCountry} onChange={e => { setXferToCountry(e.target.value); setXferTo(''); }}>
-                      <option value="">— select country —</option>
-                      {[...new Set(allAirports.map(a => a.country))].sort().map(c => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="sched-form-row">
-                    <label>To — Airport</label>
-                    <select value={xferTo} onChange={e => setXferTo(e.target.value)} disabled={!xferToCountry}>
-                      <option value="">{xferToCountry ? '— select airport —' : '— country first —'}</option>
-                      {allAirports.filter(ap => ap.country === xferToCountry).map(ap => (
-                        <option key={ap.iata_code} value={ap.iata_code}>{ap.iata_code} – {ap.name}</option>
-                      ))}
-                    </select>
-                  </div>
+                <div className="sched-form-row">
+                  <label>To</label>
+                  <select value={xferTo} onChange={e => setXferTo(e.target.value)}>
+                    <option value="">— select —</option>
+                    {renderXferOptions()}
+                  </select>
                 </div>
               </div>
 
@@ -3130,12 +3127,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     </div>
                   </div>
                 </div>
-              </div>
-
-              <div style={{ fontSize: '0.76rem', color: '#888', margin: '0.25rem 0 0.75rem', lineHeight: 1.5 }}>
-                Transfer legs reposition the aircraft. They carry no passengers, need no route,
-                and are exempt from hub/expansion capacity limits. Duration is based on the great-circle
-                distance. Runway and range limits still apply.
               </div>
 
               <div className="sched-form-actions">

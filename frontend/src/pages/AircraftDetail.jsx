@@ -1950,10 +1950,11 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     const h = String(Math.floor(depMin / 60)).padStart(2, '0');
     const m = String(depMin % 60).padStart(2, '0');
     const day = String(dayIndex);
-    // Fill all three tabs so the user can switch to any of them
+    // Fill every tab's timing so the user can switch to any of them
     setSDay(day); setSDepHour(h); setSDepMinute(m);
     setRDay(day); setRDepHour(h); setRDepMinute(m);
     setMDay(day); setMStartHour(h); setMStartMinute(m);
+    setXferDay(day); setXferHour(h); setXferMinute(m);
     document.querySelector('.ad-form-card')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
 
@@ -1976,6 +1977,9 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     const baseDay = overrideDay ?? f.dayIndex;
     const newDay = (baseDay + dayOffset) % 7; // dayIndex is 0-6
     applyNextDep(newDay, nextMin);
+    // "Schedule next from X" — prefill the transfer origin with the airport the
+    // aircraft just landed at (only helps the Transfer tab; other tabs use routes).
+    if (f.arrival_airport) setXferFrom(f.arrival_airport);
   };
 
   const openEditModal = (entry) => {

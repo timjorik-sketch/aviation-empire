@@ -46,56 +46,95 @@ function expandWindows(banks, startKey, endKey, weeks) {
   return occ;
 }
 
-// DP search for the best chain of round trips anchored at `anchorDep`.
-// Returns an array of complete weeks, each { legs:[{depWk,arrWk,depWin,arrWin}], lay }.
-// `lay` is total destination layover (idle beyond the minimum round trip).
+// Up to `maxN` sample positions across [lo, hi] (always incl. both ends).
+function positions(lo, hi, maxN) {
+  if (hi <= lo) return [lo];
+  if (maxN <= 1) return [lo];
+  const out = [];
+  for (let i = 0; i < maxN; i++) out.push(Math.round(lo + (hi - lo) * i / (maxN - 1)));
+  return [...new Set(out)];
+}
+
+// DP search for the best chains of round trips anchored at `anchorDep`.
+//
+// Crucially it does NOT force every flight to the earliest possible minute: it
+// samples several DEPARTURE positions across each departure window and several
+// ARRIVAL positions across each arrival window, so it can push flights later to
+// consolidate idle time into one big gap (e.g. to fit maintenance without
+// dropping a rotation). State = cursor (next-free-to-depart); per cursor it keeps
+// a small Pareto front trading total layover against the largest single gap so
+// far (`maxGap`), because a placement with a bit more layover but a bigger gap may
+// fit maintenance and thus yield MORE effective flights. Returns complete weeks
+// { legs, lay, maxGap, firstDep }.
 function searchWeek(anchorDep, depWindows, arrWindows, oneWay, turnaround) {
   const Lmin = 2 * oneWay + turnaround;
-  const limit = anchorDep + WEEK;   // one full cycle; next week's first dep is here
-  const BEAM = 400;                 // safety cap on distinct states per step
+  const limit = anchorDep + WEEK;
+  // Short round trips pack many rotations into the week, so position sampling
+  // there explodes the search for little gain (flights are forced tight anyway).
+  // Sample more positions only when round trips are long (few per week).
+  const POS_N = Lmin >= 8 * 60 ? 4 : (Lmin >= 4 * 60 ? 3 : 2);
+  const PER_CURSOR = 3;    // Pareto states kept per cursor
+  const GLOBAL_CAP = 600;
 
-  let beam = [{ legs: [], cursor: anchorDep, lay: 0 }];
+  let beam = [{ legs: [], cursor: anchorDep, lay: 0, maxGap: 0, firstDep: null }];
   const complete = [];
 
   for (let step = 0; step < 80; step++) {   // depth guard
-    const byCursor = new Map();              // dedup: future depends only on cursor
+    const buckets = new Map();               // cursor -> candidate states
 
     for (const st of beam) {
       let extended = false;
       for (const dw of depWindows) {
-        if (dw.end < st.cursor) continue;          // window already passed
-        if (dw.start > st.cursor + DAY) continue;  // don't skip more than a day of departures
-        const D = Math.max(st.cursor, dw.start);
-        if (D >= limit) continue;
-        for (const aw of arrWindows) {
-          if (aw.end < D + Lmin) continue;
-          if (aw.start > D + Lmin + DAY) continue; // don't idle more than a day at the destination
-          const A = Math.max(D + Lmin, aw.start);
-          if (A > aw.end) continue;
-          if (A + turnaround > limit) continue;    // return must close before the week wraps
-          extended = true;
-          const cursor = A + turnaround;
-          const cand = {
-            legs: st.legs.concat({ depWk: D, arrWk: A, depWin: { lo: dw.start, hi: dw.end }, arrWin: { lo: aw.start, hi: aw.end } }),
-            cursor,
-            lay: st.lay + (A - D - Lmin),
-          };
-          const ex = byCursor.get(cursor);
-          // Per cursor keep the strongest partial: more round trips, then less layover.
-          if (!ex || cand.legs.length > ex.legs.length ||
-              (cand.legs.length === ex.legs.length && cand.lay < ex.lay)) {
-            byCursor.set(cursor, cand);
+        if (dw.end < st.cursor) continue;
+        if (dw.start > st.cursor + DAY) continue;
+        const dLo = Math.max(st.cursor, dw.start);
+        const dHi = Math.min(dw.end, limit - 1);
+        if (dHi < dLo) continue;
+        for (const D of positions(dLo, dHi, POS_N)) {
+          for (const aw of arrWindows) {
+            if (aw.end < D + Lmin) continue;
+            if (aw.start > D + Lmin + DAY) continue;
+            const aLo = Math.max(D + Lmin, aw.start);
+            const aHi = Math.min(aw.end, limit - turnaround);
+            if (aHi < aLo) continue;
+            for (const A of positions(aLo, aHi, POS_N)) {
+              extended = true;
+              const cursor = A + turnaround;
+              const prevArr = st.legs.length ? st.legs[st.legs.length - 1].arrWk : null;
+              const hubGap = prevArr == null ? 0 : (D - prevArr);   // gap before this departure
+              const destGap = A - D - 2 * oneWay;                    // destination layover
+              const ns = {
+                legs: st.legs.concat({ depWk: D, arrWk: A, depWin: { lo: dw.start, hi: dw.end }, arrWin: { lo: aw.start, hi: aw.end } }),
+                cursor,
+                lay: st.lay + (A - D - Lmin),
+                maxGap: Math.max(st.maxGap, hubGap, destGap),
+                firstDep: st.firstDep == null ? D : st.firstDep,
+              };
+              let arr = buckets.get(cursor);
+              if (!arr) { arr = []; buckets.set(cursor, arr); }
+              arr.push(ns);
+            }
           }
         }
       }
       if (!extended && st.legs.length) complete.push(st);
     }
 
-    if (byCursor.size === 0) break;
-    beam = [...byCursor.values()];
-    if (beam.length > BEAM) {
-      beam.sort((a, b) => a.cursor - b.cursor || a.lay - b.lay);
-      beam = beam.slice(0, BEAM);
+    if (buckets.size === 0) break;
+
+    // Per cursor keep the Pareto front (least layover vs largest gap).
+    const next = [];
+    for (const arr of buckets.values()) {
+      arr.sort((a, b) => a.lay - b.lay || b.maxGap - a.maxGap);
+      let bestMax = -1, kept = 0;
+      for (const s of arr) {
+        if (s.maxGap > bestMax) { next.push(s); bestMax = s.maxGap; if (++kept >= PER_CURSOR) break; }
+      }
+    }
+    beam = next;
+    if (beam.length > GLOBAL_CAP) {
+      beam.sort((a, b) => b.legs.length - a.legs.length || a.lay - b.lay);
+      beam = beam.slice(0, GLOBAL_CAP);
     }
   }
   for (const st of beam) if (st.legs.length) complete.push(st);
@@ -191,18 +230,22 @@ export function planBanks({ oneWayMinutes, turnaround, banks, maintDuration }) {
   //      anywhere without dropping a rotation;
   //   2. least total destination layover (cleaner, tighter rhythm);
   //   3. earliest first departure (deterministic, Monday-first).
+  const need = maintDuration > 0 ? maintDuration + 2 * turnaround : 0;
   let best = null;
   for (const b of banks) {
     const plans = searchWeek(b.earliest_departure, depWindows, arrWindows, oneWay, turnaround);
     for (const pl of plans) {
       if (!pl.legs.length) continue;
-      const fits = maintFits(pl.legs, oneWay, turnaround, maintDuration);
+      // Largest gap incl. the wrap gap (last arrival → next week's first departure).
+      const lastArr = pl.legs[pl.legs.length - 1].arrWk;
+      const wrapGap = (pl.firstDep + WEEK) - lastArr;
+      const finalMax = Math.max(pl.maxGap, wrapGap);
+      const fits = need === 0 ? true : finalMax >= need;
       const eff = pl.legs.length - (fits ? 0 : 1);
-      const firstDep = Math.min(...pl.legs.map(l => l.depWk));
       if (best === null || eff > best.eff ||
           (eff === best.eff && (pl.lay < best.lay ||
-          (pl.lay === best.lay && firstDep < best.firstDep)))) {
-        best = { chain: pl.legs, eff, lay: pl.lay, firstDep };
+          (pl.lay === best.lay && pl.firstDep < best.firstDep)))) {
+        best = { chain: pl.legs, eff, lay: pl.lay, firstDep: pl.firstDep };
       }
     }
   }

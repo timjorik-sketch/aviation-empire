@@ -199,6 +199,49 @@ function placeMaintenance(rts, oneWay, turnaround, duration) {
   return { legs: [], maintStartWk: 0 };
 }
 
+// Explicitly build "same time every day" candidates: one rotation per day that
+// departs at the SAME clock time T_d and arrives at the SAME clock time T_a every
+// day (the return landing `delta` days later). These guarantee the perfectly
+// regular option is evaluated even if the DP's pruning would drop it. Layover is
+// minimised, which also maximises the daily hub gap so maintenance tends to fit.
+function uniformDailyCandidates(banks, oneWay, turnaround) {
+  const Lmin = 2 * oneWay + turnaround;
+  const out = [];
+  for (const bd of banks) {
+    let dLo = bd.earliest_departure, dHi = bd.latest_departure; if (dHi < dLo) dHi += DAY;
+    for (const ba of banks) {
+      let aLo = ba.earliest_arrival, aHi = ba.latest_arrival; if (aHi < aLo) aHi += DAY;
+      for (let delta = 0; delta <= 3; delta++) {
+        let best = null;
+        for (let Td = dLo; Td <= dHi; Td += 5) {
+          // Ta in the arrival window, with elapsed = delta*DAY + Ta - Td >= Lmin
+          // and one-per-day feasibility: Ta - Td <= (1-delta)*DAY - turnaround.
+          const taLo = Math.max(aLo, Td + Lmin - delta * DAY);
+          const taHi = Math.min(aHi, Td + (1 - delta) * DAY - turnaround);
+          if (taLo > taHi) continue;
+          const Ta = taLo;                       // earliest arrival → least layover
+          const layover = delta * DAY + Ta - Td - Lmin;
+          if (!best || layover < best.layover) best = { Td, Ta, layover };
+        }
+        if (!best) continue;
+        const elapsed = delta * DAY + best.Ta - best.Td;
+        if (elapsed < Lmin) continue;
+        const legs = [];
+        for (let k = 0; k < 7; k++) {
+          const depWk = k * DAY + best.Td;
+          legs.push({
+            depWk, arrWk: depWk + elapsed,
+            depWin: { lo: k * DAY + dLo, hi: k * DAY + dHi },
+            arrWin: { lo: (k + delta) * DAY + aLo, hi: (k + delta) * DAY + aHi },
+          });
+        }
+        out.push({ legs, lay: 7 * best.layover, firstDep: legs[0].depWk });
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * Plan a bank-aligned weekly rotation for one aircraft on one round-trip route.
  *
@@ -228,27 +271,38 @@ export function planBanks({ oneWayMinutes, turnaround, banks, maintDuration }) {
   // Score every complete week and keep the best:
   //   1. effective flights — round trips minus one if maintenance can't fit
   //      anywhere without dropping a rotation;
-  //   2. least total destination layover (cleaner, tighter rhythm);
-  //   3. earliest first departure (deterministic, Monday-first).
+  //   2. REGULARITY — prefer the same clock times every day (fewest distinct
+  //      departure/arrival minutes-of-day). "Same every day when possible."
+  //   3. least total destination layover (cleaner, tighter rhythm);
+  //   4. earliest first departure (deterministic, Monday-first).
   const need = maintDuration > 0 ? maintDuration + 2 * turnaround : 0;
+  const regularity = (legs) => {
+    const dep = new Set(), arr = new Set();
+    for (const l of legs) { dep.add(((l.depWk % 1440) + 1440) % 1440); arr.add(((l.arrWk % 1440) + 1440) % 1440); }
+    return dep.size + arr.size; // fewer distinct times-of-day = more regular
+  };
   let best = null;
+  const consider = (legs, lay, firstDep) => {
+    if (!legs.length) return;
+    const gaps = allGaps(legs, oneWay, turnaround);       // largest gap anywhere (incl. wrap + dest layovers)
+    const finalMax = gaps.length ? Math.max(...gaps.map(g => g.size)) : 0;
+    const fits = need === 0 ? true : finalMax >= need;
+    const eff = legs.length - (fits ? 0 : 1);
+    const reg = regularity(legs);
+    if (best === null || eff > best.eff ||
+        (eff === best.eff && (reg < best.reg ||
+        (reg === best.reg && (lay < best.lay ||
+        (lay === best.lay && firstDep < best.firstDep)))))) {
+      best = { chain: legs, eff, reg, lay, firstDep };
+    }
+  };
   for (const b of banks) {
-    const plans = searchWeek(b.earliest_departure, depWindows, arrWindows, oneWay, turnaround);
-    for (const pl of plans) {
-      if (!pl.legs.length) continue;
-      // Largest gap incl. the wrap gap (last arrival → next week's first departure).
-      const lastArr = pl.legs[pl.legs.length - 1].arrWk;
-      const wrapGap = (pl.firstDep + WEEK) - lastArr;
-      const finalMax = Math.max(pl.maxGap, wrapGap);
-      const fits = need === 0 ? true : finalMax >= need;
-      const eff = pl.legs.length - (fits ? 0 : 1);
-      if (best === null || eff > best.eff ||
-          (eff === best.eff && (pl.lay < best.lay ||
-          (pl.lay === best.lay && pl.firstDep < best.firstDep)))) {
-        best = { chain: pl.legs, eff, lay: pl.lay, firstDep: pl.firstDep };
-      }
+    for (const pl of searchWeek(b.earliest_departure, depWindows, arrWindows, oneWay, turnaround)) {
+      consider(pl.legs, pl.lay, pl.firstDep);
     }
   }
+  // Also weigh explicit "same time every day" candidates.
+  for (const u of uniformDailyCandidates(banks, oneWay, turnaround)) consider(u.legs, u.lay, u.firstDep);
 
   if (!best || best.chain.length === 0) {
     return { roundTrips: [], maintStartWk: null, maintDuration: 0, feasible: false, note: 'No bank-compliant round trip fits' };

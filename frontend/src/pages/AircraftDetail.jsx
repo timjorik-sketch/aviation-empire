@@ -1802,6 +1802,9 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       }
       setIsActive(data.is_active);
       setSuccess(data.message);
+      // The backend generates flight instances on activation — refetch so they
+      // appear immediately instead of only on the next auto-refresh tick.
+      fetchScheduledFlights();
     } catch (err) { setError(err.message); }
   };
 

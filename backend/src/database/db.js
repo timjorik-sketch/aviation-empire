@@ -407,6 +407,9 @@ async function initDatabase() {
     `ALTER TABLE flights ADD COLUMN IF NOT EXISTS market_price_first REAL DEFAULT 0`,
     `ALTER TABLE flights ADD COLUMN IF NOT EXISTS satisfaction_score INTEGER`,
     `ALTER TABLE flights ADD COLUMN IF NOT EXISTS violated_rules TEXT`,
+    // Transfer (ferry) flights have no route — route_id must be nullable, otherwise
+    // generateFlights throws on the NOT NULL constraint and aborts the whole cycle.
+    `ALTER TABLE flights ALTER COLUMN route_id DROP NOT NULL`,
     // weekly_schedule table
     `ALTER TABLE weekly_schedule ADD COLUMN IF NOT EXISTS economy_price REAL`,
     `ALTER TABLE weekly_schedule ADD COLUMN IF NOT EXISTS business_price REAL`,

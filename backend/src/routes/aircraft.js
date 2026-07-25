@@ -3,7 +3,7 @@ import { body, validationResult } from 'express-validator';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 import adminMiddleware from '../middleware/admin.js';
-import { calculateFlightDuration } from './flights.js';
+import { calculateFlightDuration, generateFlights } from './flights.js';
 import { validatePriceClamp } from '../utils/marketPricing.js';
 import { getAirports } from '../utils/airportCache.js';
 import { diversionGeoFraction } from '../utils/delaySystem.js';
@@ -1444,6 +1444,15 @@ router.patch('/:id/active', authMiddleware, async (req, res) => {
     }
 
     await pool.query('UPDATE aircraft SET is_active = $1 WHERE id = $2', [newIsActive, aircraftId]);
+
+    // Generate flight instances immediately on activation so newly scheduled
+    // flights (including transfer legs just added) show up right away instead of
+    // waiting for the hourly :13 generation job. Awaited so the client's refetch
+    // sees them; failures are non-fatal (the hourly job is the backstop).
+    if (newIsActive === 1) {
+      try { await generateFlights(); }
+      catch (genErr) { console.error('Activation generateFlights failed:', genErr); }
+    }
 
     res.json({
       message: `Aircraft ${newIsActive ? 'activated' : 'deactivated'}`,

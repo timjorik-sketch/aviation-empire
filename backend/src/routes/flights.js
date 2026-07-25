@@ -779,6 +779,7 @@ async function generateFlights() {
         const ourDay  = (jsDay + 6) % 7;
 
         for (const entry of entries) {
+         try {
           if (entry.day_of_week !== ourDay) continue;
 
           const depDT = cetToUTC(cetDateStr, entry.dep_time);
@@ -867,6 +868,10 @@ async function generateFlights() {
           ]);
 
           generated++;
+         } catch (entryErr) {
+           // One bad entry must never abort generation for the rest of the fleet.
+           console.error(`[FlightGen] entry ${entry.id} (ac ${ac.id}) failed:`, entryErr.message);
+         }
         }
       }
     }

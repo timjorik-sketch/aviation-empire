@@ -701,7 +701,10 @@ function cetToUTC(cetDateStr, cetTimeStr) {
 }
 
 // Generate flight instances from weekly_schedule templates for active aircraft (next 72h)
-async function generateFlights() {
+// onlyAircraftId: restrict generation to a single aircraft. Used on activation so
+// the request returns in milliseconds instead of walking every active aircraft in
+// the game; the hourly job still covers the whole fleet.
+async function generateFlights(onlyAircraftId = null) {
   try {
     const now = new Date();
     const horizon = new Date(now.getTime() + 72 * 60 * 60 * 1000);
@@ -712,7 +715,8 @@ async function generateFlights() {
       JOIN aircraft_types at ON a.aircraft_type_id = at.id
       WHERE a.is_active = 1
         AND EXISTS (SELECT 1 FROM weekly_schedule ws WHERE ws.aircraft_id = a.id)
-    `);
+        AND ($1::int IS NULL OR a.id = $1::int)
+    `, [onlyAircraftId]);
     const aircraft = acResult.rows.map(r => ({
       id: r.id, airline_id: r.airline_id, cabin_profile_id: r.airline_cabin_profile_id,
       max_passengers: r.max_passengers, condition: r.condition ?? 100
@@ -2154,6 +2158,7 @@ router.get('/weekly-schedule', authMiddleware, async (req, res) => {
       JOIN airports arr ON ws.arrival_airport = arr.iata_code
       LEFT JOIN routes r ON r.departure_airport = ws.departure_airport AND r.arrival_airport = ws.arrival_airport AND r.airline_id = ac.airline_id
       WHERE ac.airline_id = $1
+        AND COALESCE(ws.is_transfer, 0) = 0
       ORDER BY arr.name ASC, ws.day_of_week ASC, ws.departure_time ASC
     `, [airlineId]);
 

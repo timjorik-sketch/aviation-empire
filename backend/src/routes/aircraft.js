@@ -1447,10 +1447,12 @@ router.patch('/:id/active', authMiddleware, async (req, res) => {
 
     // Generate flight instances immediately on activation so newly scheduled
     // flights (including transfer legs just added) show up right away instead of
-    // waiting for the hourly :13 generation job. Awaited so the client's refetch
-    // sees them; failures are non-fatal (the hourly job is the backstop).
+    // waiting for the hourly :13 generation job. Scoped to THIS aircraft — a
+    // full-fleet pass took seconds and delayed the response, so the UI only
+    // flipped to green long after the click. Failures are non-fatal (the hourly
+    // job is the backstop).
     if (newIsActive === 1) {
-      try { await generateFlights(); }
+      try { await generateFlights(aircraftId); }
       catch (genErr) { console.error('Activation generateFlights failed:', genErr); }
     }
 

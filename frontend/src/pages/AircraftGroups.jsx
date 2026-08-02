@@ -135,11 +135,18 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
   }, [cabinProfiles, fleet, selectedAcIds]);
 
   // Aircraft that could physically fly this route — range and both runways.
+  // Grounded frames sort first: they are the ones free to be planned, while an
+  // operating one has to be pulled out of service for the write.
   const capableFleet = useMemo(() => {
     if (!fwdRoute) return [];
     const dist = fwdRoute.distance_km;
-    return fleet.filter(a => !a.range_km || dist <= a.range_km);
+    return fleet
+      .filter(a => !a.range_km || dist <= a.range_km)
+      .sort((x, y) => (x.is_active ? 1 : 0) - (y.is_active ? 1 : 0)
+                   || (x.registration || '').localeCompare(y.registration || ''));
   }, [fleet, fwdRoute]);
+
+  const groundedCount = useMemo(() => capableFleet.filter(a => !a.is_active).length, [capableFleet]);
 
   const toggleBank = (id) => {
     clearPlan();
@@ -273,7 +280,9 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
       const data = await res.json();
       if (!res.ok) setError(data.error || 'Could not write the plan');
       else {
-        const failed = (data.activation || []).filter(a => !a.activated);
+        // left_grounded is not a failure: the aircraft was parked before the
+        // plan and stays parked, schedule written, for the player to activate.
+        const failed = (data.activation || []).filter(a => !a.activated && !a.left_grounded);
         setSuccess(data.message);
         if (failed.length) {
           setError(`Not activated: ${failed.map(f => `${f.registration} (${f.error})`).join(', ')}`);
@@ -401,18 +410,26 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
                   <button className="ag-btn-link" onClick={() => { clearPlan(); setSelectedAcIds([]); }}>Clear</button>
                 </div>
                 <div className="ag-ac-list">
-                  {capableFleet.map(a => {
+                  {capableFleet.map((a, i) => {
                     const on = selectedAcIds.includes(a.id);
+                    // One divider where the grounded block ends and the operating
+                    // one begins, so the sort order reads as intentional.
+                    const startsOperating = a.is_active && i === groundedCount && groundedCount > 0;
                     return (
-                      <label key={a.id} className={`ag-ac${on ? ' ag-ac--on' : ''}`}>
-                        <input type="checkbox" checked={on} onChange={() => toggleAircraft(a.id)} />
-                        <span className={`ag-dot${a.is_active ? ' ag-dot--on' : ''}`} title={a.is_active ? 'Operating' : 'Grounded'} />
-                        <span className="ag-ac-reg">{a.registration}</span>
-                        <span className="ag-ac-name">{a.name || '—'}</span>
-                        <span className="ag-ac-type">{a.full_name}</span>
-                        <span className="ag-ac-loc">{a.current_location || a.home_airport}</span>
-                        {!a.airline_cabin_profile_id && <span className="ag-ac-warn">no cabin profile</span>}
-                      </label>
+                      <div key={a.id} className="ag-ac-row">
+                        {startsOperating && <div className="ag-ac-divider">Currently operating</div>}
+                        <label className={`ag-ac${on ? ' ag-ac--on' : ''}`}>
+                          <input type="checkbox" checked={on} onChange={() => toggleAircraft(a.id)} />
+                          <span className={`ag-dot${a.is_active ? ' ag-dot--on' : ''}`} title={a.is_active ? 'Operating' : 'Grounded'} />
+                          <span className="ag-ac-reg">{a.registration}</span>
+                          <span className="ag-ac-name">{a.name || '—'}</span>
+                          <span className="ag-ac-type">{a.full_name}</span>
+                          {a.airline_cabin_profile_name
+                            ? <span className="ag-ac-cabin">{a.airline_cabin_profile_name}</span>
+                            : <span className="ag-ac-warn">no cabin profile</span>}
+                          <span className="ag-ac-loc">{a.current_location || a.home_airport}</span>
+                        </label>
+                      </div>
                     );
                   })}
                 </div>
@@ -711,8 +728,15 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
           font-size: 0.85rem; font-weight: 600; cursor: pointer; text-decoration: underline;
         }
         .ag-ac-list { display: flex; flex-direction: column; gap: 0.3rem; max-height: 380px; overflow-y: auto; }
+        .ag-ac-row { display: flex; flex-direction: column; gap: 0.3rem; }
+        .ag-ac-divider {
+          margin-top: 0.5rem; padding: 0 0.65rem 0.15rem;
+          font-size: 0.72rem; font-weight: 700; color: #999;
+          text-transform: uppercase; letter-spacing: 0.05em;
+          border-bottom: 1px solid #F0F0F0;
+        }
         .ag-ac {
-          display: grid; grid-template-columns: 20px 12px 110px 1fr 1fr 60px auto;
+          display: grid; grid-template-columns: 20px 12px 110px 1fr 1fr 1fr 60px;
           gap: 0.6rem; align-items: center; cursor: pointer;
           padding: 0.55rem 0.65rem; border: 1px solid #E0E0E0; border-radius: 6px; background: #fff;
         }
@@ -722,8 +746,12 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
         .ag-dot--on { background: #22C55E; box-shadow: 0 0 0 3px rgba(34,197,94,0.18); }
         .ag-ac-reg { font-weight: 700; color: #2C2C2C; font-size: 0.9rem; letter-spacing: 0.02em; }
         .ag-ac-name, .ag-ac-type { font-size: 0.87rem; color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ag-ac-cabin { font-size: 0.85rem; color: #2C2C2C; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .ag-ac-loc { font-size: 0.82rem; color: #888; font-weight: 600; }
-        .ag-ac-warn { font-size: 0.72rem; color: #B45309; background: #FFFBEB; border-radius: 4px; padding: 0.15rem 0.4rem; }
+        .ag-ac-warn {
+          font-size: 0.72rem; color: #B45309; background: #FFFBEB; border: 1px solid #FDE68A;
+          border-radius: 4px; padding: 0.15rem 0.4rem; justify-self: start; white-space: nowrap;
+        }
 
         .ag-actions { display: flex; justify-content: flex-end; margin-top: 0.5rem; }
         .ag-btn-primary {
@@ -811,7 +839,7 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
           .ag-bank-head { display: none; }
           .ag-bank { grid-template-columns: 1fr; gap: 0.4rem; }
           .ag-ac { grid-template-columns: 20px 12px 1fr; row-gap: 0.3rem; }
-          .ag-ac-type, .ag-ac-loc { grid-column: 3; }
+          .ag-ac-type, .ag-ac-cabin, .ag-ac-warn, .ag-ac-loc { grid-column: 3; }
           .ag-acc-hd { grid-template-columns: 16px 1fr; row-gap: 0.35rem; }
           .ag-acc-bank, .ag-acc-days, .ag-acc-meta { grid-column: 2; text-align: left; }
         }

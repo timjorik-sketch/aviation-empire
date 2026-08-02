@@ -35,6 +35,16 @@ const toLocal = (gameMin, offset) => mod1440(gameMin + offset);
 // Names in the shape players build by hand: DXB-JFK-B1.1 is the first aircraft on
 // bank 1, DXB-JFK-AB the standby that covers every bank's leftover day. Derived
 // straight from the plan response so it does not depend on component state.
+// A bare "Network error" hides the difference between an unreachable backend and
+// one that answered with something that is not JSON (a proxy 502, an HTML error
+// page), which are very different things to go and fix.
+function describeFetchFailure(err) {
+  if (err instanceof SyntaxError) {
+    return 'The server replied with something that is not JSON — it may be down, restarting, or behind a proxy error page.';
+  }
+  return 'Could not reach the server. Is the backend running?';
+}
+
 function buildNames(data, route) {
   const base = `${route.departure_airport}-${route.arrival_airport}`;
   const perBank = {};
@@ -74,6 +84,41 @@ const legSpan = (l) => {
   const depWk = l.day_of_week * 1440 + dep;
   return { depWk, arrWk: depWk + block };
 };
+
+// Put the weekly maintenance block back into a gap it fits, mirroring the server
+// planner: leave it alone while it still fits, otherwise take the largest idle
+// stretch anywhere in the week. Gaps between an outbound arrival and its return
+// count too — the game resets condition wherever the aircraft happens to sit.
+// Returns the block unchanged when nothing fits, so the conflict warning shows.
+function refitMaintenance(legs, maintenance, pad) {
+  if (!maintenance || legs.length === 0) return maintenance;
+  const dur = maintenance.duration_minutes;
+  const spans = legs.map(legSpan).sort((x, y) => x.depWk - y.depWk);
+
+  const mStart = maintenance.day_of_week * 1440 + maintenance.start_minutes;
+  if (!spans.some(s => overlapsMaint(s.depWk, s.arrWk, pad, mStart, mStart + dur))) {
+    return maintenance;
+  }
+
+  let best = null;
+  for (let i = 0; i < spans.length; i++) {
+    const cur = spans[i];
+    const next = spans[(i + 1) % spans.length];
+    const nextDep = i + 1 < spans.length ? next.depWk : next.depWk + WEEK_MIN;
+    const size = nextDep - cur.arrWk;
+    if (!best || size > best.size) best = { start: cur.arrWk, size };
+  }
+  if (!best || best.size < dur + 2 * pad) return maintenance;
+
+  const startWk = (((best.start + pad) % WEEK_MIN) + WEEK_MIN) % WEEK_MIN;
+  const startMin = startWk % 1440;
+  return {
+    ...maintenance,
+    day_of_week: Math.floor(startWk / 1440),
+    start_minutes: startMin,
+    start_time: minToHHMM(startMin),
+  };
+}
 
 // ── Weekly schedule grid ─────────────────────────────────────────────────────
 // The same Mon–Sun timeline the aircraft schedule page uses, read-only, drawn
@@ -390,7 +435,7 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
         setBankTimeText({});
         setNames(buildNames(data, fwdRoute));
       }
-    } catch { setError('Network error'); clearPlan(); }
+    } catch (err) { setError(describeFetchFailure(err)); clearPlan(); }
     finally { setComputing(false); }
   };
 
@@ -424,9 +469,16 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
     setEditMode(false);
   };
 
-  // Move one leg of one bank across the whole group: every aircraft flying that
-  // bank in that direction shifts by the same delta, so the wave moves as a unit
-  // and each aircraft keeps its place in the pattern. Days roll over the week.
+  // Move one wave across the whole group.
+  //
+  // Moving the OUTBOUND takes the return with it: the two are one rotation, and
+  // sliding only the front half would silently eat into the turnaround at the far
+  // end. Moving the INBOUND moves only the return, which is exactly how you trade
+  // ground time at the destination against a later arrival back at the hub.
+  //
+  // Afterwards each aircraft's maintenance is refitted, because a wave that moved
+  // onto the block would otherwise just sit there as an error.
+  //
   // `currentLocal` is read back out of the draft, so the draft stays the single
   // source of truth and the field can never drift away from what is planned.
   const shiftLeg = (bankId, direction, value, currentLocal) => {
@@ -440,10 +492,12 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
     if (delta <= -720) delta += 1440;
     if (delta === 0) return;
 
-    setDraft(d => d.map(a => ({
-      ...a,
-      legs: a.legs.map(l => {
-        if (l.bank_id !== bankId || l.direction !== direction) return l;
+    const pad = plan?.summary?.turnaround ?? 60;
+    const moves = (l) => l.bank_id === bankId && (direction === 'out' || l.direction === 'in');
+
+    setDraft(d => d.map(a => {
+      const legs = a.legs.map(l => {
+        if (!moves(l)) return l;
         const dep = hhmmToMin(l.departure_time) ?? 0;
         const arr = hhmmToMin(l.arrival_time) ?? 0;
         const block = mod1440(arr - dep);
@@ -455,8 +509,9 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
           departure_time: minToHHMM(nm),
           arrival_time: minToHHMM(nm + block),
         };
-      }),
-    })));
+      });
+      return { ...a, legs, maintenance: refitMaintenance(legs, a.maintenance, pad) };
+    }));
   };
 
   // Per bank, the first outbound and inbound leg found in the draft — they all
@@ -606,7 +661,7 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
         const f = await fetch(`${API_URL}/api/aircraft/fleet`, { headers }).then(x => x.json());
         setFleet(f.fleet || []);
       }
-    } catch { setError('Network error'); }
+    } catch (err) { setError(describeFetchFailure(err)); }
     finally { setCommitting(false); }
   };
 
@@ -868,6 +923,7 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
                   <div className="ag-shift-hd">
                     Departure time Outbound
                     <span>{fwdRoute?.departure_airport}–{fwdRoute?.arrival_airport}</span>
+                    <em>moves the whole rotation</em>
                   </div>
                   {shiftRows.map(({ bank, src, outLeg, outLocal }) => {
                     const key = `${bank.id}:out`;
@@ -898,6 +954,7 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
                   <div className="ag-shift-hd">
                     Departure time Inbound
                     <span>{retRoute?.departure_airport}–{retRoute?.arrival_airport}</span>
+                    <em>return only</em>
                   </div>
                   {shiftRows.map(({ bank, src, inLeg, inLocal, inArrHubLocal }) => {
                     const key = `${bank.id}:in`;
@@ -935,8 +992,9 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
                   {computing ? 'Replanning…' : 'Replan with these times'}
                 </button>
                 <span>
-                  Rebuilds the plan with the outbound times held fixed — the optimiser redistributes
-                  the aircraft and picks the returns around them. Discards manual leg edits.
+                  Shifting moves flights but keeps who flies what. A replan holds the outbound times
+                  fixed and lets the optimiser redistribute the aircraft and returns around them —
+                  the way out of a pattern that no longer fits. Discards manual leg edits.
                 </span>
               </div>
 
@@ -1169,6 +1227,10 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
         .ag-shift-hd span {
           font-family: monospace; font-size: 0.8rem; font-weight: 700;
           color: #888; letter-spacing: 0.04em; text-transform: none;
+        }
+        .ag-shift-hd em {
+          margin-left: auto; font-style: normal; font-size: 0.72rem;
+          font-weight: 500; color: #AAA; letter-spacing: 0; text-transform: none;
         }
         .ag-shift-row {
           display: flex; align-items: center; gap: 0.6rem;

@@ -23,9 +23,14 @@ const hhmmToMin = (s) => {
   const h = parseInt(m[1]), mi = parseInt(m[2]);
   return h > 23 || mi > 59 ? null : h * 60 + mi;
 };
-const hoursLabel = (min) => `${Math.floor(min / 60)}h ${pad2(min % 60)}m`;
-
 const WEEK_MIN = 7 * 1440;
+const mod1440 = (v) => ((v % 1440) + 1440) % 1440;
+
+// Schedules are stored in Berlin game time. Times are shown at the airport they
+// happen at, using the same whole-hour longitude approximation the schedule view
+// and the bank planner use.
+const lonOffset = (lon) => (lon != null ? (Math.round(lon / 15) - 1) * 60 : 0);
+const toLocal = (gameMin, offset) => mod1440(gameMin + offset);
 
 // A bank window whose end is earlier than its start runs across midnight.
 const inWindow = (min, lo, hi) => (hi < lo ? (min >= lo || min <= hi) : (min >= lo && min <= hi));
@@ -157,7 +162,6 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
   // ── Inputs ────────────────────────────────────────────────────────────────
   const [fwdRouteId, setFwdRouteId]           = useState('');
   const [selectedBankIds, setSelectedBankIds] = useState([]);
-  const [bankWish, setBankWish]               = useState({});   // bankId → 'HH:MM'
   const [selectedAcIds, setSelectedAcIds]     = useState([]);
   const [collapsedBases, setCollapsedBases]   = useState(() => new Set());
   const [strategy, setStrategy]               = useState('regular');
@@ -174,12 +178,10 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
   const [editMode, setEditMode]   = useState(false);
   const [openSlots, setOpenSlots] = useState(() => new Set());
   const [autoName, setAutoName]   = useState(false);
-  // Departure time per bank, in hub-local time. Two copies: what is typed (which
-  // may be half-finished or nonsense) and the last valid value actually applied to
-  // the draft — shifts are computed as a delta against the applied one, so typing
-  // through an invalid intermediate never loses the reference point.
-  const [bankTimeText, setBankTimeText]       = useState({});
-  const [bankTimeApplied, setBankTimeApplied] = useState({});
+  // What is currently typed into a departure field, keyed `${bankId}:${direction}`.
+  // Only the text — the planned time itself lives in the draft and is read back
+  // from there, so a half-finished entry can never desync the two.
+  const [bankTimeText, setBankTimeText] = useState({});
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${localStorage.getItem('token')}` }), []);
   const jsonHeaders = useMemo(() => ({ ...headers, 'Content-Type': 'application/json' }), [headers]);
@@ -236,7 +238,7 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
 
   const clearPlan = useCallback(() => {
     setPlan(null); setDraft([]); setEditMode(false); setOpenSlots(new Set());
-    setBankTimeText({}); setBankTimeApplied({});
+    setBankTimeText({});
   }, []);
 
   useEffect(() => {
@@ -318,10 +320,6 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
       ? [...new Set([...prev, ...ids])]
       : prev.filter(id => !ids.includes(id)));
   };
-  const setWish = (id, value) => {
-    clearPlan();
-    setBankWish(w => ({ ...w, [id]: value }));
-  };
 
   // ── Compute ───────────────────────────────────────────────────────────────
   const computePlan = async () => {
@@ -339,7 +337,6 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
           forward_route_id: fwdRoute.id,
           return_route_id: retRoute.id,
           bank_ids: selectedBankIds,
-          bank_departure_times: bankWish,
           aircraft_ids: selectedAcIds,
           strategy,
         }),
@@ -351,9 +348,7 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
         setDraft(data.assignments.map(a => ({ ...a, legs: a.legs.map(l => ({ ...l })) })));
         setEditMode(false);
         setOpenSlots(new Set(data.assignments.length ? [data.assignments[0].slot] : []));
-        const times = Object.fromEntries(data.banks.map(b => [b.id, b.departure_local]));
-        setBankTimeText(times);
-        setBankTimeApplied(times);
+        setBankTimeText({});
       }
     } catch { setError('Network error'); clearPlan(); }
     finally { setComputing(false); }
@@ -385,29 +380,33 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
   const resetDraft = () => {
     if (!plan) return;
     setDraft(plan.assignments.map(a => ({ ...a, legs: a.legs.map(l => ({ ...l })) })));
-    const times = Object.fromEntries(plan.banks.map(b => [b.id, b.departure_local]));
-    setBankTimeText(times);
-    setBankTimeApplied(times);
+    setBankTimeText({});
     setEditMode(false);
   };
 
-  // Move a whole bank: every flight tagged with it — outbound and return, on every
-  // aircraft in the group — shifts by the same delta, so the rotation keeps its
-  // shape and only the wave moves. Days roll over the week boundary.
-  const shiftBank = (bankId, value) => {
-    setBankTimeText(t => ({ ...t, [bankId]: value }));
+  // Move one leg of one bank across the whole group: every aircraft flying that
+  // bank in that direction shifts by the same delta, so the wave moves as a unit
+  // and each aircraft keeps its place in the pattern. Days roll over the week.
+  // `currentLocal` is read back out of the draft, so the draft stays the single
+  // source of truth and the field can never drift away from what is planned.
+  const shiftLeg = (bankId, direction, value, currentLocal) => {
+    setBankTimeText(t => ({ ...t, [`${bankId}:${direction}`]: value }));
     const next = hhmmToMin(value);
-    const cur  = hhmmToMin(bankTimeApplied[bankId]);
-    if (next == null || cur == null || next === cur) return;
-    const delta = next - cur;
+    if (next == null || currentLocal == null) return;
+    // Read a change as the shortest move, so nudging 23:50 → 00:10 is twenty
+    // minutes later rather than most of a day earlier.
+    let delta = next - currentLocal;
+    if (delta > 720) delta -= 1440;
+    if (delta <= -720) delta += 1440;
+    if (delta === 0) return;
 
     setDraft(d => d.map(a => ({
       ...a,
       legs: a.legs.map(l => {
-        if (l.bank_id !== bankId) return l;
+        if (l.bank_id !== bankId || l.direction !== direction) return l;
         const dep = hhmmToMin(l.departure_time) ?? 0;
         const arr = hhmmToMin(l.arrival_time) ?? 0;
-        const block = (((arr - dep) % 1440) + 1440) % 1440;
+        const block = mod1440(arr - dep);
         const abs = ((((l.day_of_week * 1440 + dep + delta) % WEEK_MIN) + WEEK_MIN) % WEEK_MIN);
         const nm = abs % 1440;
         return {
@@ -418,8 +417,35 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
         };
       }),
     })));
-    setBankTimeApplied(t => ({ ...t, [bankId]: minToHHMM(next) }));
   };
+
+  // Per bank, the first outbound and inbound leg found in the draft — they all
+  // share a clock time within a bank, so one stands for the whole wave.
+  const shiftRows = useMemo(() => {
+    if (!plan) return [];
+    return plan.banks.map(b => {
+      let outLeg = null, inLeg = null;
+      for (const a of draft) {
+        for (const l of a.legs) {
+          if (l.bank_id !== b.id) continue;
+          if (l.direction === 'out' && !outLeg) outLeg = l;
+          if (l.direction === 'in' && !inLeg) inLeg = l;
+        }
+      }
+      const src = hubBanks.find(x => x.id === b.id) || null;
+      const hubOff  = lonOffset(outLeg?.dep_longitude ?? inLeg?.arr_longitude);
+      const destOff = lonOffset(inLeg?.dep_longitude ?? outLeg?.arr_longitude);
+      return {
+        bank: b, src, outLeg, inLeg,
+        // Outbound leaves the hub — check it against the bank's departure window.
+        outLocal: outLeg ? toLocal(hhmmToMin(outLeg.departure_time), hubOff) : null,
+        // Inbound leaves the destination, but what the bank cares about is when it
+        // lands back at the hub, so that is what gets checked.
+        inLocal: inLeg ? toLocal(hhmmToMin(inLeg.departure_time), destOff) : null,
+        inArrHubLocal: inLeg ? toLocal(hhmmToMin(inLeg.arrival_time), hubOff) : null,
+      };
+    });
+  }, [plan, draft, hubBanks]);
 
   // Which legs now clash — with each other or with their aircraft's maintenance.
   // Shifting a bank can easily push a flight onto its neighbour, and finding that
@@ -584,36 +610,39 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
                 <div className="ag-hint">No banks defined at {hubCode} yet. Create them on an aircraft's schedule page.</div>
               )}
               {hubBanks.length > 0 && (
-                <>
-                  <div className="ag-bank-head">
-                    <span>Bank</span><span>Window (hub local)</span><span>Wish departure</span>
+                <div className="ag-base">
+                  <div className="ag-base-body">
+                    <table className="ag-ovtable">
+                      <thead>
+                        <tr>
+                          <th style={{ width: '34px' }} />
+                          <th>Bank</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {hubBanks.map(b => {
+                          const on = selectedBankIds.includes(b.id);
+                          return (
+                            <tr key={b.id}
+                              className={`ag-ovrow${on ? ' ag-ovrow--on' : ''}`}
+                              onClick={() => toggleBank(b.id)}>
+                              <td style={{ textAlign: 'center' }}>
+                                <input type="checkbox" checked={on} readOnly tabIndex={-1} />
+                              </td>
+                              <td>
+                                <div className="ag-ovreg">{b.name}</div>
+                                <div className="ag-bankwin">
+                                  arr {minToHHMM(b.earliest_arrival)}–{minToHHMM(b.latest_arrival)}
+                                  {' · '}dep {minToHHMM(b.earliest_departure)}–{minToHHMM(b.latest_departure)}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
-                  {hubBanks.map(b => {
-                    const on = selectedBankIds.includes(b.id);
-                    return (
-                      <div key={b.id} className={`ag-bank${on ? ' ag-bank--on' : ''}`}>
-                        <label className="ag-bank-name">
-                          <input type="checkbox" checked={on} onChange={() => toggleBank(b.id)} />
-                          <span>{b.name}</span>
-                        </label>
-                        <span className="ag-bank-win">
-                          arr {minToHHMM(b.earliest_arrival)}–{minToHHMM(b.latest_arrival)}
-                          {' · '}dep {minToHHMM(b.earliest_departure)}–{minToHHMM(b.latest_departure)}
-                        </span>
-                        <input
-                          className="ag-wish" type="text" placeholder="HH:MM"
-                          value={bankWish[b.id] || ''} disabled={!on}
-                          onChange={e => setWish(b.id, e.target.value)}
-                        />
-                      </div>
-                    );
-                  })}
-                  <div className="ag-hint">
-                    Leave the wish departure empty to let the planner pick the best minute inside the
-                    window. A time you enter is used exactly, even outside the window — you'll get a
-                    warning in the result if it falls outside.
-                  </div>
-                </>
+                </div>
               )}
             </div>
           </section>
@@ -686,10 +715,8 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
                                       <td><span className="ag-ovreg">{ac.registration}</span></td>
                                       <td className="ag-ovname">{ac.name || <span className="ag-ovempty">—</span>}</td>
                                       <td className="ag-ovtype">{ac.full_name}</td>
-                                      <td>
-                                        {ac.airline_cabin_profile_name
-                                          ? <span className="ag-ovcabin">{ac.airline_cabin_profile_name}</span>
-                                          : <span className="ag-ovwarn">no cabin profile</span>}
+                                      <td className="ag-ovcabin">
+                                        {ac.airline_cabin_profile_name || <span className="ag-ovempty">—</span>}
                                       </td>
                                       <td className="ag-ovloc">{ac.current_location || ac.home_airport || '—'}</td>
                                     </tr>
@@ -757,27 +784,8 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
               </button>
             } />
             <div className="ag-boxbody">
-              <div className="ag-stats">
-                <div className={`ag-stat${plan.missing_aircraft ? ' ag-stat--bad' : ''}`}>
-                  <span className="ag-stat-v">{plan.required_aircraft}</span>
-                  <span className="ag-stat-l">aircraft needed</span>
-                </div>
-                <div className="ag-stat">
-                  <span className="ag-stat-v">{plan.summary.departures_per_week}</span>
-                  <span className="ag-stat-l">round trips / week</span>
-                </div>
-                <div className="ag-stat">
-                  <span className="ag-stat-v">{hoursLabel(plan.summary.round_trip_minutes)}</span>
-                  <span className="ag-stat-l">per round trip</span>
-                </div>
-                <div className="ag-stat">
-                  <span className="ag-stat-v">{plan.summary.total_flight_hours}h</span>
-                  <span className="ag-stat-l">block hours / week</span>
-                </div>
-              </div>
-
               {plan.missing_aircraft > 0 && (
-                <div className="ag-alert ag-alert--error" style={{ marginTop: '1rem' }}>
+                <div className="ag-alert ag-alert--error">
                   {plan.missing_aircraft} more aircraft needed — the entries below without a registration
                   cannot be written. Select more aircraft, drop a bank, or switch to “Fewest aircraft”.
                 </div>
@@ -789,49 +797,81 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
               )}
               {plan.note && <div className="ag-note ag-note--warn" style={{ marginTop: '1rem' }}>⚠ {plan.note}</div>}
 
-              {/* Move a whole wave: one field per bank, every flight follows */}
-              <div className="ag-shift">
-                <div className="ag-shift-hd">
-                  Departure times
-                  <span>Changing a time moves every flight of that bank, on all aircraft</span>
-                </div>
-                {plan.banks.map(b => {
-                  const src = hubBanks.find(x => x.id === b.id);
-                  const text = bankTimeText[b.id] ?? b.departure_local;
-                  const min = hhmmToMin(text);
-                  const invalid = min == null;
-                  const outside = !invalid && src && !inWindow(min, src.earliest_departure, src.latest_departure);
-                  const applied = hhmmToMin(bankTimeApplied[b.id] ?? b.departure_local);
-                  const arrivalNow = applied != null ? minToHHMM(applied + b.elapsed_minutes) : b.arrival_local;
-                  return (
-                    <div key={b.id} className={`ag-shift-row${outside || invalid ? ' ag-shift-row--warn' : ''}`}>
-                      <strong>{b.name}</strong>
-                      <input
-                        className={`ag-shift-inp${invalid ? ' ag-shift-inp--bad' : ''}`}
-                        type="text" value={text}
-                        onChange={e => shiftBank(b.id, e.target.value)}
-                      />
-                      <span className="ag-shift-info">
-                        → arr {arrivalNow} ({hubCode} local) · {hoursLabel(b.elapsed_minutes)} out and back
-                        {b.arr_bank_name !== b.name && <> · returns into {b.arr_bank_name}</>}
-                      </span>
-                      {invalid && <span className="ag-tag ag-tag--warn">enter HH:MM</span>}
-                      {!invalid && outside && src && (
-                        <span className="ag-tag ag-tag--warn">
-                          outside bank window {minToHHMM(src.earliest_departure)}–{minToHHMM(src.latest_departure)}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-                {conflicts.size > 0 && (
-                  <div className="ag-note ag-note--warn" style={{ marginTop: '0.65rem' }}>
-                    ⚠ {conflicts.size} flight{conflicts.size === 1 ? '' : 's'} now clash with another flight
-                    or with maintenance (marked red in the weeks below). The write will be rejected until
-                    that is resolved.
+              {/* Move a whole wave: a field per bank and direction, every aircraft follows */}
+              <div className="ag-shift-grid">
+                <div className="ag-shift-col">
+                  <div className="ag-shift-hd">
+                    Departure time Outbound
+                    <span>{fwdRoute?.departure_airport}–{fwdRoute?.arrival_airport}</span>
                   </div>
-                )}
+                  {shiftRows.map(({ bank, src, outLeg, outLocal }) => {
+                    const key = `${bank.id}:out`;
+                    const text = bankTimeText[key] ?? (outLocal != null ? minToHHMM(outLocal) : '');
+                    const min = hhmmToMin(text);
+                    const outside = min != null && src && !inWindow(min, src.earliest_departure, src.latest_departure);
+                    return (
+                      <div key={key} className={`ag-shift-row${min == null || outside ? ' ag-shift-row--warn' : ''}`}>
+                        <span className="ag-shift-bank">{bank.name}</span>
+                        <input
+                          className={`ag-shift-inp${min == null ? ' ag-shift-inp--bad' : ''}`}
+                          type="text" value={text} disabled={!outLeg}
+                          onChange={e => shiftLeg(bank.id, 'out', e.target.value, outLocal)}
+                        />
+                        {min == null
+                          ? <span className="ag-tag ag-tag--warn">HH:MM</span>
+                          : outside && src
+                            ? <span className="ag-tag ag-tag--warn">
+                                outside {minToHHMM(src.earliest_departure)}–{minToHHMM(src.latest_departure)}
+                              </span>
+                            : <span className="ag-shift-info">{fwdRoute?.departure_airport} local</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="ag-shift-col">
+                  <div className="ag-shift-hd">
+                    Departure time Inbound
+                    <span>{retRoute?.departure_airport}–{retRoute?.arrival_airport}</span>
+                  </div>
+                  {shiftRows.map(({ bank, src, inLeg, inLocal, inArrHubLocal }) => {
+                    const key = `${bank.id}:in`;
+                    const text = bankTimeText[key] ?? (inLocal != null ? minToHHMM(inLocal) : '');
+                    const min = hhmmToMin(text);
+                    // The bank governs when the return LANDS at the hub, not when
+                    // it leaves the far end, so that is what the warning tracks.
+                    const outside = min != null && src && inArrHubLocal != null
+                      && !inWindow(inArrHubLocal, src.earliest_arrival, src.latest_arrival);
+                    return (
+                      <div key={key} className={`ag-shift-row${min == null || outside ? ' ag-shift-row--warn' : ''}`}>
+                        <span className="ag-shift-bank">{bank.name}</span>
+                        <input
+                          className={`ag-shift-inp${min == null ? ' ag-shift-inp--bad' : ''}`}
+                          type="text" value={text} disabled={!inLeg}
+                          onChange={e => shiftLeg(bank.id, 'in', e.target.value, inLocal)}
+                        />
+                        {min == null
+                          ? <span className="ag-tag ag-tag--warn">HH:MM</span>
+                          : outside && src
+                            ? <span className="ag-tag ag-tag--warn">
+                                lands {minToHHMM(inArrHubLocal)}, outside {minToHHMM(src.earliest_arrival)}–{minToHHMM(src.latest_arrival)}
+                              </span>
+                            : <span className="ag-shift-info">
+                                {retRoute?.departure_airport} local · lands {inArrHubLocal != null ? minToHHMM(inArrHubLocal) : '—'}
+                              </span>}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
+
+              {conflicts.size > 0 && (
+                <div className="ag-note ag-note--warn" style={{ marginTop: '0.75rem' }}>
+                  ⚠ {conflicts.size} flight{conflicts.size === 1 ? '' : 's'} now clash with another flight
+                  or with maintenance (marked red in the weeks below). The write stays blocked until
+                  that is resolved.
+                </div>
+              )}
 
               <label className="ag-rename">
                 <input type="checkbox" checked={autoName} onChange={e => setAutoName(e.target.checked)} />
@@ -982,29 +1022,7 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
         .ag-note--warn { background: #FFFBEB; border-color: #FDE68A; color: #92400E; }
         .ag-hint { font-size: 0.86rem; color: #888888; line-height: 1.5; }
 
-        /* Banks */
-        .ag-bank-head, .ag-bank {
-          display: grid; grid-template-columns: minmax(110px, 1fr) minmax(180px, 1.3fr) 92px;
-          gap: 0.6rem; align-items: center;
-        }
-        .ag-bank-head {
-          padding: 0 0.65rem 0.5rem; font-size: 0.7rem; font-weight: 700;
-          color: #999; text-transform: uppercase; letter-spacing: 0.05em;
-        }
-        .ag-bank {
-          padding: 0.55rem 0.65rem; border: 1px solid #E0E0E0; border-radius: 6px; margin-bottom: 0.4rem;
-        }
-        .ag-bank--on { border-color: #2C2C2C; background: #FAFAFA; }
-        .ag-bank-name { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; color: #2C2C2C; cursor: pointer; }
-        .ag-bank-name input { accent-color: #2C2C2C; }
-        .ag-bank-win { font-size: 0.8rem; color: #666; font-variant-numeric: tabular-nums; }
-        .ag-wish {
-          padding: 0.35rem 0.5rem; border: 1px solid #E0E0E0; border-radius: 6px;
-          font-size: 0.85rem; font-variant-numeric: tabular-nums; width: 100%; box-sizing: border-box;
-        }
-        .ag-wish:disabled { background: #F5F5F5; opacity: 0.5; }
-
-        /* Aircraft list — mirrors the fleet Airplane List */
+        /* Banks and aircraft share the fleet Airplane List display */
         .ag-bases { display: flex; flex-direction: column; gap: 0.75rem; }
         .ag-base { border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
         .ag-base-hd {
@@ -1054,10 +1072,7 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
         .ag-ovname, .ag-ovtype, .ag-ovcabin { color: #555; }
         .ag-ovempty { color: #BBB; }
         .ag-ovloc { color: #666; font-weight: 600; }
-        .ag-ovwarn {
-          font-size: 0.72rem; color: #B45309; background: #FFFBEB; border: 1px solid #FDE68A;
-          border-radius: 4px; padding: 0.15rem 0.45rem; white-space: nowrap;
-        }
+        .ag-bankwin { font-size: 0.78rem; color: #888; font-variant-numeric: tabular-nums; margin-top: 2px; }
 
         .ag-btn-primary {
           background: #2C2C2C; color: #fff; border: none; border-radius: 6px;
@@ -1067,47 +1082,49 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
         .ag-btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
         .ag-btn-block { width: 100%; margin-top: 0.25rem; }
 
-        /* Result */
-        .ag-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; }
-        .ag-stat {
-          background: #F5F5F5; border: 1px solid #E0E0E0; border-radius: 8px;
-          padding: 0.9rem 1rem; display: flex; flex-direction: column; gap: 0.2rem;
-        }
-        .ag-stat--bad { background: #FEF2F2; border-color: #FECACA; }
-        .ag-stat-v { font-size: 1.35rem; font-weight: 700; color: #2C2C2C; font-variant-numeric: tabular-nums; }
-        .ag-stat-l { font-size: 0.76rem; color: #888; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
-
-        /* Departure-time shifter */
-        .ag-shift {
-          margin-top: 1.25rem; padding: 1rem 1.1rem;
-          background: #FAFAFA; border: 1px solid #E8E8E8; border-radius: 8px;
+        /* Departure-time shifter — outbound and inbound side by side */
+        .ag-shift-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        .ag-shift-col {
+          padding: 0.9rem 1rem; background: #FAFAFA;
+          border: 1px solid #E8E8E8; border-radius: 8px; min-width: 0;
         }
         .ag-shift-hd {
-          display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.75rem;
-          font-size: 0.76rem; font-weight: 700; color: #2C2C2C;
+          display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.7rem;
+          font-size: 0.74rem; font-weight: 700; color: #2C2C2C;
           text-transform: uppercase; letter-spacing: 0.08em;
         }
         .ag-shift-hd span {
-          font-size: 0.78rem; font-weight: 500; color: #999;
-          text-transform: none; letter-spacing: 0;
+          font-family: monospace; font-size: 0.8rem; font-weight: 700;
+          color: #888; letter-spacing: 0.04em; text-transform: none;
         }
         .ag-shift-row {
-          display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap;
-          padding: 0.5rem 0.75rem; background: #fff;
-          border: 1px solid #EDEDED; border-radius: 6px; margin-bottom: 0.4rem;
-          font-size: 0.86rem; color: #666;
+          display: flex; align-items: center; gap: 0.6rem;
+          padding: 0.45rem 0.65rem; background: #fff;
+          border: 1px solid #EDEDED; border-radius: 6px; margin-bottom: 0.35rem;
+          font-size: 0.84rem; color: #666; min-width: 0;
         }
         .ag-shift-row--warn { border-color: #FDE68A; background: #FFFDF7; }
-        .ag-shift-row strong { color: #2C2C2C; min-width: 110px; }
+        .ag-shift-bank {
+          font-weight: 600; color: #2C2C2C; flex: 1 1 auto; min-width: 0;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
         .ag-shift-inp {
-          width: 76px; padding: 0.35rem 0.5rem; border: 1px solid #E0E0E0; border-radius: 6px;
-          font-size: 0.9rem; font-weight: 600; color: #2C2C2C;
+          width: 72px; flex-shrink: 0; padding: 0.3rem 0.4rem;
+          border: 1px solid #E0E0E0; border-radius: 6px;
+          font-size: 0.88rem; font-weight: 600; color: #2C2C2C;
           font-variant-numeric: tabular-nums; text-align: center;
         }
         .ag-shift-inp:focus { outline: none; border-color: #2C2C2C; }
         .ag-shift-inp--bad { border-color: #FCA5A5; background: #FEF2F2; }
-        .ag-shift-info { font-variant-numeric: tabular-nums; }
-        .ag-tag { font-size: 0.72rem; font-weight: 700; border-radius: 4px; padding: 0.15rem 0.45rem; }
+        .ag-shift-inp:disabled { background: #F5F5F5; opacity: 0.5; }
+        .ag-shift-info {
+          font-size: 0.75rem; color: #999; font-variant-numeric: tabular-nums;
+          flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .ag-tag {
+          font-size: 0.68rem; font-weight: 700; border-radius: 4px;
+          padding: 0.15rem 0.4rem; flex-shrink: 0; white-space: nowrap;
+        }
         .ag-tag--warn { background: #FFFBEB; color: #B45309; border: 1px solid #FDE68A; }
 
         .ag-rename {
@@ -1198,16 +1215,13 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
         .ag-commit-note { flex: 1 1 320px; font-size: 0.85rem; color: #888; line-height: 1.5; }
 
         @media (max-width: 980px) {
-          .ag-row--half, .ag-row--7030 { grid-template-columns: 1fr; }
-          .ag-stats { grid-template-columns: 1fr 1fr; }
+          .ag-row--half, .ag-row--7030, .ag-shift-grid { grid-template-columns: 1fr; }
           .ag-acc-hd { grid-template-columns: 16px 1fr; row-gap: 0.35rem; }
           .ag-acc-bank, .ag-acc-days, .ag-acc-meta { grid-column: 2; text-align: left; }
         }
         @media (max-width: 560px) {
-          .ag-stats { grid-template-columns: 1fr; }
           .ag-boxbody { padding: 1rem; }
-          .ag-bank-head { display: none; }
-          .ag-bank { grid-template-columns: 1fr; gap: 0.4rem; }
+          .ag-shift-info { display: none; }
         }
       `}</style>
     </div>

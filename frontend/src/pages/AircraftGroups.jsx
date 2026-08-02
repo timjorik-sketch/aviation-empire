@@ -35,14 +35,33 @@ const toLocal = (gameMin, offset) => mod1440(gameMin + offset);
 // Names in the shape players build by hand: DXB-JFK-B1.1 is the first aircraft on
 // bank 1, DXB-JFK-AB the standby that covers every bank's leftover day. Derived
 // straight from the plan response so it does not depend on component state.
-// A bare "Network error" hides the difference between an unreachable backend and
-// one that answered with something that is not JSON (a proxy 502, an HTML error
-// page), which are very different things to go and fix.
-function describeFetchFailure(err) {
-  if (err instanceof SyntaxError) {
-    return 'The server replied with something that is not JSON — it may be down, restarting, or behind a proxy error page.';
+// One POST, with the three ways it can fail kept apart: the request never left,
+// the reply was not JSON, or the server answered with an error. Returns null once
+// it has reported a failure itself; otherwise { ok, status, data }.
+async function request(path, body, setError) {
+  let res;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    console.error(`[aircraft-groups] POST ${path} never completed`, err);
+    setError(`Could not reach the server (${err.message}). Check your connection.`);
+    return null;
   }
-  return 'Could not reach the server. Is the backend running?';
+
+  let data;
+  try {
+    data = await res.json();
+  } catch (err) {
+    console.error(`[aircraft-groups] POST ${path} → HTTP ${res.status}, body was not JSON`, err);
+    setError(`The server answered HTTP ${res.status} with something that is not JSON — it may be restarting or behind a proxy error page.`);
+    return null;
+  }
+
+  return { ok: res.ok, status: res.status, data };
 }
 
 function buildNames(data, route) {
@@ -264,7 +283,6 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
   const [bankTimeText, setBankTimeText] = useState({});
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${localStorage.getItem('token')}` }), []);
-  const jsonHeaders = useMemo(() => ({ ...headers, 'Content-Type': 'application/json' }), [headers]);
 
   useEffect(() => {
     let cancelled = false;
@@ -413,30 +431,38 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
     if (selectedAcIds.length === 0) { setError('Select at least one aircraft.'); return; }
 
     setComputing(true);
+    const body = {
+      forward_route_id: fwdRoute.id,
+      return_route_id: retRoute.id,
+      bank_ids: selectedBankIds,
+      aircraft_ids: selectedAcIds,
+      strategy,
+      ...(pinnedDepartures ? { bank_departure_times: pinnedDepartures } : {}),
+    };
+
+    // Each stage reports its own failure. Wrapping all three in one catch made a
+    // bug in the rendering below read as "the server is unreachable", which sent
+    // the search in exactly the wrong direction.
+    const res = await request('/api/aircraft-groups/plan', body, setError);
+    if (!res) { clearPlan(); setComputing(false); return; }
+    if (!res.ok) { setError(res.data?.error || `Could not compute a plan (HTTP ${res.status})`); clearPlan(); setComputing(false); return; }
+
     try {
-      const res = await fetch(`${API_URL}/api/aircraft-groups/plan`, {
-        method: 'POST', headers: jsonHeaders,
-        body: JSON.stringify({
-          forward_route_id: fwdRoute.id,
-          return_route_id: retRoute.id,
-          bank_ids: selectedBankIds,
-          aircraft_ids: selectedAcIds,
-          strategy,
-          ...(pinnedDepartures ? { bank_departure_times: pinnedDepartures } : {}),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error || 'Could not compute a plan'); clearPlan(); }
-      else {
-        setPlan(data);
-        setDraft(data.assignments.map(a => ({ ...a, legs: a.legs.map(l => ({ ...l })) })));
-        setEditMode(false);
-        setOpenSlots(new Set(data.assignments.length ? [data.assignments[0].slot] : []));
-        setBankTimeText({});
-        setNames(buildNames(data, fwdRoute));
+      const data = res.data;
+      if (!Array.isArray(data.assignments)) {
+        throw new Error('response had no assignments — the backend may be running an older build');
       }
-    } catch (err) { setError(describeFetchFailure(err)); clearPlan(); }
-    finally { setComputing(false); }
+      setPlan(data);
+      setDraft(data.assignments.map(a => ({ ...a, legs: (a.legs || []).map(l => ({ ...l })) })));
+      setEditMode(false);
+      setOpenSlots(new Set(data.assignments.length ? [data.assignments[0].slot] : []));
+      setBankTimeText({});
+      setNames(buildNames(data, fwdRoute));
+    } catch (err) {
+      console.error('[aircraft-groups] plan received but could not be displayed', err);
+      setError(`The plan arrived but could not be displayed: ${err.message}`);
+      clearPlan();
+    } finally { setComputing(false); }
   };
 
   // ── Edit helpers ──────────────────────────────────────────────────────────
@@ -625,44 +651,43 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
     if (!ecoPrice) { setError('Enter an economy price before writing the plan.'); return; }
 
     setCommitting(true);
+    const res = await request('/api/aircraft-groups/commit', {
+      forward_route_id: fwdRoute.id,
+      return_route_id: retRoute.id,
+      economy_price: ecoPrice,
+      business_price: hasBusiness ? bizPrice : '',
+      first_price: hasFirst ? firstPrice : '',
+      service_profile_id: serviceProfileId ? parseInt(serviceProfileId) : undefined,
+      assignments: draft.map(a => ({
+        aircraft_id: a.aircraft_id,
+        aircraft_name: names[a.slot] || undefined,
+        legs: a.legs.map(l => ({
+          route_id: l.route_id,
+          day_of_week: l.day_of_week,
+          departure_time: l.departure_time,
+        })),
+        maintenance: a.maintenance,
+      })),
+    }, setError);
+    setCommitting(false);
+    if (!res) return;
+    if (!res.ok) { setError(res.data?.error || `Could not write the plan (HTTP ${res.status})`); return; }
+
+    // left_grounded is not a failure: the aircraft was parked before the plan and
+    // stays parked, schedule written, for the player to activate.
+    const failed = (res.data.activation || []).filter(a => !a.activated && !a.left_grounded);
+    setSuccess(res.data.message);
+    if (failed.length) {
+      setError(`Not activated: ${failed.map(f => `${f.registration} (${f.error})`).join(', ')}`);
+    }
+    clearPlan();
     try {
-      const res = await fetch(`${API_URL}/api/aircraft-groups/commit`, {
-        method: 'POST', headers: jsonHeaders,
-        body: JSON.stringify({
-          forward_route_id: fwdRoute.id,
-          return_route_id: retRoute.id,
-          economy_price: ecoPrice,
-          business_price: hasBusiness ? bizPrice : '',
-          first_price: hasFirst ? firstPrice : '',
-          service_profile_id: serviceProfileId ? parseInt(serviceProfileId) : undefined,
-          assignments: draft.map(a => ({
-            aircraft_id: a.aircraft_id,
-            aircraft_name: names[a.slot] || undefined,
-            legs: a.legs.map(l => ({
-              route_id: l.route_id,
-              day_of_week: l.day_of_week,
-              departure_time: l.departure_time,
-            })),
-            maintenance: a.maintenance,
-          })),
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) setError(data.error || 'Could not write the plan');
-      else {
-        // left_grounded is not a failure: the aircraft was parked before the
-        // plan and stays parked, schedule written, for the player to activate.
-        const failed = (data.activation || []).filter(a => !a.activated && !a.left_grounded);
-        setSuccess(data.message);
-        if (failed.length) {
-          setError(`Not activated: ${failed.map(f => `${f.registration} (${f.error})`).join(', ')}`);
-        }
-        clearPlan();
-        const f = await fetch(`${API_URL}/api/aircraft/fleet`, { headers }).then(x => x.json());
-        setFleet(f.fleet || []);
-      }
-    } catch (err) { setError(describeFetchFailure(err)); }
-    finally { setCommitting(false); }
+      const f = await fetch(`${API_URL}/api/aircraft/fleet`, { headers }).then(x => x.json());
+      setFleet(f.fleet || []);
+    } catch (err) {
+      // The write already succeeded — a stale list is not worth an error banner.
+      console.error('[aircraft-groups] fleet refresh after commit failed', err);
+    }
   };
 
   if (loading) return <Loader />;

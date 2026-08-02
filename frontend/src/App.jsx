@@ -458,7 +458,7 @@ function App() {
     'ops-control': 'Operations Control Center',
     personnel: 'Staff & Crew',
     marketplace: 'Marketplace',
-    'aircraft-groups': 'Aircraft Groups',
+    'aircraft-groups': 'Aircraft Group Planning',
     'airport-overview': 'Airport Overview',
     leaderboards: 'Leaderboards',
   };

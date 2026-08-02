@@ -25,7 +25,7 @@ const SUB_TABS = {
   fleet: [
     { page: 'fleet',          label: 'Overview' },
     { page: 'cabin-profiles', label: 'Cabin Profiles' },
-    { page: 'aircraft-groups', label: 'Aircraft Groups' },
+    { page: 'aircraft-groups', label: 'Aircraft Group Planning' },
     { page: 'marketplace',    label: 'Marketplace' },
   ],
   operations: [

@@ -32,6 +32,27 @@ const mod1440 = (v) => ((v % 1440) + 1440) % 1440;
 const lonOffset = (lon) => (lon != null ? (Math.round(lon / 15) - 1) * 60 : 0);
 const toLocal = (gameMin, offset) => mod1440(gameMin + offset);
 
+// Names in the shape players build by hand: DXB-JFK-B1.1 is the first aircraft on
+// bank 1, DXB-JFK-AB the standby that covers every bank's leftover day. Derived
+// straight from the plan response so it does not depend on component state.
+function buildNames(data, route) {
+  const base = `${route.departure_airport}-${route.arrival_airport}`;
+  const perBank = {};
+  let standby = 0;
+  const out = {};
+  for (const a of data.assignments) {
+    if (a.bank_ids.length !== 1) {
+      standby += 1;
+      out[a.slot] = standby === 1 ? `${base}-AB` : `${base}-AB${standby}`;
+      continue;
+    }
+    const no = data.banks.findIndex(b => b.id === a.bank_ids[0]) + 1;
+    perBank[no] = (perBank[no] || 0) + 1;
+    out[a.slot] = `${base}-B${no}.${perBank[no]}`;
+  }
+  return out;
+}
+
 // A bank window whose end is earlier than its start runs across midnight.
 const inWindow = (min, lo, hi) => (hi < lo ? (min >= lo || min <= hi) : (min >= lo && min <= hi));
 
@@ -58,33 +79,45 @@ const legSpan = (l) => {
 // The same Mon–Sun timeline the aircraft schedule page uses, read-only, drawn
 // from a planned (not yet written) week — so bars carry the anthracite dashed
 // "ghost" language the bank planner already established for unwritten flights.
-function WeekGrid({ legs, maintenance, conflicts }) {
+// Shift an absolute week minute by a time-zone offset and split it back into the
+// day column and minute-of-day the bar is drawn at. Crossing midnight in local
+// time genuinely moves a flight into the neighbouring column — that is the point
+// of the view, not an artefact.
+function localSlot(dayOfWeek, minuteOfDay, offset) {
+  const abs = (((dayOfWeek * 1440 + minuteOfDay + offset) % WEEK_MIN) + WEEK_MIN) % WEEK_MIN;
+  return { day: Math.floor(abs / 1440), min: abs % 1440 };
+}
+
+function WeekGrid({ legs, maintenance, conflicts, offset = 0 }) {
   const flightBars = useMemo(() => legs.map((l, i) => {
-    const dep = hhmmToMin(l.departure_time) ?? 0;
-    const arr = hhmmToMin(l.arrival_time) ?? 0;
-    const dur = (((arr - dep) % 1440) + 1440) % 1440 || 1440;
+    const depGame = hhmmToMin(l.departure_time) ?? 0;
+    const arrGame = hhmmToMin(l.arrival_time) ?? 0;
+    const dur = (((arrGame - depGame) % 1440) + 1440) % 1440 || 1440;
+    const { day, min: dep } = localSlot(l.day_of_week, depGame, offset);
     const end = dep + dur;
     return {
-      id: i, day: l.day_of_week, leg: l,
+      id: i, day, leg: l,
+      depLabel: minToHHMM(dep),
+      arrLabel: minToHHMM(dep + dur),
       top: dep * PX_PER_MIN,
       height: Math.max(Math.min(dur, 1440 - dep) * PX_PER_MIN, 12),
-      overflowDay: end > 1440 ? (l.day_of_week + 1) % 7 : null,
+      overflowDay: end > 1440 ? (day + 1) % 7 : null,
       overflowHeight: end > 1440 ? Math.max((end - 1440) * PX_PER_MIN, 12) : 0,
     };
-  }), [legs]);
+  }), [legs, offset]);
 
   const maintBar = useMemo(() => {
     if (!maintenance) return null;
-    const start = maintenance.start_minutes;
+    const { day, min: start } = localSlot(maintenance.day_of_week, maintenance.start_minutes, offset);
     const end = start + maintenance.duration_minutes;
     return {
-      day: maintenance.day_of_week,
+      day, startLabel: minToHHMM(start),
       top: start * PX_PER_MIN,
       height: Math.max(Math.min(maintenance.duration_minutes, 1440 - start) * PX_PER_MIN, 12),
-      overflowDay: end > 1440 ? (maintenance.day_of_week + 1) % 7 : null,
+      overflowDay: end > 1440 ? (day + 1) % 7 : null,
       overflowHeight: end > 1440 ? Math.max((end - 1440) * PX_PER_MIN, 12) : 0,
     };
-  }, [maintenance]);
+  }, [maintenance, offset]);
 
   return (
     <div className="ag-grid">
@@ -109,7 +142,7 @@ function WeekGrid({ legs, maintenance, conflicts }) {
               <div className="ag-bar ag-bar--maint" style={{ top: maintBar.top, height: maintBar.height }}
                 title={`Maintenance · ${maintenance.duration_minutes} min`}>
                 <span className="ag-bar-fn">MAINT</span>
-                <span className="ag-bar-tm">{maintenance.start_time}</span>
+                <span className="ag-bar-tm">{maintBar.startLabel}</span>
               </div>
             )}
             {maintBar?.overflowDay === di && (
@@ -120,17 +153,17 @@ function WeekGrid({ legs, maintenance, conflicts }) {
               <div key={`f-${b.id}`}
                 className={`ag-bar ag-bar--flight${conflicts?.has(b.leg) ? ' ag-bar--conflict' : ''}`}
                 style={{ top: b.top, height: b.height }}
-                title={`${b.leg.flight_number} ${b.leg.departure_airport}→${b.leg.arrival_airport} · ${b.leg.departure_time}–${b.leg.arrival_time} · ${b.leg.bank_name}`}>
+                title={`${b.leg.flight_number} ${b.leg.departure_airport}→${b.leg.arrival_airport} · ${b.depLabel}–${b.arrLabel} · ${b.leg.bank_name}`}>
                 <span className="ag-bar-fn">{b.leg.flight_number}</span>
                 <span className="ag-bar-rt">{b.leg.departure_airport}→{b.leg.arrival_airport}</span>
-                <span className="ag-bar-tm">{b.leg.departure_time}–{b.leg.arrival_time}</span>
+                <span className="ag-bar-tm">{b.depLabel}–{b.arrLabel}</span>
               </div>
             ))}
             {flightBars.filter(b => b.overflowDay === di).map(b => (
               <div key={`o-${b.id}`} className="ag-bar ag-bar--flight ag-bar--cont"
                 style={{ top: 0, height: b.overflowHeight }}
-                title={`${b.leg.flight_number} arrives ${b.leg.arrival_time}`}>
-                <span className="ag-bar-tm">↳ {b.leg.arrival_time}</span>
+                title={`${b.leg.flight_number} arrives ${b.arrLabel}`}>
+                <span className="ag-bar-tm">↳ {b.arrLabel}</span>
               </div>
             ))}
           </div>
@@ -177,7 +210,9 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
   const [committing, setCommitting] = useState(false);
   const [editMode, setEditMode]   = useState(false);
   const [openSlots, setOpenSlots] = useState(() => new Set());
-  const [autoName, setAutoName]   = useState(false);
+  // Aircraft names, slot → string. Seeded with the suggested pattern name and
+  // always written, so the fleet list reads as the plan does; editable per row.
+  const [names, setNames]         = useState({});
   // What is currently typed into a departure field, keyed `${bankId}:${direction}`.
   // Only the text — the planned time itself lives in the draft and is read back
   // from there, so a half-finished entry can never desync the two.
@@ -322,7 +357,10 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
   };
 
   // ── Compute ───────────────────────────────────────────────────────────────
-  const computePlan = async () => {
+  // `pinnedDepartures` (bankId → hub-local 'HH:MM') re-runs the optimiser with the
+  // outbound times held fixed, which is what the replan button sends. Empty means
+  // a fresh plan where the optimiser picks the times itself.
+  const computePlan = async (pinnedDepartures) => {
     setError(''); setSuccess('');
     if (!fwdRoute) { setError('Select an outbound route.'); return; }
     if (!retRoute) { setError('No return route exists for this pairing — create the reverse route first.'); return; }
@@ -339,6 +377,7 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
           bank_ids: selectedBankIds,
           aircraft_ids: selectedAcIds,
           strategy,
+          ...(pinnedDepartures ? { bank_departure_times: pinnedDepartures } : {}),
         }),
       });
       const data = await res.json();
@@ -349,6 +388,7 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
         setEditMode(false);
         setOpenSlots(new Set(data.assignments.length ? [data.assignments[0].slot] : []));
         setBankTimeText({});
+        setNames(buildNames(data, fwdRoute));
       }
     } catch { setError('Network error'); clearPlan(); }
     finally { setComputing(false); }
@@ -447,6 +487,18 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
     });
   }, [plan, draft, hubBanks]);
 
+  // Hand the current outbound times back to the optimiser as fixed points and let
+  // it redistribute everything around them. Shifting a wave by hand is rigid and
+  // can push flights onto each other; a replan re-derives which aircraft flies
+  // what, so the times survive and the pattern is made to fit them again.
+  const replan = () => {
+    const pinned = {};
+    for (const row of shiftRows) {
+      if (row.outLocal != null) pinned[row.bank.id] = minToHHMM(row.outLocal);
+    }
+    computePlan(pinned);
+  };
+
   // Which legs now clash — with each other or with their aircraft's maintenance.
   // Shifting a bank can easily push a flight onto its neighbour, and finding that
   // out only when the write is rejected would be a poor trade.
@@ -482,17 +534,30 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
     });
   };
 
-  // Suggested names in the shape players use by hand: DXB-JFK-B1.1 for the first
-  // aircraft on bank 1, DXB-JFK-AB for a standby covering several banks.
-  const suggestedName = useCallback((assignment) => {
-    if (!plan || !fwdRoute) return '';
-    const base = `${fwdRoute.departure_airport}-${fwdRoute.arrival_airport}`;
-    if (assignment.bank_ids.length !== 1) return `${base}-AB`;
-    const bankNo = plan.banks.findIndex(b => b.id === assignment.bank_ids[0]) + 1;
-    const peers = draft.filter(a => a.bank_ids.length === 1 && a.bank_ids[0] === assignment.bank_ids[0]);
-    const idx = peers.findIndex(a => a.slot === assignment.slot) + 1;
-    return `${base}-B${bankNo}.${idx}`;
-  }, [plan, fwdRoute, draft]);
+  // Banks are referred to by position everywhere in the plan — B1, B2 — because
+  // that is how the naming pattern reads and it stays short in a table row.
+  const bankShort = useCallback(
+    (bankId) => (plan ? `B${plan.banks.findIndex(b => b.id === bankId) + 1}` : ''),
+    [plan]
+  );
+
+  // "B1 – Mon, Wed, Fri" for an aircraft that stays on one bank; a standby that
+  // fills a different bank's gap each time gets each day labelled with its own
+  // bank: "B1 – Sun, B2 – Thu, B3 – Tue".
+  const bankDayLabel = useCallback((a) => {
+    const entries = a.legs
+      .filter(l => l.direction === 'out')
+      .map(l => ({
+        day: localSlot(l.day_of_week, hhmmToMin(l.departure_time) ?? 0, a.home_offset_minutes ?? 0).day,
+        bank: bankShort(l.bank_id),
+      }))
+      .sort((x, y) => x.day - y.day);
+    if (entries.length === 0) return '—';
+    const distinct = new Set(entries.map(e => e.bank));
+    return distinct.size === 1
+      ? `${entries[0].bank} – ${entries.map(e => DAY_SHORT[e.day]).join(', ')}`
+      : entries.map(e => `${e.bank} – ${DAY_SHORT[e.day]}`).join(', ');
+  }, [bankShort]);
 
   // ── Commit ────────────────────────────────────────────────────────────────
   const commitPlan = async () => {
@@ -517,7 +582,7 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
           service_profile_id: serviceProfileId ? parseInt(serviceProfileId) : undefined,
           assignments: draft.map(a => ({
             aircraft_id: a.aircraft_id,
-            aircraft_name: autoName ? suggestedName(a) : undefined,
+            aircraft_name: names[a.slot] || undefined,
             legs: a.legs.map(l => ({
               route_id: l.route_id,
               day_of_week: l.day_of_week,
@@ -865,48 +930,56 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
                 </div>
               </div>
 
+              <div className="ag-replan">
+                <button className="ag-btn-ghost" onClick={replan} disabled={computing}>
+                  {computing ? 'Replanning…' : 'Replan with these times'}
+                </button>
+                <span>
+                  Rebuilds the plan with the outbound times held fixed — the optimiser redistributes
+                  the aircraft and picks the returns around them. Discards manual leg edits.
+                </span>
+              </div>
+
               {conflicts.size > 0 && (
                 <div className="ag-note ag-note--warn" style={{ marginTop: '0.75rem' }}>
                   ⚠ {conflicts.size} flight{conflicts.size === 1 ? '' : 's'} now clash with another flight
-                  or with maintenance (marked red in the weeks below). The write stays blocked until
-                  that is resolved.
+                  or with maintenance (marked red in the weeks below). Shift them apart, or replan to let
+                  the optimiser refit the pattern. The write stays blocked until then.
                 </div>
               )}
 
-              <label className="ag-rename">
-                <input type="checkbox" checked={autoName} onChange={e => setAutoName(e.target.checked)} />
-                Rename aircraft to the plan pattern ({fwdRoute?.departure_airport}-{fwdRoute?.arrival_airport}-B1.1, …-AB)
-              </label>
-
-              {/* One accordion per aircraft, each showing its actual week */}
-              <div className="ag-accordions">
+              {/* One register per aircraft, same display as the picker above */}
+              <div className="ag-bases" style={{ marginTop: '1.25rem' }}>
                 {draft.map(a => {
                   const open = openSlots.has(a.slot);
                   const legs = sortedLegs(a);
                   return (
-                    <div key={a.slot} className="ag-acc">
-                      <button className="ag-acc-hd" onClick={() => toggleSlot(a.slot)}>
-                        <span className="ag-acc-chev">{open ? '▾' : '▸'}</span>
-                        <span className="ag-acc-reg">
-                          {a.registration || <em className="ag-missing">aircraft missing</em>}
+                    <div key={a.slot} className="ag-base">
+                      <div className="ag-base-hd" onClick={() => toggleSlot(a.slot)}>
+                        <span className="ag-base-chevron">{open ? '▼' : '▶'}</span>
+                        <span className="ag-base-iata">
+                          {a.registration || <em className="ag-missing">missing</em>}
                         </span>
-                        <span className="ag-acc-bank">
-                          {a.bank_names.length === 1 ? a.bank_names[0] : `Standby · ${a.bank_names.join(', ')}`}
-                        </span>
-                        <span className="ag-acc-days">{a.days.map(d => DAY_SHORT[d]).join(' ')}</span>
+                        {/* The suggested name is always applied on write; this is
+                            where it gets overridden. */}
+                        <input
+                          className="ag-name-inp" type="text" maxLength={60}
+                          value={names[a.slot] ?? ''} disabled={!a.aircraft_id}
+                          onClick={e => e.stopPropagation()}
+                          onChange={e => setNames(n => ({ ...n, [a.slot]: e.target.value }))}
+                        />
+                        <span className="ag-base-name">{bankDayLabel(a)}</span>
                         <span className="ag-acc-meta">
                           {legs.length} flights · {a.flight_hours}h · {a.utilisation_pct}% util
                         </span>
-                      </button>
+                      </div>
                       {open && (
-                        <div className="ag-acc-body">
-                          {autoName && a.aircraft_id && (
-                            <div className="ag-note" style={{ marginBottom: '0.75rem' }}>
-                              New name: <strong>{suggestedName(a)}</strong>
-                            </div>
-                          )}
-
-                          <WeekGrid legs={legs} maintenance={a.maintenance} conflicts={conflicts} />
+                        <div className="ag-base-body ag-plan-body">
+                          <div className="ag-tzhint">
+                            All times in {a.home_airport || hubCode} local time
+                          </div>
+                          <WeekGrid legs={legs} maintenance={a.maintenance} conflicts={conflicts}
+                            offset={a.home_offset_minutes ?? 0} />
 
                           {editMode && (
                             <table className="ag-legs">
@@ -1125,31 +1198,34 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
           font-size: 0.68rem; font-weight: 700; border-radius: 4px;
           padding: 0.15rem 0.4rem; flex-shrink: 0; white-space: nowrap;
         }
+        .ag-replan {
+          display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap; margin-top: 0.75rem;
+        }
+        .ag-replan span { flex: 1 1 300px; font-size: 0.8rem; color: #999; line-height: 1.45; }
+        .ag-btn-ghost {
+          background: #fff; border: 1px solid #2C2C2C; border-radius: 6px;
+          padding: 0.5rem 1rem; font-size: 0.85rem; font-weight: 600;
+          color: #2C2C2C; cursor: pointer; white-space: nowrap;
+        }
+        .ag-btn-ghost:hover:not(:disabled) { background: #2C2C2C; color: #fff; }
+        .ag-btn-ghost:disabled { opacity: 0.45; cursor: not-allowed; }
+        .ag-tzhint {
+          font-size: 0.75rem; color: #999; margin-bottom: 0.5rem;
+          text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;
+        }
         .ag-tag--warn { background: #FFFBEB; color: #B45309; border: 1px solid #FDE68A; }
 
-        .ag-rename {
-          display: flex; align-items: center; gap: 0.55rem; margin-top: 1.25rem;
-          font-size: 0.88rem; color: #666; cursor: pointer;
-        }
-        .ag-rename input { accent-color: #2C2C2C; }
-
-        /* Accordions */
-        .ag-accordions { margin-top: 1rem; border: 1px solid #E0E0E0; border-radius: 8px; overflow: hidden; }
-        .ag-acc + .ag-acc { border-top: 1px solid #F0F0F0; }
-        .ag-acc-hd {
-          width: 100%; display: grid;
-          grid-template-columns: 16px 110px minmax(150px, 1fr) minmax(130px, auto) minmax(200px, auto);
-          gap: 0.75rem; align-items: center; text-align: left;
-          background: #fff; border: none; padding: 0.85rem 1rem; cursor: pointer; font-size: 0.9rem;
-        }
-        .ag-acc-hd:hover { background: #FAFAFA; }
-        .ag-acc-chev { color: #888; }
-        .ag-acc-reg { font-weight: 700; color: #2C2C2C; letter-spacing: 0.02em; }
+        /* Plan registers — one per aircraft, same shell as the picker's bases */
         .ag-missing { color: #B91C1C; font-style: italic; font-weight: 600; }
-        .ag-acc-bank { color: #2C2C2C; font-weight: 600; }
-        .ag-acc-days { color: #666; font-variant-numeric: tabular-nums; letter-spacing: 0.06em; }
-        .ag-acc-meta { color: #888; font-size: 0.83rem; text-align: right; }
-        .ag-acc-body { padding: 1rem; background: #FAFAFA; }
+        .ag-name-inp {
+          flex: 0 1 190px; min-width: 120px; padding: 0.25rem 0.5rem;
+          border: 1px solid #D4D4D4; border-radius: 4px; background: #fff;
+          font-size: 0.83rem; font-weight: 600; color: #2C2C2C;
+        }
+        .ag-name-inp:focus { outline: none; border-color: #2C2C2C; }
+        .ag-name-inp:disabled { background: #F0F0F0; opacity: 0.5; }
+        .ag-acc-meta { margin-left: auto; color: #666; font-size: 0.8rem; white-space: nowrap; }
+        .ag-plan-body { padding: 1rem; }
 
         /* Weekly schedule grid */
         .ag-grid { border: 1px solid #E0E0E0; border-radius: 6px; overflow: hidden; background: #fff; }
@@ -1216,8 +1292,8 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
 
         @media (max-width: 980px) {
           .ag-row--half, .ag-row--7030, .ag-shift-grid { grid-template-columns: 1fr; }
-          .ag-acc-hd { grid-template-columns: 16px 1fr; row-gap: 0.35rem; }
-          .ag-acc-bank, .ag-acc-days, .ag-acc-meta { grid-column: 2; text-align: left; }
+          .ag-base-hd { flex-wrap: wrap; row-gap: 0.4rem; }
+          .ag-acc-meta { margin-left: 0; width: 100%; }
         }
         @media (max-width: 560px) {
           .ag-boxbody { padding: 1rem; }

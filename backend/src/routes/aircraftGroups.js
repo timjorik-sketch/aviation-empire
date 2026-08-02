@@ -58,7 +58,7 @@ async function loadContext(airlineId, body) {
   }
 
   const acResult = await pool.query(`
-    SELECT a.id, a.registration, a.name, a.is_active, a.airline_cabin_profile_id,
+    SELECT a.id, a.registration, a.name, a.is_active, a.airline_cabin_profile_id, a.home_airport,
            t.wake_turbulence_category, t.range_km, t.full_name, t.max_passengers,
            t.min_runway_takeoff_m, t.min_runway_landing_m
     FROM aircraft a JOIN aircraft_types t ON a.aircraft_type_id = t.id
@@ -69,9 +69,12 @@ async function loadContext(airlineId, body) {
   const byId = new Map(acResult.rows.map(r => [r.id, r]));
   const aircraft = ids.map(id => byId.get(id));
 
+  // Route airports for the range/runway checks, plus every home base in the group
+  // so each aircraft's week can be shown in its own local time.
   const apRes = await pool.query(
     'SELECT iata_code, runway_length_m, longitude FROM airports WHERE iata_code = ANY($1)',
-    [[fwd.departure_airport, fwd.arrival_airport]]
+    [[...new Set([fwd.departure_airport, fwd.arrival_airport,
+                  ...aircraft.map(a => a.home_airport).filter(Boolean)])]]
   );
   const rwy = new Map(apRes.rows.map(r => [r.iata_code, r.runway_length_m]));
   const lon = new Map(apRes.rows.map(r => [r.iata_code, r.longitude]));
@@ -195,12 +198,22 @@ router.post('/plan', authMiddleware, async (req, res) => {
         // longest in the group, so the actual block can only be shorter.
         duration_minutes: ac ? bankMaintenanceDuration(ac.max_passengers) : p.maint_duration,
       } : null;
+      // A player reads an aircraft's week in the time zone it lives in, so the
+      // client needs its home base offset. Falls back to the hub — which is where
+      // the aircraft flies from either way — when the base has no coordinates.
+      const homeCode = ac?.home_airport || null;
+      const homeOffset = homeCode && lon.get(homeCode) != null
+        ? hubOffsetMinutes(lon, homeCode)
+        : offset;
+
       return {
         slot,
         aircraft_id: ac?.id ?? null,
         registration: ac?.registration ?? null,
         aircraft_name: ac?.name ?? null,
         aircraft_type: ac?.full_name ?? null,
+        home_airport: homeCode,
+        home_offset_minutes: homeOffset,
         is_active: ac?.is_active ?? 0,
         has_cabin_profile: ac ? !!ac.airline_cabin_profile_id : false,
         bank_ids: p.bank_ids,

@@ -15,7 +15,7 @@ const router = express.Router();
 // The route is source-of-truth for prices. When syncing from an aircraft schedule,
 // a null input means "this aircraft has no such cabin class" — preserve any
 // existing route/schedule/flight price for that class instead of overwriting it.
-async function syncRoutePrices(routeId, ecoPrice, bizPrice, firPrice, serviceProfileId) {
+export async function syncRoutePrices(routeId, ecoPrice, bizPrice, firPrice, serviceProfileId) {
   const eco = ecoPrice ?? null;
   const biz = bizPrice ?? null;
   const fir = firPrice ?? null;
@@ -1304,7 +1304,7 @@ function getCurrentWeekStart() {
 // two paths agree no matter which entry is created first. Week-aware (tests ±1
 // week) so overnight flights and past-midnight maintenance compare correctly at
 // the Sun→Mon seam. All inputs are absolute "week minutes".
-function flightOverlapsMaintenance(depWk, arrWk, pad, mStartWk, mEndWk) {
+export function flightOverlapsMaintenance(depWk, arrWk, pad, mStartWk, mEndWk) {
   const WEEK_MIN = 7 * 1440;
   const blockStart = depWk - pad;
   const blockEnd = arrWk + pad;
@@ -1319,7 +1319,7 @@ function flightOverlapsMaintenance(depWk, arrWk, pad, mStartWk, mEndWk) {
 // lands after midnight has arrWk > depWk (can exceed the day/week). Tested on the
 // circular weekly timeline (±1 week) so the Sun→Mon seam and overnight long-haul
 // legs compare correctly — mirrors the frontend conflict highlighting.
-function flightsOverlapWeekly(depWkA, arrWkA, depWkB, arrWkB, pad) {
+export function flightsOverlapWeekly(depWkA, arrWkA, depWkB, arrWkB, pad) {
   const WEEK_MIN = 7 * 1440;
   const endA = arrWkA + pad;
   const endB = arrWkB + pad;
@@ -1359,6 +1359,90 @@ async function getExpansionDepartures(airlineId, aircraftId) {
   return result;
 }
 
+// Activate one aircraft: enforce the operating prerequisites (cabin profile, crew,
+// a non-empty weekly schedule) and the per-airport expansion capacity, then flip
+// the flag and materialise its flights. Shared with the aircraft-group commit so
+// both paths apply exactly the same rules.
+export async function activateAircraft(airlineId, aircraftId) {
+  const acResult = await pool.query('SELECT id, airline_cabin_profile_id, crew_assigned FROM aircraft WHERE id = $1 AND airline_id = $2', [aircraftId, airlineId]);
+  if (!acResult.rows[0]) return { ok: false, status: 404, error: 'Aircraft not found' };
+  const { airline_cabin_profile_id: cabinProfileId, crew_assigned: crewAssigned } = acResult.rows[0];
+
+  if (!cabinProfileId) {
+    return { ok: false, status: 400, error: 'Cannot activate aircraft: no cabin profile assigned. Please assign a cabin profile first.' };
+  }
+  if (!crewAssigned) {
+    return { ok: false, status: 400, error: 'Cannot activate aircraft: no crew assigned. Please hire crew first.' };
+  }
+  const schedCountResult = await pool.query('SELECT COUNT(*) as cnt FROM weekly_schedule WHERE aircraft_id = $1', [aircraftId]);
+  if (parseInt(schedCountResult.rows[0].cnt) === 0) {
+    return { ok: false, status: 400, error: 'Cannot activate aircraft: no flights in weekly schedule. Add at least one flight first.' };
+  }
+
+  // ── Expansion capacity check ──────────────────────────────────────────
+  const expDeps = await getExpansionDepartures(airlineId, aircraftId);
+  const violations = [];
+
+  for (const [airport, adding] of Object.entries(expDeps)) {
+    const expResult = await pool.query('SELECT expansion_level FROM airport_expansions WHERE airline_id = $1 AND airport_code = $2', [airlineId, airport]);
+    const expLevel = expResult.rows[0]?.expansion_level ?? 0;
+    const capacity = expLevel * 100;
+
+    if (expLevel === 0) {
+      violations.push({ airport, current: 0, capacity: 0, adding, no_expansion: true });
+      continue;
+    }
+
+    const airlineForCheck = await pool.query('SELECT home_airport_code, primary_hub_airport_code FROM airlines WHERE id = $1', [airlineId]);
+    const homeCodeForCheck = airlineForCheck.rows[0]?.home_airport_code ?? '';
+    const primaryHubForCheck = airlineForCheck.rows[0]?.primary_hub_airport_code ?? '';
+
+    const currentResult = await pool.query(`
+      SELECT COUNT(*) as cnt FROM weekly_schedule ws
+      JOIN aircraft ac ON ac.id = ws.aircraft_id
+      WHERE ac.airline_id = $1 AND ac.is_active = 1
+        AND ws.is_transfer = 0
+        AND ws.departure_airport = $2
+        AND ws.arrival_airport != $3
+        AND ws.arrival_airport != $5
+        AND ac.id != $4
+        AND NOT EXISTS (
+          SELECT 1 FROM airport_expansions ae
+          WHERE ae.airline_id = ac.airline_id
+            AND ae.airport_code = ws.arrival_airport
+            AND ae.expansion_level > 0
+        )
+    `, [airlineId, airport, homeCodeForCheck, aircraftId, primaryHubForCheck]);
+    const current = parseInt(currentResult.rows[0].cnt);
+
+    if (current + adding > capacity) {
+      violations.push({ airport, current, capacity, adding });
+    }
+  }
+
+  if (violations.length > 0) {
+    return {
+      ok: false, status: 400,
+      error: 'slot_capacity_exceeded',
+      message: 'Schedule exceeds expansion capacity at one or more airports.',
+      violations,
+    };
+  }
+
+  await pool.query('UPDATE aircraft SET is_active = 1 WHERE id = $1', [aircraftId]);
+
+  // Generate flight instances immediately on activation so newly scheduled
+  // flights (including transfer legs just added) show up right away instead of
+  // waiting for the hourly :13 generation job. Scoped to THIS aircraft — a
+  // full-fleet pass took seconds and delayed the response, so the UI only
+  // flipped to green long after the click. Failures are non-fatal (the hourly
+  // job is the backstop).
+  try { await generateFlights(aircraftId); }
+  catch (genErr) { console.error('Activation generateFlights failed:', genErr); }
+
+  return { ok: true };
+}
+
 // Toggle aircraft active state (activate / deactivate)
 router.patch('/:id/active', authMiddleware, async (req, res) => {
   try {
@@ -1366,94 +1450,20 @@ router.patch('/:id/active', authMiddleware, async (req, res) => {
     const airlineId = req.airlineId;
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
-    const acResult = await pool.query('SELECT id, is_active, airline_cabin_profile_id, crew_assigned FROM aircraft WHERE id = $1 AND airline_id = $2', [aircraftId, airlineId]);
+    const acResult = await pool.query('SELECT id, is_active FROM aircraft WHERE id = $1 AND airline_id = $2', [aircraftId, airlineId]);
     if (!acResult.rows[0]) {
       return res.status(404).json({ error: 'Aircraft not found' });
     }
-    const { is_active: currentIsActive, airline_cabin_profile_id: cabinProfileId, crew_assigned: crewAssigned } = acResult.rows[0];
-
-    const newIsActive = currentIsActive ? 0 : 1;
+    const newIsActive = acResult.rows[0].is_active ? 0 : 1;
 
     if (newIsActive === 1) {
-      if (!cabinProfileId) {
-        return res.status(400).json({
-          error: 'Cannot activate aircraft: no cabin profile assigned. Please assign a cabin profile first.'
-        });
+      const result = await activateAircraft(airlineId, aircraftId);
+      if (!result.ok) {
+        const { ok, status, ...payload } = result;
+        return res.status(status || 400).json(payload);
       }
-      if (!crewAssigned) {
-        return res.status(400).json({
-          error: 'Cannot activate aircraft: no crew assigned. Please hire crew first.'
-        });
-      }
-      const schedCountResult = await pool.query('SELECT COUNT(*) as cnt FROM weekly_schedule WHERE aircraft_id = $1', [aircraftId]);
-      const schedCount = parseInt(schedCountResult.rows[0].cnt);
-      if (schedCount === 0) {
-        return res.status(400).json({
-          error: 'Cannot activate aircraft: no flights in weekly schedule. Add at least one flight first.'
-        });
-      }
-
-      // ── Expansion capacity check ──────────────────────────────────────────
-      const expDeps = await getExpansionDepartures(airlineId, aircraftId);
-      const violations = [];
-
-      for (const [airport, adding] of Object.entries(expDeps)) {
-        const expResult = await pool.query('SELECT expansion_level FROM airport_expansions WHERE airline_id = $1 AND airport_code = $2', [airlineId, airport]);
-        const expLevel = expResult.rows[0]?.expansion_level ?? 0;
-        const capacity = expLevel * 100;
-
-        if (expLevel === 0) {
-          violations.push({ airport, current: 0, capacity: 0, adding, no_expansion: true });
-          continue;
-        }
-
-        const airlineForCheck = await pool.query('SELECT home_airport_code, primary_hub_airport_code FROM airlines WHERE id = $1', [airlineId]);
-        const homeCodeForCheck = airlineForCheck.rows[0]?.home_airport_code ?? '';
-        const primaryHubForCheck = airlineForCheck.rows[0]?.primary_hub_airport_code ?? '';
-
-        const currentResult = await pool.query(`
-          SELECT COUNT(*) as cnt FROM weekly_schedule ws
-          JOIN aircraft ac ON ac.id = ws.aircraft_id
-          WHERE ac.airline_id = $1 AND ac.is_active = 1
-            AND ws.is_transfer = 0
-            AND ws.departure_airport = $2
-            AND ws.arrival_airport != $3
-            AND ws.arrival_airport != $5
-            AND ac.id != $4
-            AND NOT EXISTS (
-              SELECT 1 FROM airport_expansions ae
-              WHERE ae.airline_id = ac.airline_id
-                AND ae.airport_code = ws.arrival_airport
-                AND ae.expansion_level > 0
-            )
-        `, [airlineId, airport, homeCodeForCheck, aircraftId, primaryHubForCheck]);
-        const current = parseInt(currentResult.rows[0].cnt);
-
-        if (current + adding > capacity) {
-          violations.push({ airport, current, capacity, adding });
-        }
-      }
-
-      if (violations.length > 0) {
-        return res.status(400).json({
-          error: 'slot_capacity_exceeded',
-          message: 'Schedule exceeds expansion capacity at one or more airports.',
-          violations,
-        });
-      }
-    }
-
-    await pool.query('UPDATE aircraft SET is_active = $1 WHERE id = $2', [newIsActive, aircraftId]);
-
-    // Generate flight instances immediately on activation so newly scheduled
-    // flights (including transfer legs just added) show up right away instead of
-    // waiting for the hourly :13 generation job. Scoped to THIS aircraft — a
-    // full-fleet pass took seconds and delayed the response, so the UI only
-    // flipped to green long after the click. Failures are non-fatal (the hourly
-    // job is the backstop).
-    if (newIsActive === 1) {
-      try { await generateFlights(aircraftId); }
-      catch (genErr) { console.error('Activation generateFlights failed:', genErr); }
+    } else {
+      await pool.query('UPDATE aircraft SET is_active = 0 WHERE id = $1', [aircraftId]);
     }
 
     res.json({
@@ -1919,12 +1929,12 @@ router.post('/:id/schedule-transfer', authMiddleware, async (req, res) => {
 // Plan a bank-aligned weekly rotation for ONE aircraft on ONE round-trip route.
 // `commit:false` (default) computes a preview only; `commit:true` writes the
 // generated legs + one weekly maintenance block in a single transaction.
-function bankMaintenanceDuration(seats) {
+export function bankMaintenanceDuration(seats) {
   if (seats <= 100) return 90;
   if (seats <= 250) return 150;
   return 240;
 }
-const BANK_TURNAROUND = { L: 25, M: 40, H: 60 };
+export const BANK_TURNAROUND = { L: 25, M: 40, H: 60 };
 
 router.post('/:id/bank-plan', authMiddleware, async (req, res) => {
   try {

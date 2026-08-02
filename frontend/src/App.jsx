@@ -29,6 +29,7 @@ import Loader from './components/Loader.jsx';
 import FleetPage from './pages/FleetPage';
 import AircraftDetail from './pages/AircraftDetail';
 import AircraftMarketplace from './pages/AircraftMarketplace';
+import AircraftGroups from './pages/AircraftGroups';
 import RoutePlanner from './pages/RoutePlanner';
 import FlightSchedule from './pages/FlightSchedule';
 import Finances from './pages/Finances';
@@ -457,6 +458,7 @@ function App() {
     'ops-control': 'Operations Control Center',
     personnel: 'Staff & Crew',
     marketplace: 'Marketplace',
+    'aircraft-groups': 'Aircraft Groups',
     'airport-overview': 'Airport Overview',
     leaderboards: 'Leaderboards',
   };
@@ -517,6 +519,16 @@ function App() {
         onNavigateToAirport={(code) => navigateToAirport(code, 'fleet')}
         onNavigate={(page) => navigate(page)}
       />
+    );
+  }
+  if (currentPage === 'aircraft-groups') {
+    return wrap(
+      <ErrorBoundary>
+        <AircraftGroups
+          airline={activeAirline}
+          onBack={() => setCurrentPage('fleet')}
+        />
+      </ErrorBoundary>
     );
   }
   if (currentPage === 'marketplace') {

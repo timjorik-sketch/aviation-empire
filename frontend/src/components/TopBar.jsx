@@ -13,7 +13,7 @@ const NAV_ITEMS = [
 
 const SECTION_PAGES = {
   dashboard:    ['dashboard'],
-  fleet:        ['fleet', 'cabin-profiles', 'marketplace', 'aircraft-detail'],
+  fleet:        ['fleet', 'cabin-profiles', 'aircraft-groups', 'marketplace', 'aircraft-detail'],
   operations:   ['ops-control', 'flight-schedule', 'service-profiles'],
   network:      ['hubs', 'routes', 'airport-overview', 'airport', 'route-map'],
   finances:     ['finances'],
@@ -25,6 +25,7 @@ const SUB_TABS = {
   fleet: [
     { page: 'fleet',          label: 'Overview' },
     { page: 'cabin-profiles', label: 'Cabin Profiles' },
+    { page: 'aircraft-groups', label: 'Aircraft Groups' },
     { page: 'marketplace',    label: 'Marketplace' },
   ],
   operations: [

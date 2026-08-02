@@ -2,6 +2,7 @@ import express from 'express';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 import { MAINTENANCE_PROGRAMS, GROUND_HANDLING_LEVELS, HOTEL_PARTNERSHIPS } from '../utils/delaySystem.js';
+import { deactivateAircraft } from './aircraft.js';
 
 const router = express.Router();
 
@@ -280,12 +281,12 @@ router.delete('/dismiss/:aircraft_id', authMiddleware, async (req, res) => {
       [req.airlineId, aircraftId]
     );
 
-    await pool.query(
-      'UPDATE aircraft SET crew_assigned = 0, is_active = 0 WHERE id = $1',
-      [aircraftId]
-    );
+    await pool.query('UPDATE aircraft SET crew_assigned = 0 WHERE id = $1', [aircraftId]);
+    // Grounding here must also drop the already-generated flights, or the
+    // aircraft keeps flying crewless for up to 72h.
+    const cancelledFlights = await deactivateAircraft(aircraftId);
 
-    res.json({ message: 'Crew dismissed', is_active: 0 });
+    res.json({ message: 'Crew dismissed', is_active: 0, cancelled_flights: cancelledFlights });
   } catch (err) {
     console.error('Personnel dismiss error:', err);
     res.status(500).json({ error: 'Server error' });

@@ -6,7 +6,7 @@ import { validatePriceClamp } from '../utils/marketPricing.js';
 import { planGroup } from '../utils/groupPlanner.js';
 import {
   syncRoutePrices, flightsOverlapWeekly, flightOverlapsMaintenance,
-  bankMaintenanceDuration, BANK_TURNAROUND, activateAircraft,
+  bankMaintenanceDuration, BANK_TURNAROUND, activateAircraft, deactivateAircraft,
 } from './aircraft.js';
 
 const router = express.Router();
@@ -348,7 +348,10 @@ router.post('/commit', authMiddleware, async (req, res) => {
       const newName = typeof a.aircraft_name === 'string' && a.aircraft_name.trim()
         ? a.aircraft_name.trim().slice(0, 60)
         : null;
-      writes.push({ ac, legs, maint, newName });
+      // Remember whether the player had this aircraft operating: the write has to
+      // ground it to unlock the schedule tables, and only aircraft that were
+      // already flying may be put back into service afterwards.
+      writes.push({ ac, legs, maint, newName, wasActive: !!ac.is_active });
     }
 
     const client = await pool.connect();
@@ -356,8 +359,13 @@ router.post('/commit', authMiddleware, async (req, res) => {
       await client.query('BEGIN');
       for (const w of writes) {
         // Deactivate first: weekly_schedule and maintenance_schedule are locked
-        // while an aircraft is operating.
-        await client.query('UPDATE aircraft SET is_active = 0 WHERE id = $1', [w.ac.id]);
+        // while an aircraft is operating. This also cancels the flights already
+        // generated from the OLD schedule — otherwise they keep running next to
+        // the new plan.
+        await deactivateAircraft(w.ac.id, client);
+        // flights.weekly_schedule_id is ON DELETE NO ACTION, so the template rows
+        // can't be dropped while any flight still points at them.
+        await client.query('UPDATE flights SET weekly_schedule_id = NULL WHERE aircraft_id = $1', [w.ac.id]);
         await client.query('DELETE FROM weekly_schedule WHERE aircraft_id = $1', [w.ac.id]);
         await client.query('DELETE FROM maintenance_schedule WHERE aircraft_id = $1 AND airline_id = $2', [w.ac.id, airlineId]);
 
@@ -407,25 +415,44 @@ router.post('/commit', authMiddleware, async (req, res) => {
     await syncRoutePrices(fwd.id, eco, biz, fir, sp);
     await syncRoutePrices(ret.id, eco, biz, fir, sp);
 
-    // Reactivate one by one. The schedules are already written, so an aircraft
-    // that cannot be activated (no crew, expansion capacity) is reported rather
-    // than rolled back — the player fixes the cause and flips it green manually.
+    // Restore the previous operating state — ONLY aircraft that were already
+    // flying go back into service. Committing a plan must never put a grounded
+    // aircraft into the air behind the player's back; one that was parked stays
+    // parked with its new schedule written, ready to be flipped green manually.
+    // The schedules are already committed, so an aircraft that cannot be
+    // reactivated (no crew, expansion capacity) is reported rather than rolled
+    // back — the player fixes the cause and activates it themselves.
     const activation = [];
     for (const w of writes) {
+      if (!w.wasActive) {
+        activation.push({
+          aircraft_id: w.ac.id,
+          registration: w.ac.registration,
+          activated: false,
+          left_grounded: true,
+          error: null,
+        });
+        continue;
+      }
       const result = await activateAircraft(airlineId, w.ac.id);
       activation.push({
         aircraft_id: w.ac.id,
         registration: w.ac.registration,
         activated: result.ok,
+        left_grounded: false,
         error: result.ok ? null : (result.message || result.error),
       });
     }
 
     const legCount = writes.reduce((s, w) => s + w.legs.length, 0);
-    const failed = activation.filter(a => !a.activated);
+    const grounded = activation.filter(a => a.left_grounded);
+    const failed = activation.filter(a => !a.activated && !a.left_grounded);
+    const notes = [];
+    if (failed.length) notes.push(`${failed.length} could not be reactivated`);
+    if (grounded.length) notes.push(`${grounded.length} left grounded (were not operating before)`);
     res.status(201).json({
       message: `Group plan written: ${writes.length} aircraft, ${legCount} flights`
-        + (failed.length ? ` — ${failed.length} could not be reactivated` : ' — all aircraft operating'),
+        + (notes.length ? ` — ${notes.join(', ')}` : ' — all aircraft operating'),
       aircraft_count: writes.length,
       leg_count: legCount,
       activation,

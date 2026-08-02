@@ -1635,6 +1635,7 @@ async function processFlights() {
         COALESCE(f.booking_revenue_collected, 0) AS rev_collected,
         f.seats_sold, f.ticket_price,
         ac.current_location, ac.home_airport, ac.condition, ac.unavailable_until,
+        ac.is_active AS ac_is_active,
         al.wet_lease_contract, al.hotel_partnership,
         al.maintenance_program, al.ground_handling_level,
         at.wake_turbulence_category AS wake_cat,
@@ -1669,6 +1670,19 @@ async function processFlights() {
       const hubCodes = f.airline_id ? await hubsFor(f.airline_id) : new Set();
       const depIsHub = hubCodes.has(f.dep_airport);
       const arrIsHub = hubCodes.has(f.arr_airport);
+
+      // ── Aircraft is grounded: drop the flight, no charge ──────────────────
+      // generateFlights materialises 72h ahead, so deactivating an aircraft
+      // leaves up to three days of already-generated flights behind. Every
+      // deactivation path is supposed to cancel them itself; this is the net
+      // that catches whatever slips through, so a grounded aircraft can never
+      // depart. No cancellation cost — the player grounded it on purpose, and
+      // bookings already stopped (the booking pass filters on is_active).
+      if (f.aircraft_id && f.ac_is_active === 0) {
+        await pool.query("UPDATE flights SET status = 'cancelled', is_wet_leased = false WHERE id = $1", [f.id]);
+        console.log(`[FlightProc] ${f.flight_number} CANCELLED — aircraft ${f.aircraft_id} is grounded`);
+        continue;
+      }
 
       // ── Aircraft can't operate this flight: wrong location OR in repair ──
       // All cancels caused by the aircraft being unavailable share the same

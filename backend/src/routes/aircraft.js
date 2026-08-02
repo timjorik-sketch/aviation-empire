@@ -1359,6 +1359,22 @@ async function getExpansionDepartures(airlineId, aircraftId) {
   return result;
 }
 
+// Ground one aircraft: clear the flag AND drop the flights that were already
+// materialised for it. generateFlights runs 72h ahead, so flipping is_active
+// alone leaves up to three days of flights that the processor would happily
+// depart — while the booking pass (which does filter on is_active) has already
+// stopped selling seats for them. Every path that grounds an aircraft must go
+// through here. Pass a transaction client to join an open transaction.
+export async function deactivateAircraft(aircraftId, client = pool) {
+  await client.query('UPDATE aircraft SET is_active = 0 WHERE id = $1', [aircraftId]);
+  const cancelled = await client.query(
+    `UPDATE flights SET status = 'cancelled'
+     WHERE aircraft_id = $1 AND status IN ('scheduled', 'boarding')`,
+    [aircraftId]
+  );
+  return cancelled.rowCount;
+}
+
 // Activate one aircraft: enforce the operating prerequisites (cabin profile, crew,
 // a non-empty weekly schedule) and the per-airport expansion capacity, then flip
 // the flag and materialise its flights. Shared with the aircraft-group commit so
@@ -1455,6 +1471,7 @@ router.patch('/:id/active', authMiddleware, async (req, res) => {
       return res.status(404).json({ error: 'Aircraft not found' });
     }
     const newIsActive = acResult.rows[0].is_active ? 0 : 1;
+    let cancelledFlights = 0;
 
     if (newIsActive === 1) {
       const result = await activateAircraft(airlineId, aircraftId);
@@ -1463,12 +1480,13 @@ router.patch('/:id/active', authMiddleware, async (req, res) => {
         return res.status(status || 400).json(payload);
       }
     } else {
-      await pool.query('UPDATE aircraft SET is_active = 0 WHERE id = $1', [aircraftId]);
+      cancelledFlights = await deactivateAircraft(aircraftId);
     }
 
     res.json({
       message: `Aircraft ${newIsActive ? 'activated' : 'deactivated'}`,
-      is_active: newIsActive
+      is_active: newIsActive,
+      cancelled_flights: cancelledFlights
     });
   } catch (error) {
     console.error('Toggle aircraft active error:', error);

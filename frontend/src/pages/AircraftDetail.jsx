@@ -333,6 +333,14 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [maintenance, setMaintenance] = useState([]);
   const [isActive, setIsActive] = useState(0);
   const [shiftingDay, setShiftingDay] = useState(false);  // ±1D whole-schedule rotation in progress
+  // ── Edit mode: drag the whole existing schedule around the grid ──
+  // While on, the real bars are hidden and gray draft bars are drawn instead; the
+  // drafts hold absolute GAME week-minutes (0…10079) so the timezone view can be
+  // switched mid-edit without moving anything. Nothing is written until Confirm.
+  const [editMode, setEditMode]       = useState(false);
+  const [editLegs, setEditLegs]       = useState([]);   // [{ src, wkDep, dur }]
+  const [editMaints, setEditMaints]   = useState([]);   // [{ src, wkStart, dur }]
+  const [editSaving, setEditSaving]   = useState(false);
   // Show the weekly grid in the aircraft's home-base local time (vs raw game time).
   const [viewLocal, setViewLocal] = useState(true);
   // Cabin profile change warning modal state
@@ -897,6 +905,100 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     };
   }, [planMaintWk, planMeta, viewShiftMin]);
 
+  // ─── Edit mode draft bars (same gray look as the bank ghosts) ─────────────
+
+  // Draft flights, laid out exactly like flightBars but sourced from the dragged
+  // week-minute drafts (turnaround band included, so a bar that visually fits a
+  // gap also passes the server's validation).
+  const editBars = useMemo(() => editLegs.map((l, i) => {
+    const sv     = wkToView(l.wkDep);
+    const depMin = sv.minuteOfDay, day = sv.day;
+    const dur    = l.dur;
+    const arrMin = (depMin + dur) % 1440;
+    const crossesMidnight = depMin + dur > 1440;
+    const seg1H  = crossesMidnight ? (1440 - depMin) * PX_PER_MIN : dur * PX_PER_MIN;
+    const arrDay = crossesMidnight ? (day + 1) % 7 : day;
+    return {
+      key: `edit-${i}`, legIndex: i,
+      flight_number: l.src.flight_number,
+      departure_airport: l.src.departure_airport, arrival_airport: l.src.arrival_airport,
+      is_transfer: l.src.is_transfer,
+      departure_time: minutesToHHMM(depMin), arrival_time: minutesToHHMM(arrMin),
+      depLocal: localHMFromBerlin(((l.wkDep % 1440) + 1440) % 1440, l.src.dep_longitude),
+      arrLocal: localHMFromBerlin((((l.wkDep + dur) % 1440) + 1440) % 1440, l.src.arr_longitude),
+      dayIndex: day,
+      top:    depMin * PX_PER_MIN,
+      height: Math.max(seg1H, 14),
+      overflowDayIndex: crossesMidnight ? arrDay : null,
+      overflowHeight:   crossesMidnight ? Math.max(arrMin * PX_PER_MIN, 14) : 0,
+      groundDayIndex:   arrDay,
+      groundTop:        arrMin * PX_PER_MIN,
+      groundSeg1Height: arrMin + groundMin > 1440 ? (1440 - arrMin) * PX_PER_MIN : groundMin * PX_PER_MIN,
+      groundOverflowDayIndex: arrMin + groundMin > 1440 ? (arrDay + 1) % 7 : null,
+      groundOverflowHeight:   arrMin + groundMin > 1440 ? (arrMin + groundMin - 1440) * PX_PER_MIN : 0,
+    };
+  }), [editLegs, viewShiftMin, groundMin]);
+
+  const editMaintBars = useMemo(() => editMaints.map((m, i) => {
+    const sv    = wkToView(m.wkStart);
+    const start = sv.minuteOfDay, day = sv.day;
+    const dur   = m.dur;
+    const crossesMidnight = start + dur > 1440;
+    const seg1H = crossesMidnight ? (1440 - start) * PX_PER_MIN : dur * PX_PER_MIN;
+    const endDay  = crossesMidnight ? (day + 1) % 7 : day;
+    const endWall = (start + dur) % 1440;
+    return {
+      key: `editm-${i}`, maintIndex: i,
+      dayIndex: day,
+      top:    start * PX_PER_MIN,
+      height: Math.max(seg1H, 14),
+      overflowDayIndex: crossesMidnight ? endDay : null,
+      overflowHeight:   crossesMidnight ? Math.max((start + dur - 1440) * PX_PER_MIN, 14) : 0,
+      groundDayIndex:   endDay,
+      groundTop:        endWall * PX_PER_MIN,
+      groundSeg1Height: endWall + groundMin > 1440 ? (1440 - endWall) * PX_PER_MIN : groundMin * PX_PER_MIN,
+      groundOverflowDayIndex: endWall + groundMin > 1440 ? (endDay + 1) % 7 : null,
+      groundOverflowHeight:   endWall + groundMin > 1440 ? (endWall + groundMin - 1440) * PX_PER_MIN : 0,
+      start_minutes: start, duration_minutes: dur,
+    };
+  }), [editMaints, viewShiftMin, groundMin]);
+
+  // Overlap check on the circular weekly timeline — mirrors the backend's
+  // flightsOverlapWeekly / flightOverlapsMaintenance so what the grid marks red is
+  // exactly what the server would reject. Draft times are game time, and the drag
+  // moves whole legs, so this is timezone-independent.
+  const editConflicts = useMemo(() => {
+    const bad = new Set();
+    const WK  = 7 * 1440;
+    const hits = (aS, aE, bS, bE) =>
+      [-WK, 0, WK].some(s => aS + s < bE && bS < aE + s);
+    const legs = editLegs.map((l, i) => ({ key: `f-${i}`, dep: l.wkDep, arr: l.wkDep + l.dur }));
+    for (let i = 0; i < legs.length; i++) {
+      for (let j = i + 1; j < legs.length; j++) {
+        if (hits(legs[i].dep, legs[i].arr + groundMin, legs[j].dep, legs[j].arr + groundMin)) {
+          bad.add(legs[i].key); bad.add(legs[j].key);
+        }
+      }
+    }
+    editMaints.forEach((m, mi) => {
+      const mS = m.wkStart, mE = m.wkStart + m.dur;
+      // Maintenance blocks each other with a turnaround pad, same as flights.
+      editMaints.forEach((o, oi) => {
+        if (oi <= mi) return;
+        if (hits(mS, mE + groundMin, o.wkStart, o.wkStart + o.dur + groundMin)) {
+          bad.add(`m-${mi}`); bad.add(`m-${oi}`);
+        }
+      });
+      legs.forEach((l, li) => {
+        // Flight padded on BOTH sides against maintenance — the backend's rule.
+        if (hits(l.dep - groundMin, l.arr + groundMin, mS, mE)) {
+          bad.add(`f-${li}`); bad.add(`m-${mi}`);
+        }
+      });
+    });
+    return bad;
+  }, [editLegs, editMaints, groundMin]);
+
   const bankForwardRoute = useMemo(
     () => routes.find(r => r.id === parseInt(bankForwardRouteId)) || null,
     [routes, bankForwardRouteId]
@@ -1392,6 +1494,16 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       const dayDelta = d.colWidth ? Math.round((e.clientX - d.startX) / d.colWidth) : 0;
       const raw = clampMaint(d.startVal + dayDelta * 1440 + deltaMin, d.gaps, d.duration, d.turnaround);
       if (raw != null) setMaintOverride(raw);
+    } else if (d.kind === 'edit') {
+      // Free move across the whole week: vertical = time, horizontal = day column.
+      // The week is circular, so Sun→Mon simply wraps.
+      const WK = 7 * 1440;
+      const dayDelta = d.colWidth ? Math.round((e.clientX - d.startX) / d.colWidth) : 0;
+      let val = d.startVal + dayDelta * 1440 + deltaMin;
+      if (e.shiftKey) val = Math.round(val / 5) * 5;   // Shift = snap to a 5-minute rhythm
+      val = ((val % WK) + WK) % WK;
+      if (d.target === 'maint') setEditMaints(prev => prev.map((m, i) => i === d.idx ? { ...m, wkStart: val } : m));
+      else                      setEditLegs(prev => prev.map((l, i) => i === d.idx ? { ...l, wkDep: val } : l));
     } else {
       setPlanLegs(prev => applyLegDrag(prev, d.idx, d.startVal + deltaMin, metaRef.current));
     }
@@ -1423,6 +1535,19 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     window.addEventListener('mousemove', onDragMove);
     window.addEventListener('mouseup', onDragUp);
   }, [planMeta, maintGaps, maintOverride, onDragMove, onDragUp]);
+
+  // Drag an existing (draft) flight or maintenance block anywhere in the week.
+  const onEditMouseDown = useCallback((e, target, idx) => {
+    e.preventDefault(); e.stopPropagation();
+    const colWidth = e.currentTarget?.parentElement?.getBoundingClientRect().width || 0;
+    const startVal = target === 'maint'
+      ? (editMaints[idx]?.wkStart ?? 0)
+      : (editLegs[idx]?.wkDep ?? 0);
+    dragRef.current = { kind: 'edit', target, idx, startY: e.clientY, startX: e.clientX, colWidth, startVal };
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onDragMove);
+    window.addEventListener('mouseup', onDragUp);
+  }, [editLegs, editMaints, onDragMove, onDragUp]);
 
   const openBankModal = (bank = null) => {
     setError('');
@@ -1505,6 +1630,44 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     } catch (err) { setError(err.message); }
   };
 
+  // Clear the weekly schedule and re-post it wholesale. Used by ±1D and by Edit
+  // mode: both relocate many entries at once, where per-entry PATCHes would trip
+  // the server's overlap check against rows that are themselves about to move.
+  // Callers snapshot first, so a failed re-post never loses the schedule silently.
+  // Returns the number of maintenance blocks the server rejected (overlap).
+  const rewriteSchedule = async ({ flights, transfers, maints }) => {
+    const clearRes  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/schedule`, { method: 'DELETE', headers });
+    const clearData = await clearRes.json();
+    if (!clearRes.ok) throw new Error(clearData.error);
+
+    if (flights.length) {
+      const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/schedule`, {
+        method: 'POST', headers: jsonHeaders, body: JSON.stringify({ flights }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to write flights');
+    }
+
+    // Transfer legs re-post through their own endpoint (no route/fares).
+    if (transfers.length) {
+      const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/schedule-transfer`, {
+        method: 'POST', headers: jsonHeaders, body: JSON.stringify({ flights: transfers }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to write transfer legs');
+    }
+
+    let maintFailed = 0;
+    for (const mt of maints) {
+      const res = await fetch(`${API_URL}/api/maintenance`, {
+        method: 'POST', headers: jsonHeaders,
+        body: JSON.stringify({ aircraft_id: aircraftId, day_of_week: mt.day_of_week, start_time: mt.start_time, type: mt.type || 'routine' }),
+      });
+      if (!res.ok) maintFailed++;
+    }
+    return maintFailed;
+  };
+
   // Rotate the ENTIRE weekly schedule (flights + maintenance) by ±1 day. The shift
   // is rigid and rolling — everything keeps its time-of-day, and Monday wraps to
   // Sunday (−1D) / Sunday wraps to Monday (+1D). Because it's a uniform full-day
@@ -1515,61 +1678,37 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     if (schedule.length === 0 && maintenance.length === 0) { setError('Nothing to shift — the weekly schedule is empty.'); return; }
     const shift = dir * 1440;  // one whole day, signed
     setShiftingDay(true); setError(''); setSuccess('');
-    // Snapshot before we clear, so a failed re-post never loses the schedule silently.
     const srcSchedule  = schedule.map(e => ({ ...e }));
     const srcMaint     = maintenance.map(m => ({ ...m }));
     try {
-      const clearRes  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/schedule`, { method: 'DELETE', headers });
-      const clearData = await clearRes.json();
-      if (!clearRes.ok) throw new Error(clearData.error);
-
-      const flights = srcSchedule.filter(e => !e.is_transfer).map(e => {
-        const s = shiftWeekSlot(e.day_of_week, parseHM(e.departure_time), shift, 'roll');
-        return {
-          route_id: e.route_id,
-          day_of_week: s.day,
-          departure_time: minutesToHHMM(s.minuteOfDay),
-          economy_price: e.economy_price,
-          business_price: e.business_price,
-          first_price: e.first_price,
-          service_profile_id: e.service_profile_id,
-        };
+      const shifted = (e) => shiftWeekSlot(e.day_of_week, parseHM(e.departure_time), shift, 'roll');
+      const maintFailed = await rewriteSchedule({
+        flights: srcSchedule.filter(e => !e.is_transfer).map(e => {
+          const s = shifted(e);
+          return {
+            route_id: e.route_id,
+            day_of_week: s.day,
+            departure_time: minutesToHHMM(s.minuteOfDay),
+            economy_price: e.economy_price,
+            business_price: e.business_price,
+            first_price: e.first_price,
+            service_profile_id: e.service_profile_id,
+          };
+        }),
+        transfers: srcSchedule.filter(e => e.is_transfer).map(e => {
+          const s = shifted(e);
+          return {
+            departure_airport: e.departure_airport,
+            arrival_airport: e.arrival_airport,
+            day_of_week: s.day,
+            departure_time: minutesToHHMM(s.minuteOfDay),
+          };
+        }),
+        maints: srcMaint.map(mt => {
+          const s = shiftWeekSlot(mt.day_of_week, mt.start_minutes, shift, 'roll');
+          return { day_of_week: s.day, start_time: minutesToHHMM(s.minuteOfDay), type: mt.type };
+        }),
       });
-      if (flights.length) {
-        const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/schedule`, {
-          method: 'POST', headers: jsonHeaders, body: JSON.stringify({ flights }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Failed to shift flights');
-      }
-
-      // Transfer legs re-post through their own endpoint (no route/fares).
-      const transfers = srcSchedule.filter(e => e.is_transfer).map(e => {
-        const s = shiftWeekSlot(e.day_of_week, parseHM(e.departure_time), shift, 'roll');
-        return {
-          departure_airport: e.departure_airport,
-          arrival_airport: e.arrival_airport,
-          day_of_week: s.day,
-          departure_time: minutesToHHMM(s.minuteOfDay),
-        };
-      });
-      if (transfers.length) {
-        const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/schedule-transfer`, {
-          method: 'POST', headers: jsonHeaders, body: JSON.stringify({ flights: transfers }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Failed to shift transfer legs');
-      }
-
-      let maintFailed = 0;
-      for (const mt of srcMaint) {
-        const s = shiftWeekSlot(mt.day_of_week, mt.start_minutes, shift, 'roll');
-        const res = await fetch(`${API_URL}/api/maintenance`, {
-          method: 'POST', headers: jsonHeaders,
-          body: JSON.stringify({ aircraft_id: aircraftId, day_of_week: s.day, start_time: minutesToHHMM(s.minuteOfDay), type: mt.type || 'routine' }),
-        });
-        if (!res.ok) maintFailed++;
-      }
 
       setSuccess(
         `Schedule shifted ${dir > 0 ? '+1 day' : '−1 day'}` +
@@ -1578,6 +1717,71 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       fetchSchedule();
     } catch (err) { setError(err.message); fetchSchedule(); }
     finally { setShiftingDay(false); }
+  };
+
+  // ── Edit mode: free-drag the existing schedule, then write it in one go ──
+  const enterEditMode = () => {
+    if (isActive) { setError('Aircraft must be inactive to edit schedule. Deactivate the aircraft first.'); return; }
+    if (schedule.length === 0 && maintenance.length === 0) { setError('Nothing to edit — the weekly schedule is empty.'); return; }
+    clearBankPlan();
+    setEditLegs(schedule.map(e => {
+      const dep = parseHM(e.departure_time);
+      const arr = parseHM(e.arrival_time);
+      return { src: { ...e }, wkDep: e.day_of_week * 1440 + dep, dur: ((arr - dep) + 1440) % 1440 || 1 };
+    }));
+    setEditMaints(maintenance.map(m => ({
+      src: { ...m }, wkStart: m.day_of_week * 1440 + m.start_minutes, dur: m.duration_minutes,
+    })));
+    setError(''); setSuccess(''); setEditMode(true);
+  };
+
+  const cancelEditMode = () => {
+    setEditMode(false); setEditLegs([]); setEditMaints([]); setError('');
+  };
+
+  const confirmEditMode = async () => {
+    if (editConflicts.size > 0) { setError('Fix the highlighted overlaps before saving.'); return; }
+    setEditSaving(true); setError(''); setSuccess('');
+    const srcLegs   = editLegs.map(l => ({ ...l }));
+    const srcMaints = editMaints.map(m => ({ ...m }));
+    try {
+      const slot = (wk) => ({ day: Math.floor(wk / 1440) % 7, time: minutesToHHMM(((wk % 1440) + 1440) % 1440) });
+      const maintFailed = await rewriteSchedule({
+        flights: srcLegs.filter(l => !l.src.is_transfer).map(l => {
+          const s = slot(l.wkDep);
+          return {
+            route_id: l.src.route_id,
+            day_of_week: s.day,
+            departure_time: s.time,
+            economy_price: l.src.economy_price,
+            business_price: l.src.business_price,
+            first_price: l.src.first_price,
+            service_profile_id: l.src.service_profile_id,
+          };
+        }),
+        transfers: srcLegs.filter(l => l.src.is_transfer).map(l => {
+          const s = slot(l.wkDep);
+          return {
+            departure_airport: l.src.departure_airport,
+            arrival_airport: l.src.arrival_airport,
+            day_of_week: s.day,
+            departure_time: s.time,
+          };
+        }),
+        maints: srcMaints.map(m => {
+          const s = slot(m.wkStart);
+          return { day_of_week: s.day, start_time: s.time, type: m.src.type };
+        }),
+      });
+
+      setSuccess(
+        'Schedule updated' +
+        (maintFailed ? ` — ${maintFailed} maintenance block(s) skipped (overlap)` : '')
+      );
+      setEditMode(false); setEditLegs([]); setEditMaints([]);
+      fetchSchedule();
+    } catch (err) { setError(err.message); fetchSchedule(); }
+    finally { setEditSaving(false); }
   };
 
   const handleTransferSubmit = async () => {
@@ -2449,18 +2653,36 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
               <button
                 className="ad-btn-clear-sched"
                 onClick={() => handleShiftDay(-1)}
-                disabled={shiftingDay || isActive}
+                disabled={shiftingDay || isActive || editMode}
                 title="Shift the whole weekly schedule back by one day (Monday wraps to Sunday)"
               >−1D</button>
               <button
                 className="ad-btn-clear-sched"
                 onClick={() => handleShiftDay(1)}
-                disabled={shiftingDay || isActive}
+                disabled={shiftingDay || isActive || editMode}
                 title="Shift the whole weekly schedule forward by one day (Sunday wraps to Monday)"
               >+1D</button>
+              <button
+                className={`ad-btn-clear-sched${editMode ? ' ad-btn-edit-on' : ''}`}
+                onClick={() => (editMode ? cancelEditMode() : enterEditMode())}
+                disabled={shiftingDay || isActive || !!bankPlan}
+                title="Drag existing flights and maintenance freely across days and times, then confirm"
+              >{editMode ? 'Editing…' : 'Edit'}</button>
             </span>
-            <button className="ad-btn-clear-sched" onClick={handleClearSchedule}>Clear All</button>
+            <button className="ad-btn-clear-sched" onClick={handleClearSchedule} disabled={editMode}>Clear All</button>
           </div>
+          {editMode && (
+            <div className="ad-bank-overlay">
+              <span className="ad-bank-overlay-label">
+                Edit Mode — drag to move · Shift = 5-min steps
+                {editConflicts.size > 0 && <span className="ad-edit-warn"> · overlaps</span>}
+              </span>
+              <button className="ad-btn-clear-sched" onClick={cancelEditMode} disabled={editSaving}>Cancel</button>
+              <button className="ad-bank-confirm-btn" disabled={editSaving || editConflicts.size > 0} onClick={confirmEditMode}>
+                {editSaving ? 'Saving…' : 'Confirm & save'}
+              </button>
+            </div>
+          )}
           {bankPlan && (
             <div className="ad-bank-overlay">
               <span className="ad-bank-overlay-label">Bank Plan Preview</span>
@@ -2485,16 +2707,27 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                 ))}
               </div>
               {DAY_SHORT.map((_, di) => {
-                const bars             = flightBars.filter(f => f.dayIndex === di);
-                const overflowBars     = flightBars.filter(f => f.overflowDayIndex === di);
-                const groundBars       = flightBars.filter(f => f.groundDayIndex === di);
-                const groundOverflowBars = flightBars.filter(f => f.groundOverflowDayIndex === di);
-                const mBars            = maintBars.filter(m => m.dayIndex === di);
-                const mOverflowBars    = maintBars.filter(m => m.overflowDayIndex === di);
-                const mGroundBars      = maintBars.filter(m => m.groundDayIndex === di);
-                const mGroundOverflowBars = maintBars.filter(m => m.groundOverflowDayIndex === di);
+                // While editing, the stored bars give way to the draggable drafts.
+                const realFlights      = editMode ? [] : flightBars;
+                const realMaint        = editMode ? [] : maintBars;
+                const bars             = realFlights.filter(f => f.dayIndex === di);
+                const overflowBars     = realFlights.filter(f => f.overflowDayIndex === di);
+                const groundBars       = realFlights.filter(f => f.groundDayIndex === di);
+                const groundOverflowBars = realFlights.filter(f => f.groundOverflowDayIndex === di);
+                const mBars            = realMaint.filter(m => m.dayIndex === di);
+                const mOverflowBars    = realMaint.filter(m => m.overflowDayIndex === di);
+                const mGroundBars      = realMaint.filter(m => m.groundDayIndex === di);
+                const mGroundOverflowBars = realMaint.filter(m => m.groundOverflowDayIndex === di);
                 const gBars            = ghostBars.filter(g => g.dayIndex === di);
                 const gOverflowBars    = ghostBars.filter(g => g.overflowDayIndex === di);
+                const eBars            = editBars.filter(b => b.dayIndex === di);
+                const eOverflowBars    = editBars.filter(b => b.overflowDayIndex === di);
+                const eGroundBars      = editBars.filter(b => b.groundDayIndex === di);
+                const eGroundOverflowBars = editBars.filter(b => b.groundOverflowDayIndex === di);
+                const eMaintBars       = editMaintBars.filter(m => m.dayIndex === di);
+                const eMaintOverflow   = editMaintBars.filter(m => m.overflowDayIndex === di);
+                const eMaintGround     = editMaintBars.filter(m => m.groundDayIndex === di);
+                const eMaintGroundOverflow = editMaintBars.filter(m => m.groundOverflowDayIndex === di);
                 return (
                   <div key={di} className="ad-grid-col">
                     {Array.from({ length: 24 }, (_, h) => (
@@ -2627,6 +2860,62 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                             <rect x="8.5" y="1.5" width="1.5" height="7" rx="0.5"/>
                           </svg>
                         </button>
+                      </div>
+                    ))}
+                    {/* Edit mode drafts — gray, draggable across days and times */}
+                    {[...eGroundBars.map(b => ({ b, top: b.groundTop, h: b.groundSeg1Height, k: 'eg' })),
+                      ...eGroundOverflowBars.map(b => ({ b, top: 0, h: b.groundOverflowHeight, k: 'egov' })),
+                      ...eMaintGround.map(b => ({ b, top: b.groundTop, h: b.groundSeg1Height, k: 'emg' })),
+                      ...eMaintGroundOverflow.map(b => ({ b, top: 0, h: b.groundOverflowHeight, k: 'emgov' }))
+                    ].map(({ b, top, h, k }) => (
+                      <div key={`${k}-${b.key}`} className="ad-grid-ground"
+                        title={`${groundMin}min turnaround`}
+                        style={{
+                          top, height: h,
+                          backgroundImage: 'repeating-linear-gradient(-45deg, #2C2C2C 0px, #2C2C2C 2px, transparent 2px, transparent 7px)',
+                          border: '1px solid #2C2C2C',
+                          borderTop: 'none',
+                          boxSizing: 'border-box',
+                          opacity: 0.5,
+                        }} />
+                    ))}
+                    {eBars.map(b => (
+                      <div key={b.key}
+                        className={`ad-grid-ghost ad-grid-ghost--drag ad-grid-ghost--move${editConflicts.has(`f-${b.legIndex}`) ? ' ad-grid-ghost--conflict' : ''}`}
+                        style={{ top: b.top, height: b.height }}
+                        onMouseDown={(e) => onEditMouseDown(e, 'flight', b.legIndex)}
+                        title={`${b.flight_number}: ${b.departure_airport}→${b.arrival_airport}\nDrag across days and times · Shift = 5-min steps\nDep ${b.departure_time}\nArr ${b.arrival_time}`}>
+                        <span className="ad-grid-fn">{b.flight_number}</span>
+                        {b.height > 24 && <span className="ad-grid-rt">{b.departure_airport}→{b.arrival_airport}</span>}
+                        {b.height > 38 && <span className="ad-grid-tm">{b.departure_time}{b.depLocal && ` (${b.depLocal})`}</span>}
+                        {b.height > 50 && <span className="ad-grid-tm">{b.arrival_time}{b.arrLocal && ` (${b.arrLocal})`}</span>}
+                      </div>
+                    ))}
+                    {eOverflowBars.map(b => (
+                      <div key={`${b.key}-ov`}
+                        className={`ad-grid-ghost${editConflicts.has(`f-${b.legIndex}`) ? ' ad-grid-ghost--conflict' : ''}`}
+                        style={{ top: 0, height: b.overflowHeight, borderTop: '2px dashed #2C2C2C' }}
+                        title={`${b.flight_number}: ${b.departure_airport}→${b.arrival_airport} (cont.)`}>
+                        <span className="ad-grid-fn">{b.flight_number}</span>
+                        {b.overflowHeight > 24 && <span className="ad-grid-rt">→{b.arrival_airport}</span>}
+                      </div>
+                    ))}
+                    {eMaintBars.map(m => (
+                      <div key={m.key}
+                        className={`ad-grid-ghost ad-grid-ghost--maint ad-grid-ghost--drag ad-grid-ghost--move${editConflicts.has(`m-${m.maintIndex}`) ? ' ad-grid-ghost--conflict' : ''}`}
+                        style={{ top: m.top, height: m.height }}
+                        onMouseDown={(e) => onEditMouseDown(e, 'maint', m.maintIndex)}
+                        title={'Maintenance (A-Check)\nDrag across days and times · Shift = 5-min steps'}>
+                        <span className="ad-grid-fn">A-Check</span>
+                        {m.height > 24 && <span className="ad-grid-rt">{minsToHM(m.start_minutes)}</span>}
+                      </div>
+                    ))}
+                    {eMaintOverflow.map(m => (
+                      <div key={`${m.key}-ov`}
+                        className={`ad-grid-ghost ad-grid-ghost--maint${editConflicts.has(`m-${m.maintIndex}`) ? ' ad-grid-ghost--conflict' : ''}`}
+                        style={{ top: 0, height: m.overflowHeight, borderTop: '2px dashed #6b7280' }}
+                        title="Maintenance (A-Check, cont.)">
+                        <span className="ad-grid-fn">A-Check</span>
                       </div>
                     ))}
                     {/* Bank plan ghost preview — half-transparent, non-interactive */}
@@ -4452,6 +4741,11 @@ const styles = `
     cursor: pointer; letter-spacing: 0.03em; transition: all 0.15s;
   }
   .ad-btn-clear-sched:hover { background: rgba(239,68,68,0.25); border-color: rgba(239,68,68,0.6); color: #fca5a5; }
+  .ad-btn-clear-sched:disabled { opacity: 0.4; cursor: not-allowed; }
+  .ad-btn-clear-sched:disabled:hover { background: transparent; border-color: rgba(255,255,255,0.3); color: rgba(255,255,255,0.7); }
+  .ad-btn-edit-on { background: rgba(255,255,255,0.9); border-color: white; color: #2C2C2C; }
+  .ad-btn-edit-on:hover { background: white; border-color: white; color: #2C2C2C; }
+  .ad-edit-warn { color: #fca5a5; }
   .sched-btn-clear {
     background: transparent; color: #dc2626; border: 1px solid #fca5a5;
     padding: 0.38rem 0.8rem; border-radius: 6px; font-weight: 600;
@@ -4502,6 +4796,9 @@ const styles = `
   .ad-grid-ghost--drag:hover { opacity: 0.68; }
   .ad-grid-ghost--maint { background: #6b7280; border-color: #4b5563; }
   .ad-grid-ghost .ad-grid-fn, .ad-grid-ghost .ad-grid-rt, .ad-grid-ghost .ad-grid-tm { color: #fff; }
+  /* Edit mode: same ghost language, but free movement in both axes */
+  .ad-grid-ghost--move { cursor: move; }
+  .ad-grid-ghost--conflict { outline: 2px solid #FF4444; outline-offset: -2px; opacity: 0.72; }
   /* Bank plan confirm overlay — floats over the grid, dark toolbar language */
   .ad-bank-overlay { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 12px; background: #2C2C2C; padding: 8px 10px 8px 16px; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.28); }
   .ad-bank-overlay-label { color: white; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }

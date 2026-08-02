@@ -145,3 +145,10 @@ vite.config.ts.timestamp-*
 
 # Claude Code machine-local settings (contains tokens)
 .claude/settings.local.json
+
+# Claude Code runtime state (per-session pid/lock, not shared)
+.claude/scheduled_tasks.lock
+
+# Leftover from the pre-PostgreSQL era. Nothing reads it any more, but an
+# accidental commit would put a whole database in the repo.
+backend/database.sqlite

@@ -566,19 +566,55 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
         }
       }
       const src = hubBanks.find(x => x.id === b.id) || null;
+      // A rotation does not have to come home into the bank it left from — the
+      // planner picks whichever arrival window costs least layover, and records it
+      // as arr_bank_id. Judging the return against the DEPARTURE bank's arrival
+      // window is what made a landing at 14:50 look wrong when it was sitting
+      // squarely inside the afternoon window it was actually planned for.
+      const arrSrc = hubBanks.find(x => x.id === b.arr_bank_id)
+                  || hubBanks.find(x => x.id === b.id) || null;
       const hubOff  = lonOffset(outLeg?.dep_longitude ?? inLeg?.arr_longitude);
       const destOff = lonOffset(inLeg?.dep_longitude ?? outLeg?.arr_longitude);
       return {
-        bank: b, src, outLeg, inLeg,
+        bank: b, src, arrSrc, outLeg, inLeg,
         // Outbound leaves the hub — check it against the bank's departure window.
         outLocal: outLeg ? toLocal(hhmmToMin(outLeg.departure_time), hubOff) : null,
-        // Inbound leaves the destination, but what the bank cares about is when it
-        // lands back at the hub, so that is what gets checked.
+        // Inbound leaves the destination, but what a bank governs is when the
+        // aircraft lands back at the hub, so that is what gets checked.
         inLocal: inLeg ? toLocal(hhmmToMin(inLeg.departure_time), destOff) : null,
         inArrHubLocal: inLeg ? toLocal(hhmmToMin(inLeg.arrival_time), hubOff) : null,
       };
     });
   }, [plan, draft, hubBanks]);
+
+  // Both ends of the route as departure boards, in the style of the flight plan's
+  // time distribution: a row per distinct local departure time, a column per day.
+  // Read across a row and simultaneous departures line up in the same cell — the
+  // thing a per-aircraft week cannot show, because it only ever shows one aircraft.
+  const boards = useMemo(() => {
+    const build = (direction) => {
+      const byTime = new Map();
+      for (const a of draft) {
+        for (const l of a.legs) {
+          if (l.direction !== direction) continue;
+          const off = lonOffset(l.dep_longitude);
+          const { day, min } = localSlot(l.day_of_week, hhmmToMin(l.departure_time) ?? 0, off);
+          const time = minToHHMM(min);
+          if (!byTime.has(time)) byTime.set(time, { time, days: {} });
+          const row = byTime.get(time);
+          (row.days[day] ||= []).push({
+            key: `${a.slot}-${l.day_of_week}-${l.departure_time}`,
+            reg: a.registration || '—',
+            bank: bankShort(l.bank_id),
+            fn: l.flight_number,
+            to: l.arrival_airport,
+          });
+        }
+      }
+      return [...byTime.values()].sort((x, y) => x.time.localeCompare(y.time));
+    };
+    return { out: build('out'), in: build('in') };
+  }, [draft, bankShort]);
 
   // Hand the current outbound times back to the optimiser as fixed points and let
   // it redistribute everything around them. Shifting a wave by hand is rigid and
@@ -956,6 +992,43 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
               )}
               {plan.note && <div className="ag-note ag-note--warn" style={{ marginTop: '1rem' }}>⚠ {plan.note}</div>}
 
+              {/* Both ends as departure boards — simultaneous departures share a cell */}
+              <div className="ag-boards">
+                {[
+                  { rows: boards.out, code: fwdRoute?.departure_airport, to: fwdRoute?.arrival_airport },
+                  { rows: boards.in,  code: retRoute?.departure_airport, to: retRoute?.arrival_airport },
+                ].map(board => (
+                  <div key={board.code} className="ag-board">
+                    <div className="ag-board-hd">
+                      Departures {board.code} <span>→ {board.to}</span>
+                      <em>{board.code} local</em>
+                    </div>
+                    <div className="ag-dist">
+                      <div className="ag-dist-head">
+                        <span>Time</span>
+                        {DAY_SHORT.map(d => <span key={d}>{d}</span>)}
+                      </div>
+                      {board.rows.length === 0 && <div className="ag-dist-empty">No departures</div>}
+                      {board.rows.map(row => (
+                        <div key={row.time} className="ag-dist-row">
+                          <span className="ag-dist-time">{row.time}</span>
+                          {DAY_SHORT.map((_, di) => (
+                            <div key={di} className="ag-dist-cell">
+                              {(row.days[di] || []).map(f => (
+                                <span key={f.key} className="ag-dist-pill"
+                                  title={`${f.fn} → ${f.to} · ${f.reg} · ${f.bank} · ${row.time}`}>
+                                  {f.reg}
+                                </span>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
               {/* Move a whole wave: a field per bank and direction, every aircraft follows */}
               <div className="ag-shift-grid">
                 <div className="ag-shift-col">
@@ -995,14 +1068,15 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
                     <span>{retRoute?.departure_airport}–{retRoute?.arrival_airport}</span>
                     <em>return only</em>
                   </div>
-                  {shiftRows.map(({ bank, src, inLeg, inLocal, inArrHubLocal }) => {
+                  {shiftRows.map(({ bank, arrSrc, inLeg, inLocal, inArrHubLocal }) => {
                     const key = `${bank.id}:in`;
                     const text = bankTimeText[key] ?? (inLocal != null ? minToHHMM(inLocal) : '');
                     const min = hhmmToMin(text);
-                    // The bank governs when the return LANDS at the hub, not when
-                    // it leaves the far end, so that is what the warning tracks.
-                    const outside = min != null && src && inArrHubLocal != null
-                      && !inWindow(inArrHubLocal, src.earliest_arrival, src.latest_arrival);
+                    // Judged against the window of the bank this rotation comes HOME
+                    // into, which is not always the one it left from.
+                    const outside = min != null && arrSrc && inArrHubLocal != null
+                      && !inWindow(inArrHubLocal, arrSrc.earliest_arrival, arrSrc.latest_arrival);
+                    const into = bankShort(bank.arr_bank_id);
                     return (
                       <div key={key} className={`ag-shift-row${min == null || outside ? ' ag-shift-row--warn' : ''}`}>
                         <span className="ag-shift-bank">{bank.name}</span>
@@ -1013,12 +1087,12 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
                         />
                         {min == null
                           ? <span className="ag-tag ag-tag--warn">HH:MM</span>
-                          : outside && src
+                          : outside && arrSrc
                             ? <span className="ag-tag ag-tag--warn">
-                                lands {minToHHMM(inArrHubLocal)}, outside {minToHHMM(src.earliest_arrival)}–{minToHHMM(src.latest_arrival)}
+                                lands {minToHHMM(inArrHubLocal)} — outside {into} {minToHHMM(arrSrc.earliest_arrival)}–{minToHHMM(arrSrc.latest_arrival)}
                               </span>
                             : <span className="ag-shift-info">
-                                {retRoute?.departure_airport} local · lands {inArrHubLocal != null ? minToHHMM(inArrHubLocal) : '—'}
+                                {retRoute?.departure_airport} local · lands {inArrHubLocal != null ? minToHHMM(inArrHubLocal) : '—'} into {into}
                               </span>}
                       </div>
                     );
@@ -1252,6 +1326,48 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
         .ag-btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
         .ag-btn-block { width: 100%; margin-top: 0.25rem; }
 
+        /* Departure boards — one per end of the route */
+        .ag-boards { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.25rem; }
+        .ag-board { border: 1px solid #E0E0E0; border-radius: 8px; overflow: hidden; min-width: 0; }
+        .ag-board-hd {
+          display: flex; align-items: baseline; gap: 0.5rem;
+          background: #FAFAFA; border-bottom: 1px solid #E0E0E0; padding: 0.6rem 0.85rem;
+          font-size: 0.74rem; font-weight: 700; color: #2C2C2C;
+          text-transform: uppercase; letter-spacing: 0.08em;
+        }
+        .ag-board-hd span { font-family: monospace; font-size: 0.8rem; color: #888; text-transform: none; letter-spacing: 0.04em; }
+        .ag-board-hd em {
+          margin-left: auto; font-style: normal; font-size: 0.68rem;
+          font-weight: 500; color: #AAA; letter-spacing: 0; text-transform: none;
+        }
+        .ag-dist-head, .ag-dist-row {
+          display: grid; grid-template-columns: 46px repeat(7, 1fr); align-items: stretch;
+        }
+        .ag-dist-head {
+          background: #F5F5F5; border-bottom: 1px solid #E8E8E8;
+          font-size: 0.62rem; font-weight: 700; color: #999;
+          text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        .ag-dist-head span { padding: 5px 3px; text-align: center; }
+        .ag-dist-head span:first-child { text-align: left; padding-left: 8px; }
+        .ag-dist-row { border-bottom: 1px solid #F2F2F2; }
+        .ag-dist-row:last-child { border-bottom: none; }
+        .ag-dist-time {
+          display: flex; align-items: center; padding-left: 8px;
+          font-size: 0.7rem; font-weight: 700; color: #2C2C2C;
+          font-variant-numeric: tabular-nums; background: #FAFAFA;
+        }
+        .ag-dist-cell {
+          display: flex; flex-wrap: wrap; gap: 2px; justify-content: center;
+          padding: 4px 3px; min-height: 26px; border-left: 1px solid #F5F5F5;
+        }
+        .ag-dist-pill {
+          font-size: 0.62rem; font-weight: 700; letter-spacing: 0.02em;
+          background: #2C2C2C; color: #fff; border-radius: 3px; padding: 1px 4px;
+          white-space: nowrap; cursor: default;
+        }
+        .ag-dist-empty { padding: 0.9rem; text-align: center; font-size: 0.8rem; color: #AAA; }
+
         /* Departure-time shifter — outbound and inbound side by side */
         .ag-shift-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
         .ag-shift-col {
@@ -1392,7 +1508,7 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
         .ag-commit-note { flex: 1 1 320px; font-size: 0.85rem; color: #888; line-height: 1.5; }
 
         @media (max-width: 980px) {
-          .ag-row--half, .ag-row--7030, .ag-shift-grid { grid-template-columns: 1fr; }
+          .ag-row--half, .ag-row--7030, .ag-shift-grid, .ag-boards { grid-template-columns: 1fr; }
           .ag-base-hd { flex-wrap: wrap; row-gap: 0.4rem; }
           .ag-acc-meta { margin-left: 0; width: 100%; }
         }

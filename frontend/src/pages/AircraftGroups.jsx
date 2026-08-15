@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import TopBar from '../components/TopBar.jsx';
 import Loader from '../components/Loader.jsx';
 
@@ -25,6 +25,19 @@ const hhmmToMin = (s) => {
 };
 const WEEK_MIN = 7 * 1440;
 const mod1440 = (v) => ((v % 1440) + 1440) % 1440;
+
+// Departures are planned on a five-minute grid, so that is the resolution of the
+// slot slider and of dragging a wave around.
+const SLOT_STEP = 5;
+
+// A bank's departure window as a continuous range. A window ending before it
+// starts runs across midnight, so the end is unwrapped onto the next day and the
+// caller takes the result modulo a day when it needs a clock time.
+function depWindow(bank) {
+  const lo = bank.earliest_departure;
+  const hi = bank.latest_departure;
+  return [lo, hi < lo ? hi + 1440 : hi];
+}
 
 // Schedules are stored in Berlin game time. Times are shown at the airport they
 // happen at, using the same whole-hour longitude approximation the schedule view
@@ -75,6 +88,11 @@ async function request(path, body, setError) {
 
   return { ok: res.ok, status: res.status, data };
 }
+
+// A leg keeps one identity for as long as the plan lives. Bars are drawn in time
+// order, so an index would change the moment a wave moves past another one, and
+// React would tear down the element being dragged along with its pointer capture.
+const withUid = (assignment) => (l, i) => ({ ...l, uid: `${assignment.slot}-${i}` });
 
 function buildNames(data, route) {
   const base = `${route.departure_airport}-${route.arrival_airport}`;
@@ -164,7 +182,35 @@ function localSlot(dayOfWeek, minuteOfDay, offset) {
   return { day: Math.floor(abs / 1440), min: abs % 1440 };
 }
 
-function WeekGrid({ legs, maintenance, conflicts, offset = 0 }) {
+function WeekGrid({ legs, maintenance, conflicts, offset = 0, onDragWave }) {
+  // Dragging a bar moves the whole wave: every aircraft flying that bank in that
+  // direction, by the same amount. Deltas are applied incrementally against what
+  // has already been applied, so the draft stays the source of truth and no drag
+  // baseline has to be remembered across re-renders.
+  const drag = useRef(null);
+
+  const onPointerDown = (e, leg) => {
+    if (!onDragWave) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { leg, startY: e.clientY, applied: 0 };
+  };
+  const onPointerMove = (e) => {
+    const d = drag.current;
+    if (!d) return;
+    const raw = (e.clientY - d.startY) / PX_PER_MIN;
+    const snapped = Math.round(raw / SLOT_STEP) * SLOT_STEP;
+    if (snapped === d.applied) return;
+    onDragWave(d.leg.bank_id, d.leg.direction, snapped - d.applied, false);
+    d.applied = snapped;
+  };
+  const onPointerUp = () => {
+    const d = drag.current;
+    drag.current = null;
+    // Zero delta still refits maintenance, which is what settles the block after
+    // the flights have finished moving.
+    if (d) onDragWave(d.leg.bank_id, d.leg.direction, 0, true);
+  };
   const flightBars = useMemo(() => legs.map((l, i) => {
     const depGame = hhmmToMin(l.departure_time) ?? 0;
     const arrGame = hhmmToMin(l.arrival_time) ?? 0;
@@ -226,17 +272,22 @@ function WeekGrid({ legs, maintenance, conflicts, offset = 0 }) {
             )}
 
             {flightBars.filter(b => b.day === di).map(b => (
-              <div key={`f-${b.id}`}
-                className={`ag-bar ag-bar--flight${conflicts?.has(b.leg) ? ' ag-bar--conflict' : ''}`}
+              <div key={`f-${b.leg.uid ?? b.id}`}
+                className={`ag-bar ag-bar--flight${onDragWave ? ' ag-bar--drag' : ''}${conflicts?.has(b.leg) ? ' ag-bar--conflict' : ''}`}
                 style={{ top: b.top, height: b.height }}
-                title={`${b.leg.flight_number} ${b.leg.departure_airport}→${b.leg.arrival_airport} · ${b.depLabel}–${b.arrLabel} · ${b.leg.bank_name}`}>
+                onPointerDown={e => onPointerDown(e, b.leg)}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerCancel={onPointerUp}
+                title={`${b.leg.flight_number} ${b.leg.departure_airport}→${b.leg.arrival_airport} · ${b.depLabel}–${b.arrLabel} · ${b.leg.bank_name}`
+                  + (onDragWave ? ' · drag to move the whole wave' : '')}>
                 <span className="ag-bar-fn">{b.leg.flight_number}</span>
                 <span className="ag-bar-rt">{b.leg.departure_airport}→{b.leg.arrival_airport}</span>
                 <span className="ag-bar-tm">{b.depLabel}–{b.arrLabel}</span>
               </div>
             ))}
             {flightBars.filter(b => b.overflowDay === di).map(b => (
-              <div key={`o-${b.id}`} className="ag-bar ag-bar--flight ag-bar--cont"
+              <div key={`o-${b.leg.uid ?? b.id}`} className="ag-bar ag-bar--flight ag-bar--cont"
                 style={{ top: 0, height: b.overflowHeight }}
                 title={`${b.leg.flight_number} arrives ${b.arrLabel}`}>
                 <span className="ag-bar-tm">↳ {b.arrLabel}</span>
@@ -271,6 +322,9 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
   // ── Inputs ────────────────────────────────────────────────────────────────
   const [fwdRouteId, setFwdRouteId]           = useState('');
   const [selectedBankIds, setSelectedBankIds] = useState([]);
+  // Chosen departure minute per bank, hub-local, on the five-minute grid. Seeded
+  // with the start of the window when a bank is picked and moved with the slider.
+  const [bankSlot, setBankSlot] = useState({});
   const [selectedAcIds, setSelectedAcIds]     = useState([]);
   const [collapsedBases, setCollapsedBases]   = useState(() => new Set());
   const [strategy, setStrategy]               = useState('regular');
@@ -410,7 +464,16 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
 
   const toggleBank = (id) => {
     clearPlan();
-    setSelectedBankIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]);
+    setSelectedBankIds(ids => {
+      if (ids.includes(id)) return ids.filter(x => x !== id);
+      const b = hubBanks.find(x => x.id === id);
+      if (b) setBankSlot(s => (s[id] != null ? s : { ...s, [id]: depWindow(b)[0] }));
+      return [...ids, id];
+    });
+  };
+  const setSlot = (id, minutes) => {
+    clearPlan();
+    setBankSlot(s => ({ ...s, [id]: minutes }));
   };
   const toggleAircraft = (id) => {
     clearPlan();
@@ -432,10 +495,7 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
   };
 
   // ── Compute ───────────────────────────────────────────────────────────────
-  // `pinnedDepartures` (bankId → hub-local 'HH:MM') re-runs the optimiser with the
-  // outbound times held fixed, which is what the replan button sends. Empty means
-  // a fresh plan where the optimiser picks the times itself.
-  const computePlan = async (pinnedDepartures) => {
+  const computePlan = async () => {
     setError(''); setSuccess('');
     if (!fwdRoute) { setError('Select an outbound route.'); return; }
     if (!retRoute) { setError('No return route exists for this pairing — create the reverse route first.'); return; }
@@ -443,13 +503,22 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
     if (selectedAcIds.length === 0) { setError('Select at least one aircraft.'); return; }
 
     setComputing(true);
+    // The slot chosen on each bank is the departure — the optimiser arranges the
+    // aircraft and the returns around it rather than picking the minute itself,
+    // which it only ever did by taking whichever window edge cost least layover.
+    const pinned = {};
+    for (const id of selectedBankIds) {
+      const b = hubBanks.find(x => x.id === id);
+      if (!b) continue;
+      pinned[id] = minToHHMM(bankSlot[id] ?? depWindow(b)[0]);
+    }
     const body = {
       forward_route_id: fwdRoute.id,
       return_route_id: retRoute.id,
       bank_ids: selectedBankIds,
       aircraft_ids: selectedAcIds,
       strategy,
-      ...(pinnedDepartures ? { bank_departure_times: pinnedDepartures } : {}),
+      bank_departure_times: pinned,
     };
 
     // Each stage reports its own failure. Wrapping all three in one catch made a
@@ -465,7 +534,7 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
         throw new Error('response had no assignments — the backend may be running an older build');
       }
       setPlan(data);
-      setDraft(data.assignments.map(a => ({ ...a, legs: (a.legs || []).map(l => ({ ...l })) })));
+      setDraft(data.assignments.map(a => ({ ...a, legs: (a.legs || []).map(withUid(a)) })));
       setEditMode(false);
       setOpenSlots(new Set(data.assignments.length ? [data.assignments[0].slot] : []));
       setBankTimeText({});
@@ -502,7 +571,7 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
   };
   const resetDraft = () => {
     if (!plan) return;
-    setDraft(plan.assignments.map(a => ({ ...a, legs: a.legs.map(l => ({ ...l })) })));
+    setDraft(plan.assignments.map(a => ({ ...a, legs: a.legs.map(withUid(a)) })));
     setBankTimeText({});
     setEditMode(false);
   };
@@ -519,17 +588,13 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
   //
   // `currentLocal` is read back out of the draft, so the draft stays the single
   // source of truth and the field can never drift away from what is planned.
-  const shiftLeg = (bankId, direction, value, currentLocal) => {
-    setBankTimeText(t => ({ ...t, [`${bankId}:${direction}`]: value }));
-    const next = hhmmToMin(value);
-    if (next == null || currentLocal == null) return;
-    // Read a change as the shortest move, so nudging 23:50 → 00:10 is twenty
-    // minutes later rather than most of a day earlier.
-    let delta = next - currentLocal;
-    if (delta > 720) delta -= 1440;
-    if (delta <= -720) delta += 1440;
-    if (delta === 0) return;
-
+  // The one place a wave moves. Both the numeric fields and dragging a bar in a
+  // week grid come through here, so they cannot drift apart. Time zones do not
+  // enter into it: a delta is a delta wherever it is read.
+  const shiftWave = useCallback((bankId, direction, delta, refit = true) => {
+    // A zero delta still has work to do when refitting: that is how a drag settles
+    // its maintenance block once the flights have stopped moving.
+    if (!delta && !refit) return;
     const pad = plan?.summary?.turnaround ?? 60;
     const moves = (l) => l.bank_id === bankId && (direction === 'out' || l.direction === 'in');
 
@@ -548,8 +613,22 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
           arrival_time: minToHHMM(nm + block),
         };
       });
-      return { ...a, legs, maintenance: refitMaintenance(legs, a.maintenance, pad) };
+      // While a drag is in flight the block would hop around under the cursor, so
+      // it is refitted once at the end instead of on every pointer move.
+      return { ...a, legs, maintenance: refit ? refitMaintenance(legs, a.maintenance, pad) : a.maintenance };
     }));
+  }, [plan]);
+
+  const shiftLeg = (bankId, direction, value, currentLocal) => {
+    setBankTimeText(t => ({ ...t, [`${bankId}:${direction}`]: value }));
+    const next = hhmmToMin(value);
+    if (next == null || currentLocal == null) return;
+    // Read a change as the shortest move, so nudging 23:50 → 00:10 is twenty
+    // minutes later rather than most of a day earlier.
+    let delta = next - currentLocal;
+    if (delta > 720) delta -= 1440;
+    if (delta <= -720) delta += 1440;
+    shiftWave(bankId, direction, delta);
   };
 
   // Per bank, the first outbound and inbound leg found in the draft — they all
@@ -622,18 +701,6 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
     };
     return { out: build('out'), in: build('in') };
   }, [draft, bankShort]);
-
-  // Hand the current outbound times back to the optimiser as fixed points and let
-  // it redistribute everything around them. Shifting a wave by hand is rigid and
-  // can push flights onto each other; a replan re-derives which aircraft flies
-  // what, so the times survive and the pattern is made to fit them again.
-  const replan = () => {
-    const pinned = {};
-    for (const row of shiftRows) {
-      if (row.outLocal != null) pinned[row.bank.id] = minToHHMM(row.outLocal);
-    }
-    computePlan(pinned);
-  };
 
   // Which legs now clash — with each other or with their aircraft's maintenance.
   // Shifting a bank can easily push a flight onto its neighbour, and finding that
@@ -815,6 +882,8 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
                       <tbody>
                         {hubBanks.map(b => {
                           const on = selectedBankIds.includes(b.id);
+                          const [lo, hi] = depWindow(b);
+                          const slot = bankSlot[b.id] ?? lo;
                           return (
                             <tr key={b.id}
                               className={`ag-ovrow${on ? ' ag-ovrow--on' : ''}`}
@@ -828,6 +897,20 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
                                   arr {minToHHMM(b.earliest_arrival)}–{minToHHMM(b.latest_arrival)}
                                   {' · '}dep {minToHHMM(b.earliest_departure)}–{minToHHMM(b.latest_departure)}
                                 </div>
+                                {/* Only reachable minutes are offered, so an out-of-window
+                                    departure is not something you can pick by accident. */}
+                                {on && (
+                                  <div className="ag-slot" onClick={e => e.stopPropagation()}>
+                                    <span className="ag-slot-edge">{minToHHMM(lo)}</span>
+                                    <input
+                                      type="range" className="ag-slot-range"
+                                      min={lo} max={hi} step={SLOT_STEP} value={slot}
+                                      onChange={e => setSlot(b.id, parseInt(e.target.value))}
+                                    />
+                                    <span className="ag-slot-edge">{minToHHMM(hi)}</span>
+                                    <span className="ag-slot-value">{minToHHMM(slot)}</span>
+                                  </div>
+                                )}
                               </td>
                             </tr>
                           );
@@ -1100,22 +1183,11 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
                 </div>
               </div>
 
-              <div className="ag-replan">
-                <button className="ag-btn-ghost" onClick={replan} disabled={computing}>
-                  {computing ? 'Replanning…' : 'Replan with these times'}
-                </button>
-                <span>
-                  Shifting moves flights but keeps who flies what. A replan holds the outbound times
-                  fixed and lets the optimiser redistribute the aircraft and returns around them —
-                  the way out of a pattern that no longer fits. Discards manual leg edits.
-                </span>
-              </div>
-
               {conflicts.size > 0 && (
                 <div className="ag-note ag-note--warn" style={{ marginTop: '0.75rem' }}>
                   ⚠ {conflicts.size} flight{conflicts.size === 1 ? '' : 's'} now clash with another flight
-                  or with maintenance (marked red in the weeks below). Shift them apart, or replan to let
-                  the optimiser refit the pattern. The write stays blocked until then.
+                  or with maintenance (marked red in the weeks below). Move them apart — with the fields
+                  above or by dragging a bar. The write stays blocked until then.
                 </div>
               )}
 
@@ -1150,7 +1222,7 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
                             All times in {a.home_airport || hubCode} local time
                           </div>
                           <WeekGrid legs={legs} maintenance={a.maintenance} conflicts={conflicts}
-                            offset={a.home_offset_minutes ?? 0} />
+                            offset={a.home_offset_minutes ?? 0} onDragWave={shiftWave} />
 
                           {editMode && (
                             <table className="ag-legs">
@@ -1415,17 +1487,6 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
           font-size: 0.68rem; font-weight: 700; border-radius: 4px;
           padding: 0.15rem 0.4rem; flex-shrink: 0; white-space: nowrap;
         }
-        .ag-replan {
-          display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap; margin-top: 0.75rem;
-        }
-        .ag-replan span { flex: 1 1 300px; font-size: 0.8rem; color: #999; line-height: 1.45; }
-        .ag-btn-ghost {
-          background: #fff; border: 1px solid #2C2C2C; border-radius: 6px;
-          padding: 0.5rem 1rem; font-size: 0.85rem; font-weight: 600;
-          color: #2C2C2C; cursor: pointer; white-space: nowrap;
-        }
-        .ag-btn-ghost:hover:not(:disabled) { background: #2C2C2C; color: #fff; }
-        .ag-btn-ghost:disabled { opacity: 0.45; cursor: not-allowed; }
         .ag-tzhint {
           font-size: 0.75rem; color: #999; margin-bottom: 0.5rem;
           text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;
@@ -1479,6 +1540,22 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
         .ag-bar--cont { opacity: 0.6; border-top: none; border-radius: 0 0 3px 3px; }
         .ag-bar--maint { background: #6b7280; border: 1.5px dashed #4b5563; z-index: 2; }
         .ag-bar--conflict { outline: 2px solid #EF4444; outline-offset: -2px; z-index: 4; }
+        /* touch-action keeps a drag on a phone from scrolling the page instead */
+        .ag-bar--drag { cursor: ns-resize; touch-action: none; }
+        .ag-bar--drag:hover { opacity: 1; }
+
+        /* Slot picker inside a selected bank row */
+        .ag-slot {
+          display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem;
+          padding-top: 0.5rem; border-top: 1px dashed #ECECEC;
+        }
+        .ag-slot-edge { font-size: 0.68rem; color: #AAA; font-variant-numeric: tabular-nums; }
+        .ag-slot-range { flex: 1 1 auto; min-width: 0; accent-color: #2C2C2C; cursor: pointer; }
+        .ag-slot-value {
+          font-size: 0.8rem; font-weight: 700; color: #2C2C2C;
+          font-variant-numeric: tabular-nums; background: #F0F0F0;
+          border-radius: 4px; padding: 1px 6px; min-width: 46px; text-align: center;
+        }
         .ag-bar-fn { font-size: 9px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }
         .ag-bar-rt { font-size: 8px; color: rgba(255,255,255,0.85); white-space: nowrap; overflow: hidden; line-height: 1.25; }
         .ag-bar-tm { font-size: 8px; color: rgba(255,255,255,0.72); white-space: nowrap; overflow: hidden; font-family: monospace; line-height: 1.25; }

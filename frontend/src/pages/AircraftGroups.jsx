@@ -347,6 +347,8 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
   // Only the text — the planned time itself lives in the draft and is read back
   // from there, so a half-finished entry can never desync the two.
   const [bankTimeText, setBankTimeText] = useState({});
+  // What is typed into a bank's slot field, before it has been settled.
+  const [slotText, setSlotText] = useState({});
 
   const headers = useMemo(() => ({ Authorization: `Bearer ${localStorage.getItem('token')}` }), []);
 
@@ -471,9 +473,17 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
       return [...ids, id];
     });
   };
-  const setSlot = (id, minutes) => {
+  // Settle a typed departure onto the five-minute grid and into the bank window.
+  // Windows across midnight are unwrapped by the caller, so a time before the
+  // start is first lifted onto the next day before it is clamped.
+  const commitSlot = (id, lo, hi) => {
+    const raw = hhmmToMin(slotText[id] ?? '');
+    setSlotText(t => { const next = { ...t }; delete next[id]; return next; });
+    if (raw == null) return;                       // unreadable — keep what was there
+    let v = raw < lo ? raw + 1440 : raw;
+    v = Math.min(hi, Math.max(lo, Math.round(v / SLOT_STEP) * SLOT_STEP));
     clearPlan();
-    setBankSlot(s => ({ ...s, [id]: minutes }));
+    setBankSlot(s => ({ ...s, [id]: v }));
   };
   const toggleAircraft = (id) => {
     clearPlan();
@@ -897,18 +907,24 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
                                   arr {minToHHMM(b.earliest_arrival)}–{minToHHMM(b.latest_arrival)}
                                   {' · '}dep {minToHHMM(b.earliest_departure)}–{minToHHMM(b.latest_departure)}
                                 </div>
-                                {/* Only reachable minutes are offered, so an out-of-window
-                                    departure is not something you can pick by accident. */}
+                                {/* Typed freely, then settled onto the five-minute grid and
+                                    into the bank's window when the field is left — visibly,
+                                    so a corrected value is never a silent one. */}
                                 {on && (
-                                  <div className="ag-slot" onClick={e => e.stopPropagation()}>
-                                    <span className="ag-slot-edge">{minToHHMM(lo)}</span>
+                                  <div className="ag-slot"
+                                    onClick={e => e.stopPropagation()}
+                                    onPointerDown={e => e.stopPropagation()}>
+                                    <span className="ag-slot-label">Departure</span>
                                     <input
-                                      type="range" className="ag-slot-range"
-                                      min={lo} max={hi} step={SLOT_STEP} value={slot}
-                                      onChange={e => setSlot(b.id, parseInt(e.target.value))}
+                                      type="text" className="ag-slot-inp"
+                                      value={slotText[b.id] ?? minToHHMM(slot)}
+                                      onChange={e => setSlotText(t => ({ ...t, [b.id]: e.target.value }))}
+                                      onBlur={() => commitSlot(b.id, lo, hi)}
+                                      onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                                     />
-                                    <span className="ag-slot-edge">{minToHHMM(hi)}</span>
-                                    <span className="ag-slot-value">{minToHHMM(slot)}</span>
+                                    <span className="ag-slot-edge">
+                                      within {minToHHMM(lo)}–{minToHHMM(hi)}
+                                    </span>
                                   </div>
                                 )}
                               </td>
@@ -1549,13 +1565,18 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
           display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem;
           padding-top: 0.5rem; border-top: 1px dashed #ECECEC;
         }
-        .ag-slot-edge { font-size: 0.68rem; color: #AAA; font-variant-numeric: tabular-nums; }
-        .ag-slot-range { flex: 1 1 auto; min-width: 0; accent-color: #2C2C2C; cursor: pointer; }
-        .ag-slot-value {
-          font-size: 0.8rem; font-weight: 700; color: #2C2C2C;
-          font-variant-numeric: tabular-nums; background: #F0F0F0;
-          border-radius: 4px; padding: 1px 6px; min-width: 46px; text-align: center;
+        .ag-slot-label {
+          font-size: 0.68rem; font-weight: 700; color: #888;
+          text-transform: uppercase; letter-spacing: 0.05em;
         }
+        .ag-slot-inp {
+          width: 72px; padding: 0.3rem 0.4rem;
+          border: 1px solid #D4D4D4; border-radius: 6px; background: #fff;
+          font-size: 0.88rem; font-weight: 700; color: #2C2C2C;
+          font-variant-numeric: tabular-nums; text-align: center;
+        }
+        .ag-slot-inp:focus { outline: none; border-color: #2C2C2C; }
+        .ag-slot-edge { font-size: 0.7rem; color: #AAA; font-variant-numeric: tabular-nums; }
         .ag-bar-fn { font-size: 9px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }
         .ag-bar-rt { font-size: 8px; color: rgba(255,255,255,0.85); white-space: nowrap; overflow: hidden; line-height: 1.25; }
         .ag-bar-tm { font-size: 8px; color: rgba(255,255,255,0.72); white-space: nowrap; overflow: hidden; font-family: monospace; line-height: 1.25; }

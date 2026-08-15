@@ -39,12 +39,24 @@ const toLocal = (gameMin, offset) => mod1440(gameMin + offset);
 // the reply was not JSON, or the server answered with an error. Returns null once
 // it has reported a failure itself; otherwise { ok, status, data }.
 async function request(path, body, setError) {
+  // Serialised before the request, and reported on its own: a body that will not
+  // stringify is a bug here, not a network problem, and saying "could not reach
+  // the server" would send the search somewhere it can never find anything.
+  let payload;
+  try {
+    payload = JSON.stringify(body);
+  } catch (err) {
+    console.error(`[aircraft-groups] POST ${path} body could not be serialised`, err, body);
+    setError(`Bug: the request could not be built (${err.message}).`);
+    return null;
+  }
+
   let res;
   try {
     res = await fetch(`${API_URL}${path}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${localStorage.getItem('token')}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: payload,
     });
   } catch (err) {
     console.error(`[aircraft-groups] POST ${path} never completed`, err);
@@ -912,7 +924,9 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
                   <option value="fewest">Fewest aircraft — roll across banks</option>
                 </select>
               </div>
-              <button className="ag-btn-primary ag-btn-block" onClick={computePlan}
+              {/* Called through a lambda: onClick={computePlan} would hand React's
+                  click event straight to the pinnedDepartures parameter. */}
+              <button className="ag-btn-primary ag-btn-block" onClick={() => computePlan()}
                 disabled={computing || !fwdRoute || !retRoute || selectedBankIds.length === 0 || selectedAcIds.length === 0}>
                 {computing ? 'Calculating…' : 'Calculate plan'}
               </button>

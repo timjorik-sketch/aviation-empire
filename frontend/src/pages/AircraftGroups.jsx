@@ -587,6 +587,13 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
     });
   }, [plan, draft, hubBanks]);
 
+  // Banks are referred to by position everywhere in the plan — B1, B2 — because
+  // that is how the naming pattern reads and it stays short in a table row.
+  const bankShort = useCallback(
+    (bankId) => (plan ? `B${plan.banks.findIndex(b => b.id === bankId) + 1}` : ''),
+    [plan]
+  );
+
   // Both ends of the route as departure boards, in the style of the flight plan's
   // time distribution: a row per distinct local departure time, a column per day.
   // Read across a row and simultaneous departures line up in the same cell — the
@@ -662,13 +669,6 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
       return next;
     });
   };
-
-  // Banks are referred to by position everywhere in the plan — B1, B2 — because
-  // that is how the naming pattern reads and it stays short in a table row.
-  const bankShort = useCallback(
-    (bankId) => (plan ? `B${plan.banks.findIndex(b => b.id === bankId) + 1}` : ''),
-    [plan]
-  );
 
   // "B1 – Mon, Wed, Fri" for an aircraft that stays on one bank; a standby that
   // fills a different bank's gap each time gets each day labelled with its own

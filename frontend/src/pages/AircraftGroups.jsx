@@ -26,8 +26,8 @@ const hhmmToMin = (s) => {
 const WEEK_MIN = 7 * 1440;
 const mod1440 = (v) => ((v % 1440) + 1440) % 1440;
 
-// Departures are planned on a five-minute grid, so that is the resolution of the
-// slot slider and of dragging a wave around.
+// Dragging snaps to five minutes — pointer precision, not a rule about what a
+// departure may be. Typed times are taken to the minute.
 const SLOT_STEP = 5;
 
 // A bank's departure window as a continuous range. A window ending before it
@@ -473,17 +473,17 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
       return [...ids, id];
     });
   };
-  // Settle a typed departure onto the five-minute grid and into the bank window.
-  // Windows across midnight are unwrapped by the caller, so a time before the
-  // start is first lifted onto the next day before it is clamped.
-  const commitSlot = (id, lo, hi) => {
+  // Any readable time is taken as typed — no rounding, no clamping. A departure
+  // outside the bank's own window is unusual rather than wrong, so it is flagged
+  // next to the field instead of being corrected away.
+  const commitSlot = (id, lo) => {
     const raw = hhmmToMin(slotText[id] ?? '');
     setSlotText(t => { const next = { ...t }; delete next[id]; return next; });
     if (raw == null) return;                       // unreadable — keep what was there
-    let v = raw < lo ? raw + 1440 : raw;
-    v = Math.min(hi, Math.max(lo, Math.round(v / SLOT_STEP) * SLOT_STEP));
     clearPlan();
-    setBankSlot(s => ({ ...s, [id]: v }));
+    // Windows can run across midnight, so a time before the start is read as
+    // belonging to the following day and stored on the same unwrapped scale.
+    setBankSlot(s => ({ ...s, [id]: raw < lo ? raw + 1440 : raw }));
   };
   const toggleAircraft = (id) => {
     clearPlan();
@@ -907,9 +907,6 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
                                   arr {minToHHMM(b.earliest_arrival)}–{minToHHMM(b.latest_arrival)}
                                   {' · '}dep {minToHHMM(b.earliest_departure)}–{minToHHMM(b.latest_departure)}
                                 </div>
-                                {/* Typed freely, then settled onto the five-minute grid and
-                                    into the bank's window when the field is left — visibly,
-                                    so a corrected value is never a silent one. */}
                                 {on && (
                                   <div className="ag-slot"
                                     onClick={e => e.stopPropagation()}
@@ -919,12 +916,14 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
                                       type="text" className="ag-slot-inp"
                                       value={slotText[b.id] ?? minToHHMM(slot)}
                                       onChange={e => setSlotText(t => ({ ...t, [b.id]: e.target.value }))}
-                                      onBlur={() => commitSlot(b.id, lo, hi)}
+                                      onBlur={() => commitSlot(b.id, lo)}
                                       onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                                     />
-                                    <span className="ag-slot-edge">
-                                      within {minToHHMM(lo)}–{minToHHMM(hi)}
-                                    </span>
+                                    {slot > hi
+                                      ? <span className="ag-tag ag-tag--warn">
+                                          outside {minToHHMM(lo)}–{minToHHMM(hi)}
+                                        </span>
+                                      : <span className="ag-slot-edge">window {minToHHMM(lo)}–{minToHHMM(hi)}</span>}
                                   </div>
                                 )}
                               </td>
@@ -1394,7 +1393,9 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
         .ag-ovrow:hover { background: #FAFAFA; }
         .ag-ovrow--on { background: #F5F5F5; }
         .ag-ovrow--on td { border-bottom-color: #E8E8E8; }
-        .ag-ovrow input { accent-color: #2C2C2C; pointer-events: none; }
+        /* Only the checkbox is inert — the row click toggles it. Left unscoped this
+           also disabled the slot field sitting in the same row. */
+        .ag-ovrow input[type="checkbox"] { accent-color: #2C2C2C; pointer-events: none; }
         .ag-status-dot {
           display: inline-block; width: 10px; height: 10px; border-radius: 50%;
           background: #9ca3af; box-shadow: 0 0 0 3px rgba(156,163,175,0.28);

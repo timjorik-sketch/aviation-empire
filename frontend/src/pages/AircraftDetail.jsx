@@ -4110,26 +4110,27 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         <div className="decomm-modal-overlay" onClick={() => { setShowCpChangeModal(false); setPendingCpChangeId(null); }}>
           <div className="decomm-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
             <div className="decomm-modal-head">
-              <h3>Confirm Cabin Profile Change</h3>
+              <h3>Change Cabin Profile</h3>
               <button className="decomm-modal-close" onClick={() => { setShowCpChangeModal(false); setPendingCpChangeId(null); }}>&times;</button>
             </div>
             <div className="decomm-modal-body">
-              <p style={{ fontSize: '0.9rem', color: '#444', marginBottom: '1rem' }}>Changing the cabin profile will:</p>
+              {(showCpChangeModal.oldCap !== showCpChangeModal.newCap) && (
+                <p style={{ fontSize: '0.95rem', color: '#2C2C2C', marginBottom: '1rem' }}>
+                  <strong>{showCpChangeModal.oldCap}</strong> → <strong>{showCpChangeModal.newCap}</strong> seats
+                </p>
+              )}
               <ul style={{ fontSize: '0.85rem', color: '#555', lineHeight: 1.7, paddingLeft: '1.2rem', marginBottom: '1.2rem' }}>
-                <li>Cancel <strong>{showCpChangeModal.flightsToCancel}</strong> upcoming scheduled flight{showCpChangeModal.flightsToCancel !== 1 ? 's' : ''} (next 72 h)</li>
-                <li>Keep the weekly schedule template &mdash; cancelled departures do not come back, later ones are re-generated after re-activation</li>
-                {showCpChangeModal.penalty > 0 && (
-                  <li>Charge a refund penalty of <strong>${showCpChangeModal.penalty.toLocaleString()}</strong> (1.2× ticket price per passenger)</li>
+                {showCpChangeModal.flightsToCancel > 0 && (
+                  <li>
+                    <strong>{showCpChangeModal.flightsToCancel}</strong> upcoming flight{showCpChangeModal.flightsToCancel !== 1 ? 's' : ''} will be cancelled
+                    {showCpChangeModal.penalty > 0 && <> &mdash; <strong>${showCpChangeModal.penalty.toLocaleString()}</strong> refund penalty</>}
+                  </li>
                 )}
-                <li>Deactivate the aircraft (requires re-activation after change)</li>
-                {(showCpChangeModal.oldCap !== showCpChangeModal.newCap) && (
-                  <li>Change capacity: <strong>{showCpChangeModal.oldCap}</strong> → <strong>{showCpChangeModal.newCap}</strong> seats</li>
-                )}
+                <li>The aircraft will be grounded until you put it back into operation</li>
               </ul>
-              <p style={{ fontSize: '0.82rem', color: '#888', marginBottom: '1.2rem' }}>Are you sure you want to continue?</p>
               <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
                 <button className="sched-btn-cancel" onClick={() => { setShowCpChangeModal(false); setPendingCpChangeId(null); }}>Cancel</button>
-                <button className="decomm-btn-scrap" onClick={confirmCabinProfileChange}>Confirm Change</button>
+                <button className="decomm-btn-scrap" onClick={confirmCabinProfileChange}>Change Cabin</button>
               </div>
             </div>
           </div>

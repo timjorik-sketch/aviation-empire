@@ -1224,6 +1224,9 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       const msgs = ['Cabin profile updated. Aircraft deactivated.'];
       if (data.cancelled_flights > 0) msgs.push(`${data.cancelled_flights} flight(s) cancelled.`);
       if (data.penalty > 0) msgs.push(`Penalty: $${data.penalty.toLocaleString()}`);
+      if (data.missing_price_classes?.length > 0) {
+        msgs.push(`Set a price for ${data.missing_price_classes.join(' / ')} in the schedule \u2014 unpriced classes sell no seats.`);
+      }
       setSuccess(msgs.join(' '));
       fetchSchedule();
       setTimeout(() => setSuccess(''), 5000);
@@ -4113,8 +4116,8 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
             <div className="decomm-modal-body">
               <p style={{ fontSize: '0.9rem', color: '#444', marginBottom: '1rem' }}>Changing the cabin profile will:</p>
               <ul style={{ fontSize: '0.85rem', color: '#555', lineHeight: 1.7, paddingLeft: '1.2rem', marginBottom: '1.2rem' }}>
-                <li>Delete the entire weekly schedule template</li>
                 <li>Cancel <strong>{showCpChangeModal.flightsToCancel}</strong> upcoming scheduled flight{showCpChangeModal.flightsToCancel !== 1 ? 's' : ''} (next 72 h)</li>
+                <li>Keep the weekly schedule template &mdash; cancelled departures do not come back, later ones are re-generated after re-activation</li>
                 {showCpChangeModal.penalty > 0 && (
                   <li>Charge a refund penalty of <strong>${showCpChangeModal.penalty.toLocaleString()}</strong> (1.2× ticket price per passenger)</li>
                 )}

@@ -941,9 +941,35 @@ router.patch('/:id/airline-cabin-profile', authMiddleware, async (req, res) => {
       await client.query(`UPDATE flights SET status = 'cancelled' WHERE id IN (${ids})`, flightsToCancel.map(f => f.id));
     }
 
-    // Detach all flights from this aircraft's weekly_schedule rows (FK constraint)
-    await client.query('UPDATE flights SET weekly_schedule_id = NULL WHERE aircraft_id = $1', [aircraftId]);
-    await client.query('DELETE FROM weekly_schedule WHERE aircraft_id = $1', [aircraftId]);
+    // The weekly schedule survives a cabin swap: it only stores times, airports and
+    // per-class prices — seat counts are read live from the aircraft's current cabin
+    // profile when flights are generated. Only the already generated flights die.
+    // Flights keep their weekly_schedule_id, so a cancelled departure is not
+    // re-generated for the same slot once the aircraft is re-activated.
+    //
+    // The one gap a swap can open: a class the new profile adds that the schedule has
+    // no price for. Booking skips any class priced <= 0, so it silently sells nothing —
+    // report those classes back so the player can fix the prices.
+    let missingPriceClasses = [];
+    if (profile_id) {
+      const gapResult = await client.query(`
+        SELECT cc.class_type
+        FROM airline_cabin_classes cc
+        WHERE cc.profile_id = $1 AND cc.actual_capacity > 0
+          AND EXISTS (
+            SELECT 1 FROM weekly_schedule ws
+            WHERE ws.aircraft_id = $2
+              AND COALESCE(ws.is_transfer, 0) = 0
+              AND COALESCE(CASE cc.class_type
+                             WHEN 'economy'  THEN ws.economy_price
+                             WHEN 'business' THEN ws.business_price
+                             ELSE                 ws.first_price
+                           END, 0) <= 0
+          )
+        ORDER BY CASE cc.class_type WHEN 'economy' THEN 1 WHEN 'business' THEN 2 ELSE 3 END
+      `, [profile_id, aircraftId]);
+      missingPriceClasses = gapResult.rows.map(r => r.class_type);
+    }
 
     if (penalty > 0) {
       const newBalance = currentBalance - penalty;
@@ -960,7 +986,8 @@ router.patch('/:id/airline-cabin-profile', authMiddleware, async (req, res) => {
     res.json({
       message: 'Cabin profile updated',
       cancelled_flights: flightsToCancel.length,
-      penalty
+      penalty,
+      missing_price_classes: missingPriceClasses
     });
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});

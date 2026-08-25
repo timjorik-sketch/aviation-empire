@@ -279,7 +279,8 @@ function WeekGrid({ legs, maintenance, conflicts, offset = 0, onDragWave }) {
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerUp}
                 onPointerCancel={onPointerUp}
-                title={`${b.leg.flight_number} ${b.leg.departure_airport}→${b.leg.arrival_airport} · ${b.depLabel}–${b.arrLabel} · ${b.leg.bank_name}`
+                title={`${b.leg.flight_number} ${b.leg.departure_airport}→${b.leg.arrival_airport} · ${b.depLabel}–${b.arrLabel}`
+                  + (b.leg.bank_name ? ` · ${b.leg.bank_name}` : '')
                   + (onDragWave ? ' · drag to move the whole wave' : '')}>
                 <span className="ag-bar-fn">{b.leg.flight_number}</span>
                 <span className="ag-bar-rt">{b.leg.departure_airport}→{b.leg.arrival_airport}</span>
@@ -300,6 +301,531 @@ function WeekGrid({ legs, maintenance, conflicts, offset = 0, onDragWave }) {
   );
 }
 
+// ── Offsets ──────────────────────────────────────────────────────────────────
+// An offset is typed the way the switch says: a clock distance "HH:MM", or a
+// whole number of days. Either may be signed to move the week backwards. An
+// unreadable entry is reported at its own field and blocks the plan — read as
+// zero it would quietly write the source week onto the aircraft unchanged.
+function parseOffset(text, mode) {
+  const raw = String(text ?? '').trim();
+  if (raw === '') return { minutes: 0, empty: true };
+  const sign = raw.startsWith('-') || raw.startsWith('−') ? -1 : 1;
+  const body = raw.replace(/^[+\-−]\s*/, '').trim();
+
+  if (mode === 'days') {
+    if (!/^\d{1,2}$/.test(body)) return { error: 'whole days, e.g. 2' };
+    const d = parseInt(body, 10);
+    if (d > 6) return { error: 'at most 6 days' };
+    return { minutes: sign * d * 1440 };
+  }
+  const m = /^(\d{1,3}):([0-5]\d)$/.exec(body);
+  if (!m) return { error: 'HH:MM, e.g. 06:30' };
+  const h = parseInt(m[1], 10);
+  if (h > 167) return { error: 'at most 167:59' };
+  return { minutes: sign * (h * 60 + parseInt(m[2], 10)) };
+}
+
+// How far the copy actually moved, said the way a schedule is read: whole days
+// first, then the clock remainder. Signed, because "-1d 02:00" is a real answer.
+function offsetLabel(minutes) {
+  if (!minutes) return 'no shift';
+  const sign = minutes < 0 ? '−' : '+';
+  const abs = Math.abs(minutes);
+  const days = Math.floor(abs / 1440);
+  const rest = abs % 1440;
+  const parts = [];
+  if (days) parts.push(`${days}d`);
+  if (rest || !days) parts.push(minToHHMM(rest));
+  return `${sign}${parts.join(' ')}`;
+}
+
+/**
+ * Copy Schedule — take one aircraft's finished week and write staggered copies of
+ * it onto several others. The offsets are the whole point: shifting each copy by
+ * hours or by days is what turns a single working rotation into a group that
+ * covers the days (or the waves) the original leaves empty.
+ *
+ * Like the bank planner, nothing is stored until the copy is confirmed.
+ */
+function CopyScheduleTab({ fleet, airports, airportName, headers, setError, setSuccess, onWritten }) {
+  const [sourceId, setSourceId]   = useState('');
+  const [srcSchedule, setSrcSchedule] = useState([]);
+  const [srcMaint, setSrcMaint]   = useState([]);
+  const [srcLoading, setSrcLoading] = useState(false);
+  const [srcOpen, setSrcOpen]     = useState(false);
+
+  const [targetIds, setTargetIds] = useState([]);
+  const [collapsedBases, setCollapsedBases] = useState(() => new Set());
+
+  // 'time' = HH:MM offsets, 'days' = whole days. One switch for the whole list, so
+  // a group is staggered in one unit rather than a mix nobody can read back.
+  const [mode, setMode] = useState('time');
+  const [shiftText, setShiftText] = useState({});
+
+  const [plan, setPlan] = useState(null);
+  const [computing, setComputing] = useState(false);
+  const [committing, setCommitting] = useState(false);
+  const [openTargets, setOpenTargets] = useState(() => new Set());
+
+  const clearPlan = useCallback(() => { setPlan(null); setOpenTargets(new Set()); }, []);
+
+  // Aircraft that can hold a weekly schedule at all: on the books, not sold off,
+  // and already delivered.
+  const usable = useMemo(() => {
+    const now = new Date();
+    return fleet.filter(a =>
+      !a.is_listed_for_sale && !(a.delivery_at && new Date(a.delivery_at) > now)
+    ).sort((x, y) => (x.registration || '').localeCompare(y.registration || ''));
+  }, [fleet]);
+
+  const source = useMemo(
+    () => usable.find(a => a.id === parseInt(sourceId)) || null,
+    [usable, sourceId]
+  );
+
+  const offsetOf = useCallback(
+    (code) => lonOffset(airports.find(a => a.iata_code === code)?.longitude ?? null),
+    [airports]
+  );
+
+  // ── Source week ───────────────────────────────────────────────────────────
+  const selectSource = async (id) => {
+    setSourceId(id);
+    setSrcSchedule([]); setSrcMaint([]); clearPlan();
+    setTargetIds(ids => ids.filter(x => x !== parseInt(id)));
+    setError(''); setSuccess('');
+    if (!id) return;
+    setSrcLoading(true);
+    try {
+      const res  = await fetch(`${API_URL}/api/aircraft/${id}/schedule`, { headers });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load the source schedule');
+      setSrcSchedule(data.schedule || []);
+      setSrcMaint(data.maintenance || []);
+      setSrcOpen(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSrcLoading(false);
+    }
+  };
+
+  const srcOffset = source ? offsetOf(source.home_airport) : 0;
+
+  // ── Targets ───────────────────────────────────────────────────────────────
+  const groupedFleet = useMemo(() => {
+    const map = new Map();
+    for (const ac of usable) {
+      if (source && ac.id === source.id) continue;
+      const key = ac.home_airport ?? '__none__';
+      if (!map.has(key)) map.set(key, { key, code: ac.home_airport || null, aircraft: [] });
+      map.get(key).aircraft.push(ac);
+    }
+    return [...map.values()].sort((a, b) => {
+      if (!a.code && !b.code) return 0;
+      if (!a.code) return 1;
+      if (!b.code) return -1;
+      return a.code.localeCompare(b.code);
+    });
+  }, [usable, source]);
+
+  const toggleTarget = (id) => {
+    clearPlan();
+    setTargetIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]);
+  };
+  const toggleBase = (key) => {
+    setCollapsedBases(s => {
+      const next = new Set(s);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+  const toggleBaseSelection = (group, on) => {
+    clearPlan();
+    const ids = group.aircraft.map(a => a.id);
+    setTargetIds(prev => on ? [...new Set([...prev, ...ids])] : prev.filter(id => !ids.includes(id)));
+  };
+
+  const selectedTargets = useMemo(
+    () => targetIds.map(id => usable.find(a => a.id === id)).filter(Boolean),
+    [targetIds, usable]
+  );
+
+  // Every selected aircraft's offset, resolved once: the plan, the summary line
+  // and the per-field error all read the same parse.
+  const offsets = useMemo(() => {
+    const out = {};
+    for (const ac of selectedTargets) out[ac.id] = parseOffset(shiftText[ac.id], mode);
+    return out;
+  }, [selectedTargets, shiftText, mode]);
+
+  const badOffsets = selectedTargets.filter(ac => offsets[ac.id]?.error);
+
+  // The unit changes what the same digits mean, so the fields start over rather
+  // than silently reinterpreting "2" from 2 days into an invalid clock time.
+  const switchMode = (next) => {
+    if (next === mode) return;
+    setMode(next);
+    setShiftText({});
+    clearPlan();
+  };
+
+  const activeTargets = selectedTargets.filter(a => a.is_active);
+
+  // ── Plan ──────────────────────────────────────────────────────────────────
+  const computePlan = async () => {
+    setError(''); setSuccess('');
+    if (!source) { setError('Select the aircraft whose schedule you want to copy.'); return; }
+    if (srcSchedule.length === 0 && srcMaint.length === 0) {
+      setError(`${source.registration} has no weekly schedule to copy.`); return;
+    }
+    if (selectedTargets.length === 0) { setError('Select at least one aircraft to copy onto.'); return; }
+    if (badOffsets.length) { setError('Fix the offsets marked in red first.'); return; }
+
+    setComputing(true);
+    const res = await request('/api/aircraft-groups/copy-plan', {
+      source_aircraft_id: source.id,
+      targets: selectedTargets.map(ac => ({ aircraft_id: ac.id, shift_minutes: offsets[ac.id].minutes })),
+    }, setError);
+    setComputing(false);
+    if (!res) return;
+    if (!res.ok) { setError(res.data?.error || `Could not build the copy (HTTP ${res.status})`); return; }
+
+    setPlan(res.data);
+    setOpenTargets(new Set(res.data.targets.map(t => t.aircraft_id)));
+  };
+
+  const blocked = plan ? plan.targets.filter(t => t.error) : [];
+
+  const commitCopy = async () => {
+    setError(''); setSuccess('');
+    setCommitting(true);
+    const res = await request('/api/aircraft-groups/copy-commit', {
+      source_aircraft_id: plan.source.aircraft_id,
+      targets: plan.targets.map(t => ({ aircraft_id: t.aircraft_id, shift_minutes: t.shift_minutes })),
+    }, setError);
+    setCommitting(false);
+    if (!res) return;
+    if (!res.ok) { setError(res.data?.error || `Could not write the copy (HTTP ${res.status})`); return; }
+
+    // left_grounded is not a failure: an aircraft that was parked before the copy
+    // stays parked, schedule written, for the player to activate.
+    const failed = (res.data.activation || []).filter(a => !a.activated && !a.left_grounded);
+    const reactivated = (res.data.activation || []).filter(a => a.activated).length;
+    const minsToGen = ((13 - new Date().getMinutes()) + 60) % 60 || 60;
+    setSuccess(res.data.message + (reactivated
+      ? ` — flights for the ${reactivated} reactivated aircraft are created at the next :13 (in ${minsToGen} min).`
+      : ''));
+    if (failed.length) {
+      setError(`Not activated: ${failed.map(f => `${f.registration} (${f.error})`).join(', ')}`);
+    }
+    clearPlan();
+    setTargetIds([]);
+    setShiftText({});
+    onWritten?.();
+  };
+
+  const toggleTargetOpen = (id) => {
+    setOpenTargets(s => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const BoxBar = ({ n, title, right }) => (
+    <div className="ag-boxbar">
+      {n != null && <span className="ag-boxbar-num">{n}</span>}
+      <span className="ag-boxbar-title">{title}</span>
+      {right && <span className="ag-boxbar-right">{right}</span>}
+    </div>
+  );
+
+  const srcLegs = useMemo(() => srcSchedule.map((e, i) => ({ ...e, uid: `src-${i}` })), [srcSchedule]);
+
+  return (
+    <>
+      {/* ── 1: Source ───────────────────────────────────────────────────── */}
+      <section className="ag-box" style={{ marginBottom: '1.25rem' }}>
+        <BoxBar n="1" title="Source schedule"
+          right={source && srcSchedule.length
+            ? `${srcSchedule.length} flights${srcMaint.length ? ' · maintenance' : ''}`
+            : null} />
+        <div className="ag-boxbody">
+          <div className="ag-field" style={{ marginBottom: source ? '1rem' : 0 }}>
+            <label>Aircraft to copy from</label>
+            <select value={sourceId} onChange={e => selectSource(e.target.value)}>
+              <option value="">— select aircraft —</option>
+              {usable.map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.registration}{a.name ? ` – ${a.name}` : ''} · {a.full_name}
+                  {a.home_airport ? ` · ${a.home_airport}` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {srcLoading && <div className="ag-hint">Loading schedule…</div>}
+
+          {!srcLoading && source && srcSchedule.length === 0 && srcMaint.length === 0 && (
+            <div className="ag-note ag-note--warn">
+              {source.registration} has no weekly schedule — plan one on its schedule page first,
+              or on the Bank tab.
+            </div>
+          )}
+
+          {!srcLoading && source && (srcSchedule.length > 0 || srcMaint.length > 0) && (
+            <div className="ag-base">
+              <div className="ag-base-hd" onClick={() => setSrcOpen(o => !o)}>
+                <span className="ag-base-chevron">{srcOpen ? '▼' : '▶'}</span>
+                <span className="ag-base-iata">{source.registration}</span>
+                {source.name && <span className="ag-base-name">{source.name}</span>}
+                <span className="ag-acc-meta">
+                  {srcSchedule.length} flights
+                  {srcMaint.length ? ` · ${srcMaint.length} maintenance` : ''}
+                </span>
+              </div>
+              {srcOpen && (
+                <div className="ag-base-body ag-plan-body">
+                  <div className="ag-tzhint">
+                    All times in {source.home_airport || 'Berlin'} local time
+                  </div>
+                  <WeekGrid legs={srcLegs} maintenance={srcMaint[0] || null} offset={srcOffset} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* ── 2: Targets ──────────────────────────────────────────────────── */}
+      <section className="ag-box" style={{ marginBottom: '1.25rem' }}>
+        <BoxBar n="2" title="Copy onto"
+          right={selectedTargets.length ? `${selectedTargets.length} selected` : null} />
+        <div className="ag-boxbody">
+          {!source && <div className="ag-hint">Select a source aircraft first.</div>}
+          {source && groupedFleet.length === 0 && (
+            <div className="ag-hint">No other aircraft in the fleet to copy onto.</div>
+          )}
+          {source && groupedFleet.length > 0 && (
+            <div className="ag-bases">
+              {groupedFleet.map(g => {
+                const collapsed = collapsedBases.has(g.key);
+                const name = g.code ? airportName(g.code) : null;
+                const allOn = g.aircraft.every(a => targetIds.includes(a.id));
+                return (
+                  <div key={g.key} className="ag-base">
+                    <div className="ag-base-hd" onClick={() => toggleBase(g.key)}>
+                      <span className="ag-base-chevron">{collapsed ? '▶' : '▼'}</span>
+                      {g.code
+                        ? <>
+                            <span className="ag-base-iata">{g.code}</span>
+                            {name && <span className="ag-base-name">{name}</span>}
+                          </>
+                        : <span className="ag-base-none">No Home Base</span>}
+                      <button
+                        className="ag-base-all"
+                        onClick={e => { e.stopPropagation(); toggleBaseSelection(g, !allOn); }}>
+                        {allOn ? 'Clear' : 'Select all'}
+                      </button>
+                      <span className="ag-base-badge">{g.aircraft.length}</span>
+                    </div>
+                    {!collapsed && (
+                      <div className="ag-base-body">
+                        <table className="ag-ovtable">
+                          <thead>
+                            <tr>
+                              <th style={{ width: 34 }} />
+                              <th style={{ width: 24 }} />
+                              <th>Registration</th><th>Name</th><th>Type</th>
+                              <th>Cabin</th><th>Location</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {g.aircraft.map(ac => {
+                              const on = targetIds.includes(ac.id);
+                              return (
+                                <tr key={ac.id} className={`ag-ovrow${on ? ' ag-ovrow--on' : ''}`}
+                                  onClick={() => toggleTarget(ac.id)}>
+                                  <td><input type="checkbox" checked={on} readOnly /></td>
+                                  <td>
+                                    {ac.is_active
+                                      ? <span className="ag-status-dot ag-status-dot--on" title="Operating" />
+                                      : <span className="ag-status-dot" title="Grounded" />}
+                                  </td>
+                                  <td><span className="ag-ovreg">{ac.registration}</span></td>
+                                  <td className="ag-ovname">{ac.name || <span className="ag-ovempty">—</span>}</td>
+                                  <td className="ag-ovtype">{ac.full_name}</td>
+                                  <td className="ag-ovcabin">
+                                    {ac.airline_cabin_profile_name || <span className="ag-ovempty">—</span>}
+                                  </td>
+                                  <td className="ag-ovloc">{ac.current_location || ac.home_airport || '—'}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* ── 3: Offsets ──────────────────────────────────────────────────── */}
+      <section className="ag-box" style={{ marginBottom: '1.25rem' }}>
+        <BoxBar n="3" title="Shift each copy" right={mode === 'days' ? 'days' : 'hours : minutes'} />
+        <div className="ag-boxbody">
+          <div className="ag-switch">
+            <button className={`ag-switch-opt${mode === 'time' ? ' ag-switch-opt--on' : ''}`}
+              onClick={() => switchMode('time')}>HH:MM</button>
+            <button className={`ag-switch-opt${mode === 'days' ? ' ag-switch-opt--on' : ''}`}
+              onClick={() => switchMode('days')}>Days</button>
+            <span className="ag-switch-note">
+              {mode === 'days'
+                ? 'Whole days — the same times, moved to another weekday.'
+                : 'A clock distance — copies that cross midnight move to the next day.'}
+            </span>
+          </div>
+
+          {selectedTargets.length === 0 && (
+            <div className="ag-hint" style={{ marginTop: '1rem' }}>
+              Select the aircraft above to give each one its offset.
+            </div>
+          )}
+
+          {selectedTargets.length > 0 && (
+            <div className="ag-shifts">
+              {selectedTargets.map(ac => {
+                const parsed = offsets[ac.id] || {};
+                return (
+                  <div key={ac.id} className="ag-shift-row">
+                    <span className="ag-shift-bank">
+                      {ac.registration}{ac.name ? ` · ${ac.name}` : ''}
+                    </span>
+                    <input
+                      className={`ag-shift-inp${parsed.error ? ' ag-shift-inp--bad' : ''}`}
+                      type="text"
+                      placeholder={mode === 'days' ? '0' : '00:00'}
+                      value={shiftText[ac.id] ?? ''}
+                      onChange={e => { clearPlan(); setShiftText(t => ({ ...t, [ac.id]: e.target.value })); }}
+                    />
+                    <span className="ag-shift-unit">{mode === 'days' ? 'days' : 'hh:mm'}</span>
+                    {parsed.error
+                      ? <span className="ag-tag ag-tag--warn">{parsed.error}</span>
+                      : <span className="ag-shift-info">{offsetLabel(parsed.minutes || 0)}</span>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {activeTargets.length > 0 && (
+            <div className="ag-note ag-note--warn" style={{ marginTop: '1rem' }}>
+              ⚠ {activeTargets.length} of the selected aircraft {activeTargets.length === 1 ? 'is' : 'are'} operating.
+              Writing grounds {activeTargets.length === 1 ? 'it' : 'them'}, cancels the flights already generated
+              from the old schedule and puts {activeTargets.length === 1 ? 'it' : 'them'} back into service afterwards.
+            </div>
+          )}
+
+          <button className="ag-btn-primary ag-btn-block" style={{ marginTop: '1.25rem' }}
+            onClick={computePlan}
+            disabled={computing || !source || selectedTargets.length === 0 || badOffsets.length > 0}>
+            {computing ? 'Calculating…' : 'Plan copy'}
+          </button>
+        </div>
+      </section>
+
+      {/* ── Result ──────────────────────────────────────────────────────── */}
+      {plan && (
+        <section className="ag-box" style={{ marginBottom: '2rem' }}>
+          <BoxBar title="Copy preview"
+            right={`from ${plan.source.registration} · ${plan.source.leg_count} flights`} />
+          <div className="ag-boxbody">
+            {blocked.length > 0 && (
+              <div className="ag-alert ag-alert--error" style={{ marginBottom: '1rem' }}>
+                {blocked.length} selected aircraft cannot take this schedule. Deselect
+                {blocked.length === 1 ? ' it' : ' them'} above and plan again.
+              </div>
+            )}
+
+            <div className="ag-bases">
+              {plan.targets.map(t => {
+                const open = openTargets.has(t.aircraft_id);
+                const legs = t.legs
+                  .slice()
+                  .sort((x, y) => (x.day_of_week * 1440 + (hhmmToMin(x.departure_time) ?? 0))
+                                - (y.day_of_week * 1440 + (hhmmToMin(y.departure_time) ?? 0)))
+                  .map((l, i) => ({ ...l, uid: `${t.aircraft_id}-${i}` }));
+                return (
+                  <div key={t.aircraft_id} className="ag-base">
+                    <div className="ag-base-hd" onClick={() => toggleTargetOpen(t.aircraft_id)}>
+                      <span className="ag-base-chevron">{open ? '▼' : '▶'}</span>
+                      <span className="ag-base-iata">{t.registration}</span>
+                      {t.name && <span className="ag-base-name">{t.name}</span>}
+                      <span className="ag-shift-tag">{offsetLabel(t.shift_minutes)}</span>
+                      <span className="ag-acc-meta">
+                        {t.error
+                          ? <span className="ag-missing">cannot take this schedule</span>
+                          : `${t.legs.length} flights${t.maintenance ? ' · maintenance' : ''}`}
+                      </span>
+                    </div>
+                    {open && (
+                      <div className="ag-base-body ag-plan-body">
+                        {t.error && <div className="ag-note ag-note--warn">⚠ {t.error}</div>}
+                        {t.warnings.map((w, i) => (
+                          <div key={i} className="ag-note ag-note--warn" style={{ marginBottom: '0.5rem' }}>⚠ {w}</div>
+                        ))}
+                        {!t.error && (<>
+                          <div className="ag-tzhint">
+                            All times in {t.home_airport || 'Berlin'} local time
+                          </div>
+                          <WeekGrid legs={legs} maintenance={t.maintenance}
+                            offset={offsetOf(t.home_airport)} />
+                          <table className="ag-legs">
+                            <thead>
+                              <tr><th>Day</th><th>Flight</th><th>Leg</th><th>Departure</th><th>Arrival</th></tr>
+                            </thead>
+                            <tbody>
+                              {legs.map(l => (
+                                <tr key={l.uid}>
+                                  <td>{DAYS[l.day_of_week]}</td>
+                                  <td className="ag-mono">{l.flight_number}</td>
+                                  <td>{l.departure_airport} → {l.arrival_airport}</td>
+                                  <td className="ag-mono">{l.departure_time}</td>
+                                  <td className="ag-mono ag-muted">{l.arrival_time}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </>)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="ag-commit">
+              <div className="ag-commit-note">
+                Writing replaces the whole weekly schedule of every listed aircraft — flights and
+                maintenance. Aircraft that were grounded stay grounded with the new schedule written.
+              </div>
+              <button className="ag-btn-primary" onClick={commitCopy}
+                disabled={committing || blocked.length > 0 || plan.targets.length === 0}>
+                {committing ? 'Writing…' : `Confirm & copy onto ${plan.targets.length} aircraft`}
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
+    </>
+  );
+}
+
 /**
  * Aircraft Group Planning — plan ONE round-trip route across SEVERAL aircraft so
  * every selected bank is served daily. Long-haul round trips run past 24 h, so a
@@ -308,6 +834,9 @@ function WeekGrid({ legs, maintenance, conflicts, offset = 0, onDragWave }) {
  * stored until "Write plan" — it is a planning assistant, not an entity.
  */
 function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
+  // Two ways to fill a group's week: build one from banks, or take a week that
+  // already works and stagger copies of it across more aircraft.
+  const [tab, setTab] = useState('bank');
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
   const [success, setSuccess] = useState('');
@@ -401,6 +930,18 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
     () => (hubCode ? banks.filter(b => b.hub_airport_code === hubCode) : []),
     [banks, hubCode]
   );
+
+  // Both tabs write schedules and both need the fleet list to catch up afterwards
+  // (operating state, names). The write already succeeded by then, so a stale list
+  // is logged rather than raised as an error banner.
+  const refreshFleet = useCallback(async () => {
+    try {
+      const f = await fetch(`${API_URL}/api/aircraft/fleet`, { headers }).then(x => x.json());
+      setFleet(f.fleet || []);
+    } catch (err) {
+      console.error('[aircraft-groups] fleet refresh after write failed', err);
+    }
+  }, [headers]);
 
   const clearPlan = useCallback(() => {
     setPlan(null); setDraft([]); setEditMode(false); setOpenSlots(new Set());
@@ -812,13 +1353,7 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
       setError(`Not activated: ${failed.map(f => `${f.registration} (${f.error})`).join(', ')}`);
     }
     clearPlan();
-    try {
-      const f = await fetch(`${API_URL}/api/aircraft/fleet`, { headers }).then(x => x.json());
-      setFleet(f.fleet || []);
-    } catch (err) {
-      // The write already succeeded — a stale list is not worth an error banner.
-      console.error('[aircraft-groups] fleet refresh after commit failed', err);
-    }
+    refreshFleet();
   };
 
   if (loading) return <Loader />;
@@ -848,9 +1383,24 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
       <div className="container" style={{ paddingTop: 24 }}>
         <TopBar onBack={onBack} backLabel={backLabel} balance={airline?.balance} />
 
+        <div className="ag-tabs">
+          <button className={`ag-tab${tab === 'bank' ? ' ag-tab--on' : ''}`}
+            onClick={() => { setTab('bank'); setError(''); setSuccess(''); }}>Bank</button>
+          <button className={`ag-tab${tab === 'copy' ? ' ag-tab--on' : ''}`}
+            onClick={() => { setTab('copy'); setError(''); setSuccess(''); }}>Copy Schedule</button>
+        </div>
+
         {error && <div className="ag-alert ag-alert--error">{error}</div>}
         {success && <div className="ag-alert ag-alert--ok">{success}</div>}
 
+        {tab === 'copy' && (
+          <CopyScheduleTab
+            fleet={fleet} airports={airports} airportName={airportName} headers={headers}
+            setError={setError} setSuccess={setSuccess} onWritten={refreshFleet}
+          />
+        )}
+
+        {tab === 'bank' && (<>
         {/* ── Row 1: Route | Banks ────────────────────────────────────────── */}
         <div className="ag-row ag-row--half">
           <section className="ag-box">
@@ -1302,9 +1852,45 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
             </div>
           </section>
         )}
+        </>)}
       </div>
 
       <style>{`
+        /* Register bar — the two ways to fill a group's week */
+        .ag-tabs { display: flex; gap: 4px; margin-bottom: 1.25rem; border-bottom: 1px solid #E0E0E0; }
+        .ag-tab {
+          background: transparent; border: none; border-bottom: 2px solid transparent;
+          padding: 0.65rem 1.1rem; margin-bottom: -1px; cursor: pointer;
+          font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em;
+          text-transform: uppercase; color: #999; transition: color 0.15s, border-color 0.15s;
+        }
+        .ag-tab:hover { color: #2C2C2C; }
+        .ag-tab--on { color: #2C2C2C; border-bottom-color: #2C2C2C; }
+
+        /* Unit switch for the offsets */
+        .ag-switch { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+        .ag-switch-opt {
+          background: #fff; border: 1px solid #E0E0E0; border-radius: 6px;
+          padding: 0.4rem 0.9rem; cursor: pointer;
+          font-size: 0.8rem; font-weight: 700; color: #666;
+          font-variant-numeric: tabular-nums; transition: all 0.15s;
+        }
+        .ag-switch-opt:hover { border-color: #C0C0C0; color: #2C2C2C; }
+        .ag-switch-opt--on { background: #2C2C2C; border-color: #2C2C2C; color: #fff; }
+        .ag-switch-note { font-size: 0.78rem; color: #999; flex: 1 1 220px; }
+
+        .ag-shifts { margin-top: 1rem; }
+        .ag-shift-unit {
+          font-size: 0.72rem; color: #AAA; font-weight: 600; flex-shrink: 0;
+          text-transform: uppercase; letter-spacing: 0.04em;
+        }
+        .ag-shift-tag {
+          font-family: monospace; font-size: 0.78rem; font-weight: 700; color: #2C2C2C;
+          background: #EFEFEF; border-radius: 4px; padding: 0.12rem 0.45rem;
+          flex-shrink: 0; white-space: nowrap;
+        }
+        .ag-status-dot--on { background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,0.28); }
+
         .ag-alert { padding: 0.85rem 1.1rem; border-radius: 8px; font-size: 0.92rem; margin-bottom: 1rem; }
         .ag-alert--error { background: #FEF2F2; border: 1px solid #FECACA; color: #B91C1C; }
         .ag-alert--ok { background: #F0FDF4; border: 1px solid #BBF7D0; color: #15803D; }

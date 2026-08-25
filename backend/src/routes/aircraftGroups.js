@@ -476,4 +476,362 @@ router.post('/commit', authMiddleware, async (req, res) => {
   }
 });
 
+// ── Copy Schedule ─────────────────────────────────────────────────────────────
+// Clone ONE aircraft's whole weekly plan onto SEVERAL others, each with its own
+// offset. Same idea as the copy on the schedule page, but many targets at once:
+// the offsets are what turn a single week into a staggered group rotation.
+//
+// Offsets are signed minutes and always roll across the week — a +6 h shift on a
+// 22:00 departure genuinely lands at 04:00 the next day, and a group is built by
+// moving aircraft into the days the source does not cover.
+function shiftWeek(dayOfWeek, minuteOfDay, shiftMin) {
+  const total = mod(dayOfWeek * DAY + minuteOfDay + shiftMin, WEEK);
+  return { day: Math.floor(total / DAY), minuteOfDay: total % DAY };
+}
+
+// Everything both /copy-plan and /copy-commit need: the source week, the targets,
+// and each target's shifted result with its own conflicts already resolved.
+// Per-target problems are reported on the target (`error`), never thrown — one
+// unfit aircraft must not cost the player the whole plan.
+async function buildCopy(airlineId, body) {
+  const { source_aircraft_id, targets } = body;
+
+  const srcId = parseInt(source_aircraft_id);
+  if (!Number.isInteger(srcId)) return { error: 'Select a source aircraft' };
+  if (!Array.isArray(targets) || targets.length === 0) {
+    return { error: 'Select at least one aircraft to copy onto' };
+  }
+
+  const seen = new Set();
+  const wanted = [];
+  for (const t of targets) {
+    const id = parseInt(t?.aircraft_id);
+    if (!Number.isInteger(id)) return { error: 'A target aircraft is missing its id' };
+    if (id === srcId) return { error: 'The source aircraft cannot also be a target' };
+    // Two entries for one aircraft would silently overwrite each other, since every
+    // write replaces that aircraft's whole weekly schedule.
+    if (seen.has(id)) return { error: 'An aircraft appears twice in the copy list' };
+    seen.add(id);
+    // Kept signed and un-normalised so the preview can echo back the offset the
+    // player typed; shiftWeek wraps it into the week where it is applied.
+    const shift = Math.round(Number(t?.shift_minutes ?? 0));
+    if (!Number.isFinite(shift) || Math.abs(shift) > 8 * WEEK) {
+      return { error: 'Invalid offset on a target aircraft' };
+    }
+    wanted.push({ id, shift });
+  }
+
+  const acResult = await pool.query(`
+    SELECT a.id, a.registration, a.name, a.is_active, a.home_airport,
+           t.wake_turbulence_category, t.range_km, t.full_name, t.max_passengers,
+           t.min_runway_takeoff_m, t.min_runway_landing_m
+    FROM aircraft a JOIN aircraft_types t ON a.aircraft_type_id = t.id
+    WHERE a.id = ANY($1) AND a.airline_id = $2
+  `, [[srcId, ...wanted.map(w => w.id)], airlineId]);
+  const byId = new Map(acResult.rows.map(r => [r.id, r]));
+
+  const source = byId.get(srcId);
+  if (!source) return { error: 'Source aircraft not found' };
+  if (wanted.some(w => !byId.get(w.id))) return { error: 'One or more target aircraft not found' };
+
+  const schedResult = await pool.query(`
+    SELECT ws.day_of_week, ws.flight_number, ws.departure_airport, ws.arrival_airport,
+           ws.departure_time, ws.arrival_time, ws.economy_price, ws.business_price,
+           ws.first_price, ws.route_id, ws.service_profile_id,
+           COALESCE(ws.is_transfer, 0) AS is_transfer,
+           COALESCE(ws.distance_km, r.distance_km) AS distance_km
+    FROM weekly_schedule ws
+    LEFT JOIN routes r ON r.id = ws.route_id
+    WHERE ws.aircraft_id = $1
+    ORDER BY ws.day_of_week, ws.departure_time
+  `, [srcId]);
+  const maintResult = await pool.query(
+    `SELECT day_of_week, start_minutes, duration_minutes, type
+     FROM maintenance_schedule
+     WHERE aircraft_id = $1 AND airline_id = $2 AND day_of_week IS NOT NULL
+     ORDER BY day_of_week, start_minutes`,
+    [srcId, airlineId]
+  );
+  if (schedResult.rows.length === 0 && maintResult.rows.length === 0) {
+    return { error: `${source.registration} has no weekly schedule to copy` };
+  }
+
+  // Runways for every airport the source week touches, so each target can be
+  // checked against the same route set the source flies.
+  const codes = [...new Set(schedResult.rows.flatMap(r => [r.departure_airport, r.arrival_airport]))];
+  const apRes = codes.length
+    ? await pool.query('SELECT iata_code, runway_length_m, longitude FROM airports WHERE iata_code = ANY($1)', [codes])
+    : { rows: [] };
+  const rwy = new Map(apRes.rows.map(r => [r.iata_code, r.runway_length_m ?? 0]));
+  const lon = new Map(apRes.rows.map(r => [r.iata_code, r.longitude]));
+
+  const srcLegs = schedResult.rows.map(r => {
+    const depMin = parseHHMM(r.departure_time) ?? 0;
+    const dist = r.distance_km ?? 0;
+    return {
+      day_of_week: r.day_of_week,
+      departure_time: r.departure_time,
+      dep_minutes: depMin,
+      arrival_time: r.arrival_time,
+      flight_number: r.flight_number,
+      departure_airport: r.departure_airport,
+      arrival_airport: r.arrival_airport,
+      economy_price: r.economy_price, business_price: r.business_price, first_price: r.first_price,
+      route_id: r.route_id, service_profile_id: r.service_profile_id,
+      is_transfer: !!r.is_transfer,
+      distance_km: dist,
+      // Block time is a property of the distance, not of the row it was written
+      // from — recomputed so a copy can never inherit a stale arrival time.
+      duration: calculateFlightDuration(dist),
+      dep_longitude: lon.get(r.departure_airport) ?? null,
+      arr_longitude: lon.get(r.arrival_airport) ?? null,
+    };
+  });
+  const srcMaint = maintResult.rows[0] || null;
+
+  const results = wanted.map(({ id, shift }) => {
+    const ac = byId.get(id);
+    const pad = BANK_TURNAROUND[ac.wake_turbulence_category] || 40;
+    const warnings = [];
+
+    // Can this aircraft fly what the source flies? Checked per airport pair so the
+    // message names the leg that fails rather than just refusing the aircraft.
+    const reasons = new Set();
+    for (const l of srcLegs) {
+      if (ac.range_km && l.distance_km > ac.range_km) {
+        reasons.add(`range ${ac.range_km}km < ${l.departure_airport}–${l.arrival_airport} ${Math.round(l.distance_km)}km`);
+      }
+      if (ac.min_runway_takeoff_m && (rwy.get(l.departure_airport) ?? 0) < ac.min_runway_takeoff_m) {
+        reasons.add(`runway ${l.departure_airport} too short for takeoff`);
+      }
+      if (ac.min_runway_landing_m && (rwy.get(l.arrival_airport) ?? 0) < ac.min_runway_landing_m) {
+        reasons.add(`runway ${l.arrival_airport} too short for landing`);
+      }
+    }
+    const base = {
+      aircraft_id: id, registration: ac.registration, name: ac.name,
+      full_name: ac.full_name, home_airport: ac.home_airport,
+      was_active: !!ac.is_active, shift_minutes: shift,
+    };
+    if (reasons.size) {
+      return { ...base, legs: [], maintenance: null, warnings: [], error: `Cannot fly this schedule: ${[...reasons].join(', ')}` };
+    }
+
+    const legs = srcLegs.map(l => {
+      const s = shiftWeek(l.day_of_week, l.dep_minutes, shift);
+      const depWk = s.day * DAY + s.minuteOfDay;
+      return {
+        ...l,
+        day_of_week: s.day,
+        departure_time: toHHMM(s.minuteOfDay),
+        arrival_time: toHHMM(s.minuteOfDay + l.duration),
+        dep_wk: depWk, arr_wk: depWk + l.duration,
+      };
+    });
+
+    // A uniform shift keeps the legs' relative spacing, so this can only bite when
+    // the target's turnaround is longer than the source's — exactly the case worth
+    // catching before anything is written.
+    for (let i = 0; i < legs.length; i++) {
+      for (let j = i + 1; j < legs.length; j++) {
+        if (flightsOverlapWeekly(legs[i].dep_wk, legs[i].arr_wk, legs[j].dep_wk, legs[j].arr_wk, pad)) {
+          return {
+            ...base, legs: [], maintenance: null, warnings: [],
+            error: `Two flights overlap on this aircraft (${pad} min turnaround) — ${legs[i].flight_number} and ${legs[j].flight_number}`,
+          };
+        }
+      }
+    }
+
+    // Maintenance keeps the source's slot but takes the TARGET's service length,
+    // which is derived from its seat count. A longer block that no longer fits is
+    // dropped with a warning instead of failing the copy — the flights are the
+    // point, and the block can be re-placed on the schedule page.
+    let maintenance = null;
+    if (srcMaint) {
+      const s = shiftWeek(srcMaint.day_of_week, srcMaint.start_minutes, shift);
+      const duration = bankMaintenanceDuration(ac.max_passengers);
+      const mStart = s.day * DAY + s.minuteOfDay;
+      const clash = legs.find(l => flightOverlapsMaintenance(l.dep_wk, l.arr_wk, pad, mStart, mStart + duration));
+      if (clash) {
+        warnings.push(`Maintenance skipped — ${duration} min at ${toHHMM(s.minuteOfDay)} would overlap ${clash.flight_number}`);
+      } else {
+        maintenance = {
+          day_of_week: s.day, start_minutes: s.minuteOfDay,
+          start_time: toHHMM(s.minuteOfDay), duration_minutes: duration,
+          type: srcMaint.type || 'routine',
+        };
+        if (duration !== srcMaint.duration_minutes) {
+          warnings.push(`Maintenance runs ${duration} min here (source: ${srcMaint.duration_minutes} min) — it follows this aircraft's seat count`);
+        }
+      }
+    }
+
+    return { ...base, legs, maintenance, warnings, error: null };
+  });
+
+  return {
+    source: {
+      aircraft_id: source.id, registration: source.registration, name: source.name,
+      full_name: source.full_name, home_airport: source.home_airport,
+      leg_count: srcLegs.length, has_maintenance: !!srcMaint,
+    },
+    source_legs: srcLegs.map(l => ({
+      day_of_week: l.day_of_week, departure_time: l.departure_time, arrival_time: l.arrival_time,
+      flight_number: l.flight_number, departure_airport: l.departure_airport,
+      arrival_airport: l.arrival_airport, is_transfer: l.is_transfer,
+      dep_longitude: l.dep_longitude, arr_longitude: l.arr_longitude,
+    })),
+    source_maintenance: srcMaint
+      ? { ...srcMaint, start_time: toHHMM(srcMaint.start_minutes) }
+      : null,
+    targets: results,
+  };
+}
+
+// ── POST /api/aircraft-groups/copy-plan ──────────────────────────────────────
+// Preview only — nothing is written. Every target comes back with its shifted
+// week, its warnings and, when it cannot take the schedule, its own error.
+router.post('/copy-plan', authMiddleware, async (req, res) => {
+  try {
+    const airlineId = req.airlineId;
+    if (!airlineId) return res.status(400).json({ error: 'No active airline' });
+
+    const built = await buildCopy(airlineId, req.body);
+    if (built.error) return res.status(400).json({ error: built.error });
+
+    res.json(built);
+  } catch (error) {
+    console.error('Group copy plan error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ── POST /api/aircraft-groups/copy-commit ────────────────────────────────────
+// Writes the copy. The plan is rebuilt from the database rather than taken from
+// the client, so what is written is what the preview computed — the request only
+// says which aircraft and by how much.
+router.post('/copy-commit', authMiddleware, async (req, res) => {
+  try {
+    const airlineId = req.airlineId;
+    if (!airlineId) return res.status(400).json({ error: 'No active airline' });
+
+    const built = await buildCopy(airlineId, req.body);
+    if (built.error) return res.status(400).json({ error: built.error });
+
+    const writable = built.targets.filter(t => !t.error);
+    const blocked = built.targets.filter(t => t.error);
+    if (writable.length === 0) {
+      return res.status(400).json({ error: `No aircraft can take this schedule: ${blocked.map(b => `${b.registration} — ${b.error}`).join('; ')}` });
+    }
+    // Refuse a partial write the player did not ask for: they saw the blocked rows
+    // in the preview and have to drop them before the copy runs.
+    if (blocked.length > 0) {
+      return res.status(400).json({
+        error: `${blocked.length} selected aircraft cannot take this schedule — remove them and retry: `
+          + blocked.map(b => `${b.registration} (${b.error})`).join('; '),
+      });
+    }
+
+    const now = new Date();
+    const jsDay = now.getDay();
+    const currentDow = jsDay === 0 ? 6 : jsDay - 1;
+    const currentWeekMin = currentDow * DAY + now.getHours() * 60 + now.getMinutes();
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const t of writable) {
+        // Same order the group commit uses: ground the aircraft to unlock the
+        // schedule tables (which also cancels the flights generated from the old
+        // plan), release the flight rows still pointing at the templates, then
+        // replace the week.
+        await deactivateAircraft(t.aircraft_id, client);
+        await client.query('UPDATE flights SET weekly_schedule_id = NULL WHERE aircraft_id = $1', [t.aircraft_id]);
+        await client.query('DELETE FROM weekly_schedule WHERE aircraft_id = $1', [t.aircraft_id]);
+        await client.query('DELETE FROM maintenance_schedule WHERE aircraft_id = $1 AND airline_id = $2', [t.aircraft_id, airlineId]);
+
+        if (t.legs.length) {
+          const values = [];
+          const placeholders = [];
+          let idx = 1;
+          for (const l of t.legs) {
+            placeholders.push(`($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`);
+            values.push(t.aircraft_id, l.day_of_week, l.flight_number, l.departure_airport, l.arrival_airport,
+              l.departure_time, l.arrival_time,
+              l.is_transfer ? null : l.economy_price,
+              l.is_transfer ? null : l.business_price,
+              l.is_transfer ? null : l.first_price,
+              l.is_transfer ? null : l.route_id,
+              l.is_transfer ? null : l.service_profile_id,
+              l.distance_km || null,
+              l.is_transfer ? 1 : 0);
+          }
+          await client.query(`
+            INSERT INTO weekly_schedule
+              (aircraft_id, day_of_week, flight_number, departure_airport, arrival_airport,
+               departure_time, arrival_time, economy_price, business_price, first_price,
+               route_id, service_profile_id, distance_km, is_transfer)
+            VALUES ${placeholders.join(', ')}
+          `, values);
+        }
+
+        if (t.maintenance) {
+          // Mirror maintenance.js: a slot that already passed this week is marked
+          // completed so the processor bills it next week instead of instantly.
+          const trigger = t.maintenance.day_of_week * DAY + t.maintenance.start_minutes;
+          await client.query(`
+            INSERT INTO maintenance_schedule
+              (aircraft_id, airline_id, day_of_week, start_minutes, duration_minutes, type, status, last_completed_at)
+            VALUES ($1, $2, $3, $4, $5, $6, 'scheduled', $7)
+          `, [t.aircraft_id, airlineId, t.maintenance.day_of_week, t.maintenance.start_minutes,
+              t.maintenance.duration_minutes, t.maintenance.type,
+              currentWeekMin >= trigger ? now.toISOString() : null]);
+        }
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    // Restore the previous operating state. An aircraft that was parked stays
+    // parked with its new schedule written — copying must never put one into the
+    // air behind the player's back. The write is already committed, so a failed
+    // reactivation is reported, not rolled back.
+    const activation = [];
+    for (const t of writable) {
+      if (!t.was_active) {
+        activation.push({ aircraft_id: t.aircraft_id, registration: t.registration, activated: false, left_grounded: true, error: null });
+        continue;
+      }
+      const result = await activateAircraft(airlineId, t.aircraft_id);
+      activation.push({
+        aircraft_id: t.aircraft_id, registration: t.registration,
+        activated: result.ok, left_grounded: false,
+        error: result.ok ? null : (result.message || result.error),
+      });
+    }
+
+    const legCount = writable.reduce((s, t) => s + t.legs.length, 0);
+    const grounded = activation.filter(a => a.left_grounded);
+    const failed = activation.filter(a => !a.activated && !a.left_grounded);
+    const notes = [];
+    if (failed.length) notes.push(`${failed.length} could not be reactivated`);
+    if (grounded.length) notes.push(`${grounded.length} left grounded (were not operating before)`);
+    res.status(201).json({
+      message: `Schedule copied from ${built.source.registration}: ${writable.length} aircraft, ${legCount} flights`
+        + (notes.length ? ` — ${notes.join(', ')}` : ''),
+      aircraft_count: writable.length,
+      leg_count: legCount,
+      activation,
+    });
+  } catch (error) {
+    console.error('Group copy commit error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 export default router;

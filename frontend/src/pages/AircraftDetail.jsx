@@ -2005,9 +2005,15 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         throw new Error(data.error);
       }
       setIsActive(data.is_active);
-      setSuccess(data.message);
-      // The backend generates flight instances on activation — refetch so they
-      // appear immediately instead of only on the next auto-refresh tick.
+      if (data.is_active) {
+        // Flight instances are only materialised by the hourly :13 job, so say when
+        // that is instead of leaving the user staring at an empty flight list.
+        const nowMin = new Date().getMinutes();
+        const minsToGen = ((13 - nowMin) + 60) % 60 || 60;
+        setSuccess(`${data.message} — flights will be created at the next :13 (in ${minsToGen} min).`);
+      } else {
+        setSuccess(data.message);
+      }
       fetchScheduledFlights();
     } catch (err) { setError(err.message); }
   };

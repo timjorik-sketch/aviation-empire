@@ -3,7 +3,7 @@ import { body, validationResult } from 'express-validator';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 import adminMiddleware from '../middleware/admin.js';
-import { calculateFlightDuration, generateFlights } from './flights.js';
+import { calculateFlightDuration } from './flights.js';
 import { validatePriceClamp } from '../utils/marketPricing.js';
 import { getAirports } from '../utils/airportCache.js';
 import { diversionGeoFraction } from '../utils/delaySystem.js';
@@ -1447,16 +1447,11 @@ export async function activateAircraft(airlineId, aircraftId) {
 
   await pool.query('UPDATE aircraft SET is_active = 1 WHERE id = $1', [aircraftId]);
 
-  // Generate flight instances immediately on activation so newly scheduled
-  // flights (including transfer legs just added) show up right away instead of
-  // waiting for the hourly :13 generation job. Scoped to THIS aircraft — a
-  // full-fleet pass took seconds and delayed the response, so the UI only
-  // flipped to green long after the click. Failures are non-fatal (the hourly
-  // job is the backstop).
-  try { await generateFlights(aircraftId); }
-  catch (genErr) { console.error('Activation generateFlights failed:', genErr); }
-
-  return { ok: true };
+  // Flight instances are NOT materialised here. Generation happens exclusively in
+  // the hourly :13 job (flights.js generateFlights) — one clock for the whole game,
+  // so an aircraft activated at :50 gets the same 72h window as one activated at :14.
+  // Activating therefore only flips the flag and returns immediately.
+  return { ok: true, next_generation_at_minute: 13 };
 }
 
 // Toggle aircraft active state (activate / deactivate)
@@ -2561,13 +2556,14 @@ router.get('/:id/flights', authMiddleware, async (req, res) => {
     }));
 
     const maintResult = await pool.query(`
-      SELECT id, day_of_week, start_minutes, duration_minutes, type
+      SELECT id, day_of_week, start_minutes, duration_minutes, type, last_completed_at
       FROM maintenance_schedule
       WHERE aircraft_id = $1
     `, [aircraftId]);
     const maintEntries = maintResult.rows.map(r => ({
       id: r.id, day_of_week: r.day_of_week, start_minutes: r.start_minutes,
-      duration_minutes: r.duration_minutes, type: r.type
+      duration_minutes: r.duration_minutes, type: r.type,
+      last_completed_ms: r.last_completed_at ? new Date(r.last_completed_at).getTime() : null
     }));
 
     const startOfToday = new Date(now); startOfToday.setUTCHours(0, 0, 0, 0);
@@ -2594,6 +2590,17 @@ router.get('/:id/flights', authMiddleware, async (req, res) => {
         const endDt = new Date(startDt.getTime() + m.duration_minutes * 60000);
 
         if (startDt < windowEnd && endDt > windowStart) {
+          // An elapsed window is only "completed" if the processor actually ran it
+          // (last_completed_at inside the window — it stamps at the window's start).
+          // A slot that passed while the aircraft was grounded never happened, so it
+          // is skipped entirely and the next week's occurrence is shown instead.
+          if (now >= endDt) {
+            const done = m.last_completed_ms;
+            const ranThisWindow = done != null
+              && done >= startDt.getTime() - 5 * 60000
+              && done <= endDt.getTime();
+            if (!ranThisWindow) continue;
+          }
           const status = now >= startDt && now < endDt ? 'in-progress' : now >= endDt ? 'completed' : 'scheduled';
           flights.push({
             id: `maint_${m.id}_${weekOffset}`,

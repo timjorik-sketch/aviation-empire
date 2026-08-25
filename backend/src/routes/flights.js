@@ -2,7 +2,7 @@ import express from 'express';
 import { body, validationResult } from 'express-validator';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
-import { calcFlightSatisfaction, getAirlineSatisfactionScore, getSatisfactionMultiplier } from '../utils/satisfaction.js';
+import { calcFlightSatisfaction, loadProfileItems, getAirlineSatisfactionScore, getSatisfactionMultiplier } from '../utils/satisfaction.js';
 import { calcMarketPrices, calcBaseRate, calcAirportPremium } from '../utils/marketPricing.js';
 import {
   rollDelaysForFlight,
@@ -730,6 +730,14 @@ async function generateFlights(onlyAircraftId = null) {
     } catch (e) { /* fall back to defaults below */ }
 
     let generated = 0;
+    // Service-profile items are identical for every flight on the same profile —
+    // load each profile once per run instead of once per generated flight.
+    const profileItemsCache = new Map();
+    async function getProfileItems(profileId) {
+      const key = profileId ?? 0;
+      if (!profileItemsCache.has(key)) profileItemsCache.set(key, await loadProfileItems(profileId ?? null));
+      return profileItemsCache.get(key);
+    }
 
     for (const ac of aircraft) {
       let ecoSeats = 0, bizSeats = 0, firstSeats = 0;
@@ -771,6 +779,33 @@ async function generateFlights(onlyAircraftId = null) {
 
       if (!entries.length) continue;
 
+      // Everything this aircraft already has on the books in (and just before) the
+      // horizon — pulled ONCE instead of two queries per candidate flight. The
+      // duplicate key uses the same departure_time::date cast the old per-entry
+      // query used, so the semantics are unchanged.
+      const existingResult = await pool.query(`
+        SELECT weekly_schedule_id, status,
+               to_char(departure_time::date, 'YYYY-MM-DD') AS dep_date,
+               departure_time, arrival_time
+        FROM flights
+        WHERE aircraft_id = $1
+          AND departure_time >= $2 AND departure_time <= $3
+      `, [ac.id,
+          new Date(now.getTime() - 36 * 3600000).toISOString(),
+          new Date(horizon.getTime() + 2 * 3600000).toISOString()]);
+
+      const existingKeys = new Set();
+      const liveWindows = [];
+      for (const row of existingResult.rows) {
+        if (row.weekly_schedule_id != null) existingKeys.add(`${row.dep_date}|${row.weekly_schedule_id}`);
+        if (['scheduled', 'boarding', 'in-flight'].includes(row.status)) {
+          liveWindows.push({
+            dep: new Date(row.departure_time).getTime(),
+            arr: new Date(row.arrival_time).getTime(),
+          });
+        }
+      }
+
       for (let d = 0; d < 4; d++) {
         const dayUTC = new Date(now.getTime() + d * 86400000);
 
@@ -797,25 +832,12 @@ async function generateFlights(onlyAircraftId = null) {
           const arrDT = new Date(depDT.getTime() + durMin * 60000);
 
           const utcDateStr = depDT.toISOString().slice(0, 10);
-          const dupResult = await pool.query(
-            `SELECT id FROM flights WHERE aircraft_id = $1 AND departure_time::date = $2::date
-             AND weekly_schedule_id = $3`,
-            [ac.id, utcDateStr, entry.id]
-          );
-          if (dupResult.rows[0]) continue;
+          if (existingKeys.has(`${utcDateStr}|${entry.id}`)) continue;
 
           // Skip if the aircraft already has a live flight (incl. orphaned ones from a
           // cleared schedule) overlapping this window — same plane can't fly twice at once.
-          const conflictResult = await pool.query(
-            `SELECT 1 FROM flights
-             WHERE aircraft_id = $1
-               AND status IN ('scheduled', 'boarding', 'in_flight')
-               AND departure_time < $2
-               AND arrival_time > $3
-             LIMIT 1`,
-            [ac.id, arrDT.toISOString(), depDT.toISOString()]
-          );
-          if (conflictResult.rows[0]) continue;
+          const depMs = depDT.getTime(), arrMs = arrDT.getTime();
+          if (liveWindows.some(w => w.dep < arrMs && w.arr > depMs)) continue;
 
           const distKm    = entry.distance_km || 1000;
           const depCat = airportCatMap.get(entry.dep_airport) ?? 4;
@@ -838,6 +860,7 @@ async function generateFlights(onlyAircraftId = null) {
             const sat = await calcFlightSatisfaction({
               distKm,
               serviceProfileId: entry.service_profile_id ?? null,
+              preloadedItems: await getProfileItems(entry.service_profile_id ?? null),
               condition: ac.condition ?? 100,
               ecoSeats: satEcoSeats,
               bizSeats,
@@ -871,6 +894,8 @@ async function generateFlights(onlyAircraftId = null) {
             atcFee, mp.eco, mp.biz, mp.first, satisfactionScore, violatedRulesJson
           ]);
 
+          existingKeys.add(`${utcDateStr}|${entry.id}`);
+          liveWindows.push({ dep: depMs, arr: arrMs });
           generated++;
          } catch (entryErr) {
            // One bad entry must never abort generation for the rest of the fleet.
@@ -1264,9 +1289,12 @@ async function processFlights() {
 
     const MAINT_BASE_COST = { L: 2000, M: 8000, H: 15000 };
 
+    // Only aircraft in operation are maintained. A grounded aircraft isn't flown,
+    // so its slot simply passes by — no charge, no condition reset.
     const pendingMaintResult = await pool.query(`
       SELECT ms.id, ms.aircraft_id, ms.day_of_week, ms.start_minutes, ms.duration_minutes, ms.airline_id
       FROM maintenance_schedule ms
+      JOIN aircraft a ON a.id = ms.aircraft_id AND a.is_active = 1
       WHERE ms.last_completed_at IS NULL
          OR ms.last_completed_at < NOW() - INTERVAL '6 days'
     `);
@@ -1275,10 +1303,23 @@ async function processFlights() {
       start_minutes: r.start_minutes, duration_minutes: r.duration_minutes, airline_id: r.airline_id
     }));
 
+    // Due = we are INSIDE the window, not merely past its start. Firing on
+    // "any time after the start" meant a slot that elapsed while the aircraft was
+    // grounded (or before it was ever activated) got charged and stamped completed
+    // the moment the aircraft went into operation.
+    const WEEK_MINUTES = 7 * 1440;
+    const isMaintDue = (m) => {
+      const start = m.day_of_week * 1440 + m.start_minutes;
+      const end   = start + m.duration_minutes;
+      // Windows may run past Sunday midnight — compare on the circular week too.
+      return (currentWeekMin >= start && currentWeekMin < end)
+          || (end > WEEK_MINUTES && currentWeekMin < end - WEEK_MINUTES);
+    };
+
     const maintAcMap = new Map();
     const dueAcIds = [...new Set(
       pendingMaint
-        .filter(m => currentWeekMin >= m.day_of_week * 1440 + m.start_minutes)
+        .filter(isMaintDue)
         .map(m => m.aircraft_id)
         .filter(Boolean)
     )];
@@ -1300,8 +1341,7 @@ async function processFlights() {
     }
 
     for (const m of pendingMaint) {
-      const maintWeekMin = m.day_of_week * 1440 + m.start_minutes;
-      if (currentWeekMin >= maintWeekMin) {
+      if (isMaintDue(m)) {
         const info = maintAcMap.get(m.aircraft_id) || {};
         const condition    = info.condition    ?? 100;
         const wakeCategory = info.wakeCategory ?? 'M';

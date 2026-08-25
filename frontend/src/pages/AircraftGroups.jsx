@@ -801,7 +801,13 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
     // left_grounded is not a failure: the aircraft was parked before the plan and
     // stays parked, schedule written, for the player to activate.
     const failed = (res.data.activation || []).filter(a => !a.activated && !a.left_grounded);
-    setSuccess(res.data.message);
+    // Reactivated aircraft get their flight instances from the hourly :13 job, not
+    // from the commit — name the time so the empty flight lists don't read as a bug.
+    const reactivated = (res.data.activation || []).filter(a => a.activated).length;
+    const minsToGen = ((13 - new Date().getMinutes()) + 60) % 60 || 60;
+    setSuccess(res.data.message + (reactivated
+      ? ` — flights for the ${reactivated} reactivated aircraft are created at the next :13 (in ${minsToGen} min).`
+      : ''));
     if (failed.length) {
       setError(`Not activated: ${failed.map(f => `${f.registration} (${f.error})`).join(', ')}`);
     }

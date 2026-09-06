@@ -210,6 +210,67 @@ router.get('/', authMiddleware, async (req, res) => {
   }
 });
 
+// POST /api/personnel/crew-quote — what crewing these aircraft would cost
+// A quote, not a change. Hiring commits the airline to a weekly wage, so the
+// places that offer to crew a whole group at once can show the bill first and
+// name the aircraft that cannot be crewed yet, without duplicating the cabin-crew
+// rules in the frontend.
+router.post('/crew-quote', authMiddleware, async (req, res) => {
+  if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });
+  const ids = [...new Set((Array.isArray(req.body?.aircraft_ids) ? req.body.aircraft_ids : [])
+    .map(Number).filter(Number.isInteger))];
+  if (ids.length === 0) return res.json({ quotes: [], weekly_cost: 0 });
+
+  try {
+    const acResult = await pool.query(`
+      SELECT ac.id, ac.registration, ac.name, ac.crew_assigned, ac.airline_cabin_profile_id,
+             at.manufacturer, at.model, at.full_name
+      FROM aircraft ac
+      JOIN aircraft_types at ON at.id = ac.aircraft_type_id
+      WHERE ac.id = ANY($1) AND ac.airline_id = $2
+    `, [ids, req.airlineId]);
+
+    const profileIds = [...new Set(acResult.rows.map(r => r.airline_cabin_profile_id).filter(Boolean))];
+    const clsResult = profileIds.length
+      ? await pool.query('SELECT profile_id, class_type, actual_capacity FROM airline_cabin_classes WHERE profile_id = ANY($1)', [profileIds])
+      : { rows: [] };
+    const byProfile = new Map();
+    for (const r of clsResult.rows) {
+      if (!byProfile.has(r.profile_id)) byProfile.set(r.profile_id, []);
+      byProfile.get(r.profile_id).push({ class_type: r.class_type, actual_capacity: r.actual_capacity });
+    }
+
+    const quotes = acResult.rows.map(r => {
+      const base = {
+        aircraft_id: r.id, registration: r.registration, name: r.name, full_name: r.full_name,
+        type_rating: getTypeRating(r.manufacturer, r.model),
+        cabin_count: 0, cockpit_count: 0, weekly_cost: 0,
+      };
+      if (r.crew_assigned) return { ...base, can_hire: false, reason: 'Crew already assigned' };
+      if (!r.airline_cabin_profile_id) {
+        // Cabin crew is sized from the cabin, so there is nothing to quote yet.
+        return { ...base, can_hire: false, reason: 'No cabin profile — assign one first' };
+      }
+      const cabinCount = calcCabinCrew(byProfile.get(r.airline_cabin_profile_id) || []);
+      return {
+        ...base,
+        cabin_count: cabinCount,
+        cockpit_count: COCKPIT_COUNT,
+        weekly_cost: cabinCount * CABIN_WAGE + COCKPIT_COUNT * COCKPIT_WAGE,
+        can_hire: true, reason: null,
+      };
+    });
+
+    res.json({
+      quotes,
+      weekly_cost: quotes.filter(q => q.can_hire).reduce((sum, q) => sum + q.weekly_cost, 0),
+    });
+  } catch (err) {
+    console.error('Personnel crew-quote error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // POST /api/personnel/hire/:aircraft_id — hire cabin + cockpit crew
 router.post('/hire/:aircraft_id', authMiddleware, async (req, res) => {
   if (!req.airlineId) return res.status(400).json({ error: 'No active airline' });

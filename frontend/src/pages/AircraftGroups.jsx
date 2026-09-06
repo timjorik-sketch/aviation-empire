@@ -416,6 +416,15 @@ function CopyScheduleTab({ fleet, airports, airportName, headers, setError, setS
   // a separate decision the player makes on purpose.
   const [activate, setActivate] = useState(false);
 
+  // Crewing dialog. Opens by itself the moment activation is asked for and the
+  // crew is not there, because that is when the gap turns into a problem — and
+  // the fix is two clicks away rather than on another page.
+  const [crewModal, setCrewModal]   = useState(null);   // null | number[] of aircraft ids
+  const [crewQuotes, setCrewQuotes] = useState(null);
+  const [crewLoading, setCrewLoading] = useState(false);
+  const [crewHiring, setCrewHiring] = useState(false);
+  const [crewError, setCrewError]   = useState('');
+
   const [plan, setPlan] = useState(null);
   const [computing, setComputing] = useState(false);
   const [committing, setCommitting] = useState(false);
@@ -558,6 +567,60 @@ function CopyScheduleTab({ fleet, airports, airportName, headers, setError, setS
     return gaps;
   };
   const notReady = activate ? selectedTargets.filter(ac => missingFor(ac).length) : [];
+  const needCrew = selectedTargets.filter(ac => !ac.crew_assigned);
+
+  // The quote is the server's, not a copy of the cabin-crew rules living here: it
+  // says how many crew each aircraft needs, what they cost per week, and which
+  // aircraft cannot be crewed yet at all.
+  const openCrewModal = useCallback(async (aircraft) => {
+    const ids = aircraft.map(a => a.id);
+    if (ids.length === 0) return;
+    setCrewModal(ids);
+    setCrewQuotes(null); setCrewError(''); setCrewLoading(true);
+    const res = await request('/api/personnel/crew-quote', { aircraft_ids: ids }, setCrewError);
+    setCrewLoading(false);
+    if (!res) return;
+    if (!res.ok) { setCrewError(res.data?.error || `Could not price the crew (HTTP ${res.status})`); return; }
+    setCrewQuotes(res.data);
+  }, []);
+
+  // Ticking the box is the moment the missing crew starts to matter, so that is
+  // when the dialog shows up.
+  const onActivateChange = (on) => {
+    setActivate(on);
+    if (on && needCrew.length > 0) openCrewModal(needCrew);
+  };
+
+  // Hired one at a time: /hire is per aircraft, and a failure on one (no cabin
+  // profile) must not stop the rest from being crewed.
+  const hireCrew = async () => {
+    const hireable = (crewQuotes?.quotes || []).filter(q => q.can_hire);
+    if (hireable.length === 0) return;
+    setCrewHiring(true); setCrewError('');
+    const failed = [];
+    for (const q of hireable) {
+      try {
+        const res = await fetch(`${API_URL}/api/personnel/hire/${q.aircraft_id}`, { method: 'POST', headers });
+        const data = await res.json();
+        if (!res.ok) failed.push(`${q.registration} (${data.error || `HTTP ${res.status}`})`);
+      } catch (err) {
+        failed.push(`${q.registration} (${err.message})`);
+      }
+    }
+    setCrewHiring(false);
+    // crew_assigned is read off the fleet list, so it has to catch up before the
+    // rows and the warning can tell the truth again.
+    await onWritten?.();
+    if (failed.length) {
+      setCrewError(`Not crewed: ${failed.join(', ')}`);
+      // Re-price so the dialog shows what is still outstanding.
+      const res = await request('/api/personnel/crew-quote', { aircraft_ids: crewModal }, setCrewError);
+      if (res?.ok) setCrewQuotes(res.data);
+      return;
+    }
+    setSuccess(`Crew hired for ${hireable.length} aircraft.`);
+    setCrewModal(null); setCrewQuotes(null);
+  };
 
   // The unit changes what the same digits mean, so the fields start over rather
   // than silently reinterpreting "2" from 2 days into an invalid clock time.
@@ -858,7 +921,7 @@ function CopyScheduleTab({ fleet, airports, airportName, headers, setError, setS
 
           {selectedTargets.length > 0 && (
             <label className="ag-check">
-              <input type="checkbox" checked={activate} onChange={e => setActivate(e.target.checked)} />
+              <input type="checkbox" checked={activate} onChange={e => onActivateChange(e.target.checked)} />
               <span>
                 <strong>Put into operation after writing</strong>
                 <em>
@@ -873,7 +936,12 @@ function CopyScheduleTab({ fleet, airports, airportName, headers, setError, setS
             <div className="ag-note ag-note--warn" style={{ marginTop: '0.75rem' }}>
               ⚠ {notReady.length} of the selected aircraft cannot be put into operation yet —
               {' '}{notReady.map(ac => `${ac.registration} (no ${missingFor(ac).join(', no ')})`).join(', ')}.
-              The schedules are still written; assign what is missing and activate them from the fleet list.
+              The schedules are written either way; whatever is still missing leaves that aircraft grounded.
+              {needCrew.length > 0 && (
+                <button className="ag-link-btn" onClick={() => openCrewModal(needCrew)}>
+                  Assign crew
+                </button>
+              )}
             </div>
           )}
 
@@ -977,6 +1045,85 @@ function CopyScheduleTab({ fleet, airports, airportName, headers, setError, setS
             </div>
           </div>
         </section>
+      )}
+
+      {/* ── Crew dialog ─────────────────────────────────────────────────── */}
+      {crewModal && (
+        <div className="ag-modal-overlay" onClick={() => !crewHiring && setCrewModal(null)}>
+          <div className="ag-modal" onClick={e => e.stopPropagation()}>
+            <div className="ag-modal-hd">
+              <h2>Assign crew</h2>
+              <button className="ag-modal-x" onClick={() => !crewHiring && setCrewModal(null)}>×</button>
+            </div>
+            <div className="ag-modal-body">
+              <p className="ag-modal-lead">
+                An aircraft needs a crew before it can operate. Hiring assigns cabin and cockpit crew
+                to each aircraft below and adds their wages to the weekly payroll.
+              </p>
+
+              {crewLoading && <div className="ag-hint">Pricing crew…</div>}
+              {crewError && <div className="ag-alert ag-alert--error">{crewError}</div>}
+
+              {crewQuotes && (
+                <table className="ag-ovtable">
+                  <thead>
+                    <tr>
+                      <th>Aircraft</th><th>Type rating</th>
+                      <th style={{ textAlign: 'right' }}>Cabin</th>
+                      <th style={{ textAlign: 'right' }}>Cockpit</th>
+                      <th style={{ textAlign: 'right' }}>Weekly wages</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {crewQuotes.quotes.map(q => (
+                      <tr key={q.aircraft_id} className={q.can_hire ? undefined : 'ag-quote--off'}>
+                        <td>
+                          <span className="ag-ovreg">{q.registration}</span>
+                          {q.name && <span className="ag-ovname"> · {q.name}</span>}
+                          {!q.can_hire && <div className="ag-quote-reason">{q.reason}</div>}
+                        </td>
+                        <td className="ag-ovtype">{q.type_rating}</td>
+                        <td style={{ textAlign: 'right' }}>{q.can_hire ? q.cabin_count : '—'}</td>
+                        <td style={{ textAlign: 'right' }}>{q.can_hire ? q.cockpit_count : '—'}</td>
+                        <td style={{ textAlign: 'right' }} className="ag-mono">
+                          {q.can_hire ? `$${q.weekly_cost.toLocaleString()}` : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
+              {crewQuotes && (
+                <div className="ag-note" style={{ marginTop: '1rem' }}>
+                  Crew already on the payroll but not deployed is used first, so the airline's total
+                  wage bill may rise by less than the sum above.
+                </div>
+              )}
+
+              {crewQuotes?.quotes.some(q => !q.can_hire && q.reason?.startsWith('No cabin profile')) && (
+                <div className="ag-note ag-note--warn" style={{ marginTop: '0.75rem' }}>
+                  ⚠ Cabin crew is sized from the cabin, so an aircraft without a cabin profile cannot be
+                  crewed here. Assign one on the fleet list, then come back.
+                </div>
+              )}
+            </div>
+            <div className="ag-modal-ft">
+              <span className="ag-modal-total">
+                {crewQuotes ? `$${crewQuotes.weekly_cost.toLocaleString()} / week` : ''}
+              </span>
+              <button className="ag-btn-cancel" onClick={() => setCrewModal(null)} disabled={crewHiring}>
+                Close
+              </button>
+              <button className="ag-btn-primary" onClick={hireCrew}
+                disabled={crewHiring || !crewQuotes || !crewQuotes.quotes.some(q => q.can_hire)}>
+                {crewHiring
+                  ? 'Hiring…'
+                  : `Hire crew for ${(crewQuotes?.quotes || []).filter(q => q.can_hire).length} aircraft`}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );
@@ -2072,6 +2219,51 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
           display: block; margin-top: 2px; font-style: normal;
           font-size: 0.78rem; color: #888; line-height: 1.45;
         }
+        .ag-link-btn {
+          margin-left: 0.5rem; background: transparent; border: none; padding: 0;
+          color: #92400E; font-size: inherit; font-weight: 700;
+          text-decoration: underline; cursor: pointer;
+        }
+        .ag-link-btn:hover { color: #2C2C2C; }
+
+        /* Crew dialog */
+        .ag-modal-overlay {
+          position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 1000;
+          display: flex; align-items: center; justify-content: center; padding: 1.5rem;
+        }
+        .ag-modal {
+          background: #fff; border-radius: 8px; width: 100%; max-width: 640px;
+          max-height: 85vh; display: flex; flex-direction: column;
+          box-shadow: 0 12px 40px rgba(0,0,0,0.25); overflow: hidden;
+        }
+        .ag-modal-hd {
+          background: #2C2C2C; color: #fff; padding: 14px 20px;
+          display: flex; align-items: center; gap: 10px;
+        }
+        .ag-modal-hd h2 { margin: 0; font-size: 1rem; font-weight: 700; }
+        .ag-modal-x {
+          margin-left: auto; background: transparent; border: none; cursor: pointer;
+          color: rgba(255,255,255,0.6); font-size: 1.4rem; line-height: 1; padding: 0 4px;
+        }
+        .ag-modal-x:hover { color: #fff; }
+        .ag-modal-body { padding: 1.25rem 1.5rem; overflow-y: auto; }
+        .ag-modal-lead { margin: 0 0 1rem; font-size: 0.88rem; color: #666; line-height: 1.55; }
+        .ag-modal-ft {
+          display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+          padding: 1rem 1.5rem; border-top: 1px solid #E8E8E8; background: #FAFAFA;
+        }
+        .ag-modal-total {
+          margin-right: auto; font-weight: 700; color: #2C2C2C;
+          font-variant-numeric: tabular-nums;
+        }
+        .ag-btn-cancel {
+          background: #fff; border: 1px solid #E0E0E0; border-radius: 6px;
+          padding: 0.55rem 1.1rem; font-size: 0.9rem; font-weight: 600;
+          color: #666; cursor: pointer;
+        }
+        .ag-btn-cancel:hover { border-color: #C0C0C0; color: #2C2C2C; }
+        .ag-quote--off td { opacity: 0.55; }
+        .ag-quote-reason { font-size: 0.75rem; color: #B45309; margin-top: 2px; }
 
         .ag-alert { padding: 0.85rem 1.1rem; border-radius: 8px; font-size: 0.92rem; margin-bottom: 1rem; }
         .ag-alert--error { background: #FEF2F2; border: 1px solid #FECACA; color: #B91C1C; }

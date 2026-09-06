@@ -301,6 +301,50 @@ function WeekGrid({ legs, maintenance, conflicts, offset = 0, onDragWave }) {
   );
 }
 
+// ── Fleet ordering ───────────────────────────────────────────────────────────
+// Fleet split into home-base registers, bases alphabetical with "no base" last —
+// the order the fleet's own Airplane List uses. `order` decides the rows inside,
+// so the same grouping serves the source picker and the target table with their
+// two different sorts.
+function groupByBase(list, order) {
+  const map = new Map();
+  for (const ac of list) {
+    const key = ac.home_airport ?? '__none__';
+    if (!map.has(key)) map.set(key, { key, code: ac.home_airport || null, aircraft: [] });
+    map.get(key).aircraft.push(ac);
+  }
+  for (const g of map.values()) g.aircraft.sort(order);
+  return [...map.values()].sort((a, b) => {
+    if (!a.code && !b.code) return 0;
+    if (!a.code) return 1;
+    if (!b.code) return -1;
+    return a.code.localeCompare(b.code);
+  });
+}
+
+const byRegistration = (x, y) => (x.registration || '').localeCompare(y.registration || '');
+
+// Named aircraft alphabetically, the unnamed ahead of them — up top they read as
+// the frames still waiting for a name, rather than sorting under an empty string
+// somewhere nobody looks. Registration breaks ties.
+const byName = (x, y) => {
+  const nx = (x.name || '').trim();
+  const ny = (y.name || '').trim();
+  if (!nx !== !ny) return nx ? 1 : -1;
+  return nx.localeCompare(ny) || byRegistration(x, y);
+};
+
+// What each sortable column of the target table compares on. Strings throughout —
+// the columns here are all text or a two-state flag, so one comparator covers them.
+const TARGET_SORT = {
+  status:       (a) => (a.is_active ? '0' : '1'),
+  registration: (a) => a.registration || '',
+  name:         (a) => (a.name || '').trim(),
+  type:         (a) => a.full_name || '',
+  cabin:        (a) => a.airline_cabin_profile_name || '',
+  location:     (a) => a.current_location || a.home_airport || '',
+};
+
 // ── Offsets ──────────────────────────────────────────────────────────────────
 // An offset is typed the way the switch says: a clock distance "HH:MM", or a
 // whole number of days. Either may be signed to move the week backwards. An
@@ -356,11 +400,21 @@ function CopyScheduleTab({ fleet, airports, airportName, headers, setError, setS
 
   const [targetIds, setTargetIds] = useState([]);
   const [collapsedBases, setCollapsedBases] = useState(() => new Set());
+  // One sort for every base register, so the table reads as a single setting
+  // rather than each accordion remembering its own order.
+  const [sortCol, setSortCol] = useState('registration');
+  const [sortDir, setSortDir] = useState('asc');
 
   // 'time' = HH:MM offsets, 'days' = whole days. One switch for the whole list, so
   // a group is staggered in one unit rather than a mix nobody can read back.
   const [mode, setMode] = useState('time');
   const [shiftText, setShiftText] = useState({});
+  // Each aircraft's name as it will read after the write, seeded with what it is
+  // called now — so an edit is a rename and a cleared field a deliberate erase.
+  const [nameText, setNameText] = useState({});
+  // Off by default: a copy writes schedules, and putting aircraft into the air is
+  // a separate decision the player makes on purpose.
+  const [activate, setActivate] = useState(false);
 
   const [plan, setPlan] = useState(null);
   const [computing, setComputing] = useState(false);
@@ -412,22 +466,30 @@ function CopyScheduleTab({ fleet, airports, airportName, headers, setError, setS
 
   const srcOffset = source ? offsetOf(source.home_airport) : 0;
 
+  // The picker is read looking for a base first and a name second, so it carries
+  // the base as the group label and orders the aircraft by name inside it.
+  const sourceGroups = useMemo(() => groupByBase(usable, byName), [usable]);
+
   // ── Targets ───────────────────────────────────────────────────────────────
   const groupedFleet = useMemo(() => {
-    const map = new Map();
-    for (const ac of usable) {
-      if (source && ac.id === source.id) continue;
-      const key = ac.home_airport ?? '__none__';
-      if (!map.has(key)) map.set(key, { key, code: ac.home_airport || null, aircraft: [] });
-      map.get(key).aircraft.push(ac);
-    }
-    return [...map.values()].sort((a, b) => {
-      if (!a.code && !b.code) return 0;
-      if (!a.code) return 1;
-      if (!b.code) return -1;
-      return a.code.localeCompare(b.code);
-    });
-  }, [usable, source]);
+    const rows = source ? usable.filter(ac => ac.id !== source.id) : usable;
+    const key = TARGET_SORT[sortCol] || TARGET_SORT.registration;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    // Registration breaks every tie, so equal names or cabins keep a stable,
+    // readable order instead of shuffling between renders.
+    return groupByBase(rows, (a, b) =>
+      dir * (String(key(a)).localeCompare(String(key(b))) || byRegistration(a, b)));
+  }, [usable, source, sortCol, sortDir]);
+
+  const handleSort = (col) => {
+    if (sortCol === col) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortCol(col); setSortDir('asc'); }
+  };
+  const SortIcon = ({ col }) => (
+    <span className={`ag-sort-icon${sortCol === col ? ' ag-sort-icon--on' : ''}`}>
+      {sortCol === col ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
+    </span>
+  );
 
   const toggleTarget = (id) => {
     clearPlan();
@@ -461,6 +523,42 @@ function CopyScheduleTab({ fleet, airports, airportName, headers, setError, setS
 
   const badOffsets = selectedTargets.filter(ac => offsets[ac.id]?.error);
 
+  // Newly selected aircraft bring their current name into the field. Aircraft that
+  // were deselected keep theirs, so re-picking one restores the edit rather than
+  // silently reverting it.
+  useEffect(() => {
+    setNameText(prev => {
+      const next = { ...prev };
+      let changed = false;
+      for (const ac of selectedTargets) {
+        if (!(ac.id in next)) { next[ac.id] = ac.name || ''; changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [selectedTargets]);
+
+  // The name only travels with the request when it actually differs — an unchanged
+  // field must not turn into a write that touches every aircraft in the group.
+  const targetPayload = useCallback(() => selectedTargets.map(ac => {
+    const typed = (nameText[ac.id] ?? ac.name ?? '').trim();
+    return {
+      aircraft_id: ac.id,
+      shift_minutes: offsets[ac.id].minutes,
+      ...(typed === (ac.name || '').trim() ? {} : { aircraft_name: typed }),
+    };
+  }), [selectedTargets, nameText, offsets]);
+
+  // Two of the three operating prerequisites are knowable here; the schedule is
+  // what the copy is about to supply, and expansion capacity only the server can
+  // answer. Shown per row so a blocked activation is visible before the write.
+  const missingFor = (ac) => {
+    const gaps = [];
+    if (!ac.airline_cabin_profile_id) gaps.push('cabin profile');
+    if (!ac.crew_assigned) gaps.push('crew');
+    return gaps;
+  };
+  const notReady = activate ? selectedTargets.filter(ac => missingFor(ac).length) : [];
+
   // The unit changes what the same digits mean, so the fields start over rather
   // than silently reinterpreting "2" from 2 days into an invalid clock time.
   const switchMode = (next) => {
@@ -485,7 +583,7 @@ function CopyScheduleTab({ fleet, airports, airportName, headers, setError, setS
     setComputing(true);
     const res = await request('/api/aircraft-groups/copy-plan', {
       source_aircraft_id: source.id,
-      targets: selectedTargets.map(ac => ({ aircraft_id: ac.id, shift_minutes: offsets[ac.id].minutes })),
+      targets: targetPayload(),
     }, setError);
     setComputing(false);
     if (!res) return;
@@ -500,9 +598,12 @@ function CopyScheduleTab({ fleet, airports, airportName, headers, setError, setS
   const commitCopy = async () => {
     setError(''); setSuccess('');
     setCommitting(true);
+    // The same payload the preview was built from, so what is written is what was
+    // shown — the names included.
     const res = await request('/api/aircraft-groups/copy-commit', {
       source_aircraft_id: plan.source.aircraft_id,
-      targets: plan.targets.map(t => ({ aircraft_id: t.aircraft_id, shift_minutes: t.shift_minutes })),
+      targets: targetPayload(),
+      activate,
     }, setError);
     setCommitting(false);
     if (!res) return;
@@ -522,6 +623,7 @@ function CopyScheduleTab({ fleet, airports, airportName, headers, setError, setS
     clearPlan();
     setTargetIds([]);
     setShiftText({});
+    setNameText({});
     onWritten?.();
   };
 
@@ -556,11 +658,15 @@ function CopyScheduleTab({ fleet, airports, airportName, headers, setError, setS
             <label>Aircraft to copy from</label>
             <select value={sourceId} onChange={e => selectSource(e.target.value)}>
               <option value="">— select aircraft —</option>
-              {usable.map(a => (
-                <option key={a.id} value={a.id}>
-                  {a.registration}{a.name ? ` – ${a.name}` : ''} · {a.full_name}
-                  {a.home_airport ? ` · ${a.home_airport}` : ''}
-                </option>
+              {sourceGroups.map(g => (
+                <optgroup key={g.key}
+                  label={g.code ? `${g.code}${airportName(g.code) ? ` — ${airportName(g.code)}` : ''}` : 'No Home Base'}>
+                  {g.aircraft.map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.name ? `${a.name} · ` : ''}{a.registration} · {a.full_name}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           </div>
@@ -636,9 +742,25 @@ function CopyScheduleTab({ fleet, airports, airportName, headers, setError, setS
                           <thead>
                             <tr>
                               <th style={{ width: 34 }} />
-                              <th style={{ width: 24 }} />
-                              <th>Registration</th><th>Name</th><th>Type</th>
-                              <th>Cabin</th><th>Location</th>
+                              <th className="ag-sortable" style={{ width: 24 }}
+                                onClick={() => handleSort('status')} title="Sort by operating status">
+                                <SortIcon col="status" />
+                              </th>
+                              <th className="ag-sortable" onClick={() => handleSort('registration')}>
+                                Registration<SortIcon col="registration" />
+                              </th>
+                              <th className="ag-sortable" onClick={() => handleSort('name')}>
+                                Name<SortIcon col="name" />
+                              </th>
+                              <th className="ag-sortable" onClick={() => handleSort('type')}>
+                                Type<SortIcon col="type" />
+                              </th>
+                              <th className="ag-sortable" onClick={() => handleSort('cabin')}>
+                                Cabin<SortIcon col="cabin" />
+                              </th>
+                              <th className="ag-sortable" onClick={() => handleSort('location')}>
+                                Location<SortIcon col="location" />
+                              </th>
                             </tr>
                           </thead>
                           <tbody>
@@ -699,13 +821,21 @@ function CopyScheduleTab({ fleet, airports, airportName, headers, setError, setS
 
           {selectedTargets.length > 0 && (
             <div className="ag-shifts">
+              <div className="ag-shift-hd">
+                <span>Aircraft</span>
+                <em>name · offset</em>
+              </div>
               {selectedTargets.map(ac => {
                 const parsed = offsets[ac.id] || {};
+                const gaps = activate ? missingFor(ac) : [];
                 return (
-                  <div key={ac.id} className="ag-shift-row">
-                    <span className="ag-shift-bank">
-                      {ac.registration}{ac.name ? ` · ${ac.name}` : ''}
-                    </span>
+                  <div key={ac.id} className={`ag-shift-row${gaps.length ? ' ag-shift-row--warn' : ''}`}>
+                    <span className="ag-shift-reg">{ac.registration}</span>
+                    <input
+                      className="ag-name-inp" type="text" maxLength={60} placeholder="No name"
+                      value={nameText[ac.id] ?? ac.name ?? ''}
+                      onChange={e => { clearPlan(); setNameText(n => ({ ...n, [ac.id]: e.target.value })); }}
+                    />
                     <input
                       className={`ag-shift-inp${parsed.error ? ' ag-shift-inp--bad' : ''}`}
                       type="text"
@@ -717,9 +847,33 @@ function CopyScheduleTab({ fleet, airports, airportName, headers, setError, setS
                     {parsed.error
                       ? <span className="ag-tag ag-tag--warn">{parsed.error}</span>
                       : <span className="ag-shift-info">{offsetLabel(parsed.minutes || 0)}</span>}
+                    {gaps.length > 0 && (
+                      <span className="ag-tag ag-tag--warn">no {gaps.join(', no ')}</span>
+                    )}
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {selectedTargets.length > 0 && (
+            <label className="ag-check">
+              <input type="checkbox" checked={activate} onChange={e => setActivate(e.target.checked)} />
+              <span>
+                <strong>Put into operation after writing</strong>
+                <em>
+                  Every listed aircraft goes into service once its schedule is written. Without this,
+                  each one keeps the state it has now — a grounded aircraft stays grounded.
+                </em>
+              </span>
+            </label>
+          )}
+
+          {notReady.length > 0 && (
+            <div className="ag-note ag-note--warn" style={{ marginTop: '0.75rem' }}>
+              ⚠ {notReady.length} of the selected aircraft cannot be put into operation yet —
+              {' '}{notReady.map(ac => `${ac.registration} (no ${missingFor(ac).join(', no ')})`).join(', ')}.
+              The schedules are still written; assign what is missing and activate them from the fleet list.
             </div>
           )}
 
@@ -812,7 +966,9 @@ function CopyScheduleTab({ fleet, airports, airportName, headers, setError, setS
             <div className="ag-commit">
               <div className="ag-commit-note">
                 Writing replaces the whole weekly schedule of every listed aircraft — flights and
-                maintenance. Aircraft that were grounded stay grounded with the new schedule written.
+                maintenance. {activate
+                  ? 'All of them are then put into operation; any that cannot be are reported and stay grounded.'
+                  : 'Aircraft that were grounded stay grounded with the new schedule written.'}
               </div>
               <button className="ag-btn-primary" onClick={commitCopy}
                 disabled={committing || blocked.length > 0 || plan.targets.length === 0}>
@@ -1890,6 +2046,32 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
           flex-shrink: 0; white-space: nowrap;
         }
         .ag-status-dot--on { background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,0.28); }
+
+        /* Sortable column heads, same behaviour as the fleet overview table */
+        .ag-sortable { cursor: pointer; user-select: none; transition: background 0.12s, color 0.12s; }
+        .ag-sortable:hover { background: #F0F0F0; color: #2C2C2C; }
+        .ag-sort-icon { margin-left: 4px; opacity: 0.3; }
+        .ag-sort-icon--on { opacity: 1; }
+
+        /* Shift rows carry a name field, so the registration shrinks to a label
+           and the name takes the space the registration used to have. */
+        .ag-shift-reg {
+          font-family: monospace; font-weight: 700; color: #2C2C2C;
+          font-size: 0.85rem; letter-spacing: 0.02em; flex: 0 0 auto; white-space: nowrap;
+        }
+        .ag-shift-row .ag-name-inp { flex: 1 1 140px; min-width: 90px; }
+
+        .ag-check {
+          display: flex; gap: 0.6rem; align-items: flex-start; cursor: pointer;
+          margin-top: 1rem; padding: 0.7rem 0.85rem;
+          background: #F9F9F9; border: 1px solid #E8E8E8; border-radius: 6px;
+        }
+        .ag-check input { accent-color: #2C2C2C; margin-top: 2px; flex-shrink: 0; }
+        .ag-check strong { display: block; font-size: 0.86rem; color: #2C2C2C; }
+        .ag-check em {
+          display: block; margin-top: 2px; font-style: normal;
+          font-size: 0.78rem; color: #888; line-height: 1.45;
+        }
 
         .ag-alert { padding: 0.85rem 1.1rem; border-radius: 8px; font-size: 0.92rem; margin-bottom: 1rem; }
         .ag-alert--error { background: #FEF2F2; border: 1px solid #FECACA; color: #B91C1C; }

@@ -518,11 +518,17 @@ async function buildCopy(airlineId, body) {
     if (!Number.isFinite(shift) || Math.abs(shift) > 8 * WEEK) {
       return { error: 'Invalid offset on a target aircraft' };
     }
-    wanted.push({ id, shift });
+    // The name field shows what the aircraft will be called, so an empty one is a
+    // deliberate erase; only an absent field leaves the current name alone.
+    const rename = typeof t?.aircraft_name === 'string'
+      ? { name: t.aircraft_name.trim().slice(0, 60) || null }
+      : null;
+    wanted.push({ id, shift, rename });
   }
 
   const acResult = await pool.query(`
     SELECT a.id, a.registration, a.name, a.is_active, a.home_airport,
+           a.airline_cabin_profile_id, a.crew_assigned,
            t.wake_turbulence_category, t.range_km, t.full_name, t.max_passengers,
            t.min_runway_takeoff_m, t.min_runway_landing_m
     FROM aircraft a JOIN aircraft_types t ON a.aircraft_type_id = t.id
@@ -589,7 +595,7 @@ async function buildCopy(airlineId, body) {
   });
   const srcMaint = maintResult.rows[0] || null;
 
-  const results = wanted.map(({ id, shift }) => {
+  const results = wanted.map(({ id, shift, rename }) => {
     const ac = byId.get(id);
     const pad = BANK_TURNAROUND[ac.wake_turbulence_category] || 40;
     const warnings = [];
@@ -609,9 +615,18 @@ async function buildCopy(airlineId, body) {
       }
     }
     const base = {
-      aircraft_id: id, registration: ac.registration, name: ac.name,
+      aircraft_id: id, registration: ac.registration,
+      // What it will be called after the write, so the preview and the fleet list
+      // agree the moment the copy lands.
+      name: rename ? rename.name : ac.name,
+      rename: !!rename,
       full_name: ac.full_name, home_airport: ac.home_airport,
       was_active: !!ac.is_active, shift_minutes: shift,
+      // Two of the three operating prerequisites; the third (a non-empty weekly
+      // schedule) is what this copy is about to give it. Expansion capacity is
+      // only knowable at activation time, so it stays the server's answer.
+      has_cabin_profile: !!ac.airline_cabin_profile_id,
+      has_crew: !!ac.crew_assigned,
     };
     if (reasons.size) {
       return { ...base, legs: [], maintenance: null, warnings: [], error: `Cannot fly this schedule: ${[...reasons].join(', ')}` };
@@ -776,6 +791,11 @@ router.post('/copy-commit', authMiddleware, async (req, res) => {
           `, values);
         }
 
+        if (t.rename) {
+          await client.query('UPDATE aircraft SET name = $1 WHERE id = $2 AND airline_id = $3',
+            [t.name, t.aircraft_id, airlineId]);
+        }
+
         if (t.maintenance) {
           // Mirror maintenance.js: a slot that already passed this week is marked
           // completed so the processor bills it next week instead of instantly.
@@ -797,13 +817,18 @@ router.post('/copy-commit', authMiddleware, async (req, res) => {
       client.release();
     }
 
-    // Restore the previous operating state. An aircraft that was parked stays
-    // parked with its new schedule written — copying must never put one into the
-    // air behind the player's back. The write is already committed, so a failed
-    // reactivation is reported, not rolled back.
+    // By default the previous operating state is restored: an aircraft that was
+    // parked stays parked with its new schedule written, because copying must
+    // never put one into the air behind the player's back. `activate` is that
+    // decision made explicitly, and then every aircraft in the copy goes into
+    // service. The write is already committed either way, so an aircraft that
+    // cannot be activated (no crew, no cabin profile, expansion capacity) is
+    // reported rather than rolled back — the player fixes the cause and flips it
+    // themselves.
+    const activateAll = req.body.activate === true;
     const activation = [];
     for (const t of writable) {
-      if (!t.was_active) {
+      if (!activateAll && !t.was_active) {
         activation.push({ aircraft_id: t.aircraft_id, registration: t.registration, activated: false, left_grounded: true, error: null });
         continue;
       }

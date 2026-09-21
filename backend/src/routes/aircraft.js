@@ -1253,7 +1253,13 @@ router.get('/:id/schedule', authMiddleware, async (req, res) => {
              r.economy_price, r.business_price, r.first_price, r.service_profile_id,
              r.created_at,
              dep.runway_length_m AS dep_runway_m,
-             arr.runway_length_m AS arr_runway_m
+             arr.runway_length_m AS arr_runway_m,
+             COALESCE((
+               SELECT COUNT(*)
+               FROM weekly_schedule ws
+               JOIN aircraft a2 ON a2.id = ws.aircraft_id
+               WHERE ws.route_id = r.id AND a2.airline_id = $1
+             ), 0) AS weekly_flights
       FROM routes r
       LEFT JOIN airports dep ON dep.iata_code = r.departure_airport
       LEFT JOIN airports arr ON arr.iata_code = r.arrival_airport
@@ -1269,6 +1275,8 @@ router.get('/:id/schedule', authMiddleware, async (req, res) => {
       estimated_duration: calculateFlightDuration(row.distance_km),
       dep_runway_m: row.dep_runway_m ?? null,
       arr_runway_m: row.arr_runway_m ?? null,
+      // Fleet-wide weekly legs already scheduled on this route (all aircraft).
+      weekly_flights: parseInt(row.weekly_flights) || 0,
     }));
 
     const schedResult = await pool.query(`

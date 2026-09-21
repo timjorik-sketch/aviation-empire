@@ -2283,14 +2283,28 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     return out;
   }, [routes]);
 
+  // Marker in front of every route option, so the closed dropdown shows at a
+  // glance whether the route is already flown:
+  //   ●  already planned   ○  not planned yet   ⚠  out of range (disabled)
+  // r.weekly_flights counts the fleet's weekly legs on this route — used as a
+  // yes/no flag only.
   const renderRouteOption = (r, keyPrefix = '') => {
     const outOfRange = aircraftRange && r.distance_km > aircraftRange;
+    const marker = outOfRange ? '⚠' : (r.weekly_flights ?? 0) ? '●' : '○';
     return (
       <option key={`${keyPrefix}${r.id}`} value={r.id} disabled={outOfRange}>
-        {outOfRange ? '⚠ ' : ''}{r.flight_number}: {r.departure_airport} → {r.arrival_airport} ({(r.distance_km ?? '?').toLocaleString()} km{outOfRange ? ' — exceeds range' : ''})
+        {marker} {r.flight_number}: {r.departure_airport} → {r.arrival_airport} ({(r.distance_km ?? '?').toLocaleString()} km{outOfRange ? ' — exceeds range' : ''})
       </option>
     );
   };
+
+  // Shared legend, placed under each route picker.
+  const routeLegend = (
+    <div className="sched-route-legend">
+      <span><b>●</b> already planned</span>
+      <span><b>○</b> not planned</span>
+    </div>
+  );
 
   const routeInRange = (routeId) => {
     if (!routeId || !aircraftRange) return true;
@@ -3033,6 +3047,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     </optgroup>
                   </select>
                 </div>
+                {routeLegend}
               </div>
 
               <div className="sched-section-hd">Timing</div>
@@ -3134,6 +3149,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     </optgroup>
                   </select>
                 </div>
+                {routeLegend}
               </div>
 
               <div className="sched-section-hd">Timing</div>
@@ -3315,6 +3331,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     <optgroup label="All routes">{routes.map(r => renderRouteOption(r, 'bank-all-'))}</optgroup>
                   </select>
                 </div>
+                {routeLegend}
                 {bankForwardRouteId && (
                   <div className="sched-bank-return">
                     {bankReturnRouteId
@@ -4914,6 +4931,11 @@ const styles = `
   .sched-form-row input:focus { outline: none; border-color: #2C2C2C; }
   .sched-form-row.price-disabled label { color: #BBBBBB; }
   .sched-range-warn { color: #c2410c; font-weight: 700; font-size: 0.72rem; margin-left: 6px; text-transform: none; letter-spacing: 0; }
+  .sched-route-legend {
+    display: flex; flex-wrap: wrap; gap: 4px 14px;
+    margin-top: 0.4rem; font-size: 0.7rem; color: #888888;
+  }
+  .sched-route-legend b { color: #2C2C2C; font-weight: 700; margin-right: 3px; }
   .sched-no-cabin-warning {
     display: flex; gap: 14px; align-items: flex-start;
     margin: 16px; padding: 16px;

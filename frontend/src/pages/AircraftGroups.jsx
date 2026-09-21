@@ -1714,11 +1714,13 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
                 <select value={fwdRouteId} onChange={e => setFwdRouteId(e.target.value)}>
                   <option value="">— select route —</option>
                   {routes.map(r => (
+                    // ● already planned, ○ not planned yet.
                     <option key={r.id} value={r.id}>
-                      {r.flight_number}: {r.departure_airport} → {r.arrival_airport} ({(r.distance_km ?? 0).toLocaleString()} km)
+                      {(r.weekly_flights ?? 0) ? '●' : '○'} {r.flight_number}: {r.departure_airport} → {r.arrival_airport} ({(r.distance_km ?? 0).toLocaleString()} km)
                     </option>
                   ))}
                 </select>
+                <div className="ag-route-legend"><span><b>●</b> already planned</span><span><b>○</b> not planned</span></div>
               </div>
               {fwdRoute && (
                 <div className={`ag-note${retRoute ? '' : ' ag-note--warn'}`}>
@@ -2311,6 +2313,11 @@ function AircraftGroups({ airline, onBack, backLabel = 'Fleet' }) {
         }
         .ag-field select:focus, .ag-field input:focus { outline: none; border-color: #2C2C2C; }
         .ag-field--off label, .ag-field--off input { opacity: 0.45; }
+        .ag-route-legend {
+          display: flex; flex-wrap: wrap; gap: 4px 14px;
+          margin-top: 0.35rem; font-size: 0.74rem; color: #888888;
+        }
+        .ag-route-legend b { color: #2C2C2C; font-weight: 700; margin-right: 3px; }
 
         .ag-note {
           background: #F5F5F5; border: 1px solid #E0E0E0; border-radius: 6px;

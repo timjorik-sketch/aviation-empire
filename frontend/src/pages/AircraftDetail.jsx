@@ -4862,13 +4862,13 @@ const styles = `
   .ad-hour-line { position: absolute; left: 0; right: 0; height: 1px; background: #E8E8E8; pointer-events: none; z-index: 0; }
   .ad-halfhour-line { position: absolute; left: 0; right: 0; height: 1px; border-top: 1px dashed #EEEEEE; pointer-events: none; z-index: 0; }
   .ad-grid-col:last-child { border-right: none; }
-  /* "Show Banks" overlay — arrival window blue, departure window amber */
+  /* "Show Banks" overlay — arrival window sky blue, departure window navy */
   .ad-bank-band { position: absolute; left: 0; right: 0; z-index: 0; pointer-events: none; box-sizing: border-box; }
-  .ad-bank-band--arr { background-color: rgba(37,99,235,0.07); background-image: repeating-linear-gradient(135deg, rgba(37,99,235,0.2) 0 2px, transparent 2px 7px); border-top: 1px solid rgba(37,99,235,0.45); border-bottom: 1px solid rgba(37,99,235,0.45); }
-  .ad-bank-band--dep { background-color: rgba(217,119,6,0.07); background-image: repeating-linear-gradient(45deg, rgba(217,119,6,0.22) 0 2px, transparent 2px 7px); border-top: 1px solid rgba(217,119,6,0.5); border-bottom: 1px solid rgba(217,119,6,0.5); }
+  .ad-bank-band--arr { background-color: rgba(14,165,233,0.07); background-image: repeating-linear-gradient(135deg, rgba(14,165,233,0.2) 0 2px, transparent 2px 7px); border-top: 1px solid rgba(14,165,233,0.45); border-bottom: 1px solid rgba(14,165,233,0.45); }
+  .ad-bank-band--dep { background-color: rgba(30,58,138,0.06); background-image: repeating-linear-gradient(45deg, rgba(30,58,138,0.2) 0 2px, transparent 2px 7px); border-top: 1px solid rgba(30,58,138,0.5); border-bottom: 1px solid rgba(30,58,138,0.5); }
   .ad-bank-band-lbl { position: absolute; top: 1px; left: 3px; font-size: 8px; font-weight: 700; letter-spacing: 0.03em; white-space: nowrap; overflow: hidden; max-width: calc(100% - 6px); text-overflow: ellipsis; }
-  .ad-bank-band--arr .ad-bank-band-lbl { color: rgb(37,99,235); }
-  .ad-bank-band--dep .ad-bank-band-lbl { color: rgb(180,83,9); }
+  .ad-bank-band--arr .ad-bank-band-lbl { color: rgb(2,132,199); }
+  .ad-bank-band--dep .ad-bank-band-lbl { color: rgb(30,58,138); }
   .ad-bank-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 6px 12px; font-size: 0.72rem; color: #666; border-bottom: 1px solid #EEEEEE; background: #FAFAFA; }
   .ad-bank-sw { position: static; display: inline-block; width: 18px; height: 10px; margin-right: 6px; vertical-align: -1px; border-radius: 2px; }
   .ad-bank-legend-names { color: #999; }

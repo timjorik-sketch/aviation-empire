@@ -44,7 +44,8 @@ export function legLocalTimes(e) {
 
 // Distinct colour per bank within its hub (banks ordered by arrival window),
 // as an "r,g,b" triplet for use in rgba() / CSS variables.
-export const BANK_COLORS = ['37,99,235', '217,119,6', '22,163,74', '147,51,234', '225,29,72'];
+// Kept within the blue range: navy, mid blue, cyan, indigo, slate.
+export const BANK_COLORS = ['30,58,138', '59,130,246', '6,182,212', '99,102,241', '100,116,139'];
 
 export function bankColorMap(banks) {
   const byHub = {};

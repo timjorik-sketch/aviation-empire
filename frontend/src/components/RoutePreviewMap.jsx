@@ -92,8 +92,8 @@ export default function RoutePreviewMap({ dep, arr, routes, hubs, homeAirport, c
     });
 
     L.tileLayer(
-      'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
-      { attribution: '© OpenStreetMap contributors © CARTO', maxZoom: 19, subdomains: 'abcd' }
+      'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+      { attribution: 'Tiles © Esri — Esri, HERE, Garmin, © OpenStreetMap contributors', maxNativeZoom: 16, maxZoom: 19 }
     ).addTo(map);
 
     routeLayerRef.current = L.layerGroup().addTo(map);

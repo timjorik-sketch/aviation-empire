@@ -66,8 +66,8 @@ function planeIcon(deg, color = '#26A9F0') {
 
 const TILE_LAYERS = {
   dark: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
-    options: { attribution: '© OpenStreetMap contributors © CARTO', maxZoom: 19, subdomains: 'abcd' },
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    options: { attribution: 'Tiles © Esri — Esri, HERE, Garmin, © OpenStreetMap contributors', maxNativeZoom: 16, maxZoom: 19 },
   },
   satellite: {
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',

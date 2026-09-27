@@ -1275,8 +1275,6 @@ async function processFlights() {
   _tickCount++;
   const tickStart = Date.now();
   try {
-    await patchNullSatisfactionScores();
-
     const now = new Date();
 
     // Heartbeat: log queue sizes once per minute so we can verify the
@@ -2260,6 +2258,10 @@ function startFlightProcessor() {
   backfillFuelPrices();
   scheduleAtMinute13(generateFuelPrice, 'FuelPrice');
   scheduleAtMinute13(pruneOldFlights, 'Prune');
+  // Safety net only — flights get their score when generated, so this rarely
+  // finds anything. Hourly is plenty.
+  scheduleAtMinute13(() => patchNullSatisfactionScores().catch(err =>
+    console.error('patchNullSatisfactionScores error:', err)), 'SatBackfill');
   // Process flight statuses on the central cadence (see config/intervals.js).
   flightProcessorInterval = setInterval(processFlights, FLIGHT_PROCESSOR_MS);
   setTimeout(processFlights, 1000);

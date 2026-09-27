@@ -480,14 +480,6 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
           background-image: repeating-linear-gradient(135deg, rgba(var(--bk), 0.16) 0 2px, transparent 2px 7px);
         }
         .fs-dist-row--bank .fs-dist-time { box-shadow: inset 3px 0 0 rgba(var(--bk), 0.7); }
-        .fs-dist-time { flex-direction: column; gap: 3px; }
-        .fs-bank-tag {
-          font-family: inherit; font-size: 9px; font-weight: 700;
-          text-transform: uppercase; letter-spacing: 0.04em;
-          color: rgb(var(--bk)); background: rgba(255,255,255,0.9);
-          border: 1px solid rgba(var(--bk), 0.45); border-radius: 3px; padding: 0 4px;
-          white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
-        }
         .fs-bank-legend {
           display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
           padding: 8px 20px; font-size: 0.72rem; color: #777;
@@ -679,11 +671,9 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
                     const arrow = distMode === 'departure' ? '→' : '←';
                     return (
                       <div key={row.time} className={`fs-dist-row${row.banks.length ? ' fs-dist-row--bank' : ''}`} style={bankStyle(row.banks[0])}>
-                        <span className="fs-dist-time">
+                        <span className="fs-dist-time"
+                          title={row.banks.length ? row.banks.map(b => `${b.name} · ${distMode === 'departure' ? 'departure' : 'arrival'} window`).join('\n') : undefined}>
                           {row.time}
-                          {row.banks.map(b => (
-                            <span key={b.id} className="fs-bank-tag" style={bankStyle(b)} title={`${b.name} · ${distMode === 'departure' ? 'departure' : 'arrival'} window`}>{b.name}</span>
-                          ))}
                         </span>
                         {DAY_LABELS.map((_, di) => {
                           const cell = row.days[di] || [];

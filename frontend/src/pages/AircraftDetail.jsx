@@ -161,6 +161,7 @@ const DELAY_REASON_SHORT = {
   wrong_location:  'Wrong Location',
   cascade:         'Cascade',
   medical_cascade: 'Medical Cascade',
+  late_inbound:    'Late Inbound',
 };
 
 // Compact "+X" or "+XhY" form for the delay amount.

@@ -9,13 +9,11 @@ router.get('/', authMiddleware, async (req, res) => {
   try {
     const airlineId = req.airlineId;
 
-    // 1) Passengers — total seats_sold from completed flights
+    // 1) Passengers — lifetime counter (flights rows are pruned after 7 days)
     const passengersRes = await pool.query(`
       SELECT a.id AS airline_id, a.name, a.airline_code, a.home_airport_code,
-             COALESCE(SUM(f.seats_sold), 0)::INTEGER AS total_passengers
+             COALESCE(a.total_passengers_lifetime, 0)::INTEGER AS total_passengers
       FROM airlines a
-      LEFT JOIN flights f ON f.airline_id = a.id AND f.status = 'completed'
-      GROUP BY a.id, a.name, a.airline_code, a.home_airport_code
       ORDER BY total_passengers DESC
     `);
 

@@ -10,6 +10,7 @@ import {
   calcCancelCosts,
   logDelayEvent,
   diversionGeoFraction,
+  getTurnaround,
 } from '../utils/delaySystem.js';
 import { getAirports } from '../utils/airportCache.js';
 import { FLIGHT_PROCESSOR_MS } from '../config/intervals.js';
@@ -1170,6 +1171,7 @@ async function patchNullSatisfactionScores() {
         atc:              10,
         medical:          5,
         technical_air:    10,
+        late_inbound:     10,
       };
       const m = malusByReason[f.delay_reason] || 0;
       if (m) finalScore = Math.max(0, finalScore - m);
@@ -1551,9 +1553,13 @@ async function processFlights() {
               `UPDATE aircraft SET
                  current_location = $1,
                  total_flight_hours = total_flight_hours + $2::float8,
-                 condition = GREATEST(0, ROUND((condition - $3::float8)::numeric, 2))
+                 condition = GREATEST(0, ROUND((condition - $3::float8)::numeric, 2)),
+                 lifetime_flights    = COALESCE(lifetime_flights, 0) + 1,
+                 lifetime_passengers = COALESCE(lifetime_passengers, 0) + $5,
+                 lifetime_profit     = COALESCE(lifetime_profit, 0) + $6
                WHERE id = $4`,
-              [flight.arrival_airport || null, flightHours, condLoss, flight.aircraft_id]
+              [flight.arrival_airport || null, flightHours, condLoss, flight.aircraft_id,
+               flight.seats_sold || 0, (flight.flight_revenue || 0) - fuelCost - atcFee - landingFee - groundHandling - cateringCost]
             );
           } catch (err) {
             console.error(`[FlightProc] aircraft update failed for flight ${flight.id} (ac ${flight.aircraft_id}):`, err.message);
@@ -1595,9 +1601,13 @@ async function processFlights() {
               `UPDATE aircraft SET
                  current_location = $1,
                  total_flight_hours = total_flight_hours + $2::float8,
-                 condition = GREATEST(0, ROUND((condition - $3::float8)::numeric, 2))
+                 condition = GREATEST(0, ROUND((condition - $3::float8)::numeric, 2)),
+                 lifetime_flights    = COALESCE(lifetime_flights, 0) + 1,
+                 lifetime_passengers = COALESCE(lifetime_passengers, 0) + $5,
+                 lifetime_profit     = COALESCE(lifetime_profit, 0) + $6
                WHERE id = $4`,
-              [flight.arrival_airport || null, flightHours, condLoss, flight.aircraft_id]
+              [flight.arrival_airport || null, flightHours, condLoss, flight.aircraft_id,
+               flight.seats_sold || 0, netRevenue - cateringCost]
             );
           } catch (err) {
             console.error(`[FlightProc] aircraft update failed for flight ${flight.id} (ac ${flight.aircraft_id}):`, err.message);
@@ -1680,7 +1690,21 @@ async function processFlights() {
         al.maintenance_program, al.ground_handling_level,
         at.wake_turbulence_category AS wake_cat,
         at.min_runway_landing_m AS min_runway,
-        dep_apt.category AS dep_category
+        dep_apt.category AS dep_category,
+        EXISTS (
+          SELECT 1 FROM flights p
+          WHERE p.aircraft_id = f.aircraft_id AND p.id <> f.id
+            AND p.departure_time < f.departure_time
+            AND p.status IN ('scheduled', 'boarding', 'delayed', 'in-flight')
+        ) AS has_pending_earlier,
+        (
+          SELECT p.arrival_time FROM flights p
+          WHERE p.aircraft_id = f.aircraft_id AND p.id <> f.id
+            AND p.departure_time < f.departure_time
+            AND p.status = 'completed'
+          ORDER BY p.departure_time DESC
+          LIMIT 1
+        ) AS prev_arrival
       FROM flights f
       LEFT JOIN routes r           ON f.route_id           = r.id
       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
@@ -1691,6 +1715,7 @@ async function processFlights() {
       LEFT JOIN airports dep_apt   ON COALESCE(r.departure_airport, ws.departure_airport) = dep_apt.iata_code
       WHERE f.status = 'scheduled'
         AND f.departure_time <= $1::timestamptz + INTERVAL '15 minutes'
+      ORDER BY f.departure_time ASC
     `, [now.toISOString()]);
 
     const boardingCandidates = boardingCandidatesResult.rows;
@@ -1723,6 +1748,15 @@ async function processFlights() {
         console.log(`[FlightProc] ${f.flight_number} CANCELLED — aircraft ${f.aircraft_id} is grounded`);
         continue;
       }
+
+      // ── Aircraft still busy with an earlier leg: wait, don't judge location ──
+      // current_location only moves when the previous leg is marked completed.
+      // When the processor falls behind (slow DB, restart) it catches up with
+      // several legs of the same aircraft due in one tick; checking the later
+      // leg now would see the aircraft at the previous airport and cancel it
+      // as wrong_location, stranding the aircraft off-rotation. Leave it
+      // 'scheduled' — it is picked up again once the earlier leg has landed.
+      if (f.aircraft_id && f.has_pending_earlier) continue;
 
       // ── Aircraft can't operate this flight: wrong location OR in repair ──
       // All cancels caused by the aircraft being unavailable share the same
@@ -1759,6 +1793,33 @@ async function processFlights() {
 
         console.log(`[FlightProc] ${f.flight_number} CANCELLED wrong_location (${inRepair ? 'in repair' : `at ${f.current_location}`}), cost $${cost}`);
         continue;
+      }
+
+      // ── Knock-on delay: previous leg landed too late for a full turnaround ──
+      // Based on the legs' game times (arrival_time already carries any delay
+      // of the previous leg), not on when the processor got to it — so a
+      // processor backlog shifts nothing. Counts as this flight's delay event;
+      // no further random roll.
+      if (f.aircraft_id && f.prev_arrival) {
+        const readyAt = new Date(f.prev_arrival).getTime() + getTurnaround(f.wake_cat || 'M') * 60000;
+        const lateMin = Math.ceil((readyAt - new Date(f.departure_time).getTime()) / 60000);
+        if (lateMin > 0) {
+          await pool.query(
+            `UPDATE flights SET status = 'delayed',
+               departure_time = departure_time + ($1::int * INTERVAL '1 minute'),
+               arrival_time   = arrival_time   + ($1::int * INTERVAL '1 minute'),
+               delay_minutes = $1, delay_reason = 'late_inbound'
+             WHERE id = $2`,
+            [lateMin, f.id]
+          );
+          await logDelayEvent({
+            flightId: f.id, airlineId: f.airline_id, aircraftId: f.aircraft_id,
+            eventType: 'late_inbound', outcome: 'minor_delay',
+            delayMinutes: lateMin, cost: 0, satisfactionMalus: 10,
+          });
+          console.log(`[Delay] ${f.flight_number} late_inbound +${lateMin}min`);
+          continue;
+        }
       }
 
       // ── Roll delay/cancel/diversion event ──────────────────────────────
@@ -2104,6 +2165,51 @@ router.get('/dev/route-calc', authMiddleware, async (req, res) => {
   }
 });
 
+// Keep only the last 7 days of finished flights. Everything that needs a longer
+// horizon is kept as counters instead (airlines.total_*_lifetime,
+// aircraft.lifetime_*), incremented when a flight lands.
+const FLIGHT_RETENTION_DAYS = 7;
+const PRUNE_BATCH = 5000;
+
+async function pruneOldFlights() {
+  try {
+    // Never delete history before the aircraft lifetime counters were seeded from it.
+    const { rows } = await pool.query(
+      "SELECT 1 FROM applied_migrations WHERE key = 'backfill:aircraft-lifetime-counters'"
+    );
+    if (!rows.length) {
+      console.warn('[Prune] skipped — aircraft lifetime backfill not applied yet');
+      return;
+    }
+
+    let total = 0;
+    for (;;) {
+      // flight_delay_events.flight_id is ON DELETE SET NULL, so events survive.
+      const r = await pool.query(`
+        DELETE FROM flights WHERE id IN (
+          SELECT id FROM flights
+          WHERE status IN ('completed', 'cancelled')
+            AND COALESCE(arrival_time, departure_time) < NOW() - ($1::int * INTERVAL '1 day')
+          LIMIT $2
+        )
+      `, [FLIGHT_RETENTION_DAYS, PRUNE_BATCH]);
+      total += r.rowCount;
+      if (r.rowCount < PRUNE_BATCH) break;
+    }
+
+    const ev = await pool.query(
+      "DELETE FROM flight_delay_events WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')",
+      [FLIGHT_RETENTION_DAYS]
+    );
+
+    if (total > 0 || ev.rowCount > 0) {
+      console.log(`[Prune] removed ${total} flight(s) and ${ev.rowCount} delay event(s) older than ${FLIGHT_RETENTION_DAYS} days`);
+    }
+  } catch (err) {
+    console.error('pruneOldFlights error:', err);
+  }
+}
+
 // Start flight processor (runs every 10 seconds)
 let flightProcessorInterval = null;
 
@@ -2137,6 +2243,7 @@ function startFlightProcessor() {
   });
   backfillFuelPrices();
   scheduleAtMinute13(generateFuelPrice, 'FuelPrice');
+  scheduleAtMinute13(pruneOldFlights, 'Prune');
   // Process flight statuses on the central cadence (see config/intervals.js).
   flightProcessorInterval = setInterval(processFlights, FLIGHT_PROCESSOR_MS);
   setTimeout(processFlights, 1000);

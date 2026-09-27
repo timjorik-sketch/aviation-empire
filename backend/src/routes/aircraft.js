@@ -843,23 +843,15 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
     }
 
     let total_flights = 0, total_profit = 0, total_passengers = 0;
-    const statsResult = await pool.query(`
-      SELECT COUNT(*) as cnt,
-             COALESCE(SUM(
-               revenue
-               - COALESCE(fuel_cost, 0)
-               - COALESCE(atc_fee, 0)
-               - COALESCE(landing_fee, 0)
-               - COALESCE(ground_handling_cost, 0)
-               - COALESCE(catering_cost, 0)
-             ), 0) as profit,
-             COALESCE(SUM(seats_sold), 0) as pax
-      FROM flights WHERE aircraft_id = $1 AND status = 'completed'
-    `, [aircraftId]);
+    // Lifetime counters — flights rows are pruned after 7 days.
+    const statsResult = await pool.query(
+      'SELECT lifetime_flights, lifetime_profit, lifetime_passengers FROM aircraft WHERE id = $1',
+      [aircraftId]
+    );
     if (statsResult.rows[0]) {
-      total_flights = parseInt(statsResult.rows[0].cnt);
-      total_profit = statsResult.rows[0].profit;
-      total_passengers = parseInt(statsResult.rows[0].pax);
+      total_flights = parseInt(statsResult.rows[0].lifetime_flights) || 0;
+      total_profit = parseFloat(statsResult.rows[0].lifetime_profit) || 0;
+      total_passengers = parseInt(statsResult.rows[0].lifetime_passengers) || 0;
     }
 
     const wsResult = await pool.query(`

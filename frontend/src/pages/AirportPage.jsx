@@ -359,7 +359,7 @@ function DestinationStatusCard({ destStatus, airportCode }) {
             <td className="ap-al-info-val">{destStatus.ground_staff ?? 0}</td>
           </tr>
           <tr>
-            <td className="ap-al-info-label">Flights Handled</td>
+            <td className="ap-al-info-label">Flights Handled (7 days)</td>
             <td className="ap-al-info-val">{(destStatus.completed_flights ?? 0).toLocaleString()}</td>
           </tr>
         </tbody>

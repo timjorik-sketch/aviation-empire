@@ -97,7 +97,7 @@ router.get('/public/:code', authMiddleware, async (req, res) => {
 
     // Run remaining queries in parallel
     const [totalPaxResult, destResult, hubResult, fleetResult, routeResult] = await Promise.all([
-      pool.query(`SELECT COALESCE(SUM(seats_sold), 0) AS total FROM flights WHERE airline_id = $1 AND status = 'completed'`, [alId]),
+      pool.query(`SELECT COALESCE(total_passengers_lifetime, 0) AS total FROM airlines WHERE id = $1`, [alId]),
       pool.query(`SELECT COUNT(*) FROM (
         SELECT ws.departure_airport AS airport FROM weekly_schedule ws JOIN aircraft ac ON ac.id = ws.aircraft_id WHERE ac.airline_id = $1 AND ac.is_active = 1
         UNION

@@ -253,11 +253,12 @@ router.get('/:code/airline-status', authMiddleware, async (req, res) => {
     );
     const expansionLevel = expResult.rows[0] ? (parseInt(expResult.rows[0].expansion_level) || 0) : 0;
 
-    // Completed flights
+    // Completed flights — last 7 days (flights rows are pruned after that)
     const completedResult = await pool.query(`
       SELECT COUNT(*) FROM flights f
       JOIN routes r ON f.route_id = r.id
       WHERE f.airline_id = $1 AND (r.departure_airport = $2 OR r.arrival_airport = $2) AND f.status = 'completed'
+        AND f.arrival_time >= NOW() - INTERVAL '7 days'
     `, [airlineId, code]);
     const completedFlights = parseInt(completedResult.rows[0].count) || 0;
 

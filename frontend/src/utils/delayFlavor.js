@@ -65,6 +65,11 @@ const FLAVORS = {
     'Aircraft late after medical diversion',
     'Knock-on from medical diversion',
   ],
+  late_inbound: [
+    'Late arrival of inbound aircraft',
+    'Aircraft arrived late from previous flight',
+    'Knock-on delay from earlier rotation',
+  ],
 };
 
 // Cheap deterministic hash → integer

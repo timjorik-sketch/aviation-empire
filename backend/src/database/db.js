@@ -367,6 +367,10 @@ async function initDatabase() {
     `ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS crew_assigned INTEGER DEFAULT 0`,
     `ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS total_flight_hours REAL DEFAULT 0`,
     `ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS is_listed_for_sale INTEGER DEFAULT 0`,
+    // Lifetime counters — flights rows are pruned after 7 days, so totals live here
+    `ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS lifetime_flights INTEGER DEFAULT 0`,
+    `ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS lifetime_passengers BIGINT DEFAULT 0`,
+    `ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS lifetime_profit NUMERIC DEFAULT 0`,
     // aircraft_types table
     `ALTER TABLE aircraft_types ADD COLUMN IF NOT EXISTS list_price REAL`,
     `ALTER TABLE aircraft_types ADD COLUMN IF NOT EXISTS depreciation_age REAL DEFAULT 0.035`,
@@ -380,6 +384,9 @@ async function initDatabase() {
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS total_passengers_lifetime BIGINT DEFAULT 0`,
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS total_revenue_lifetime NUMERIC DEFAULT 0`,
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS lifetime_backfilled_at TIMESTAMPTZ`,
+    // New airlines start with zero flights — mark them backfilled so a later boot
+    // never recomputes their counters from the (pruned, 7-day) flights table.
+    `ALTER TABLE airlines ALTER COLUMN lifetime_backfilled_at SET DEFAULT NOW()`,
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS acknowledged_level INTEGER`,
     `ALTER TABLE airlines ADD COLUMN IF NOT EXISTS primary_hub_airport_code TEXT REFERENCES airports(iata_code)`,
     // users table
@@ -509,6 +516,21 @@ async function initDatabase() {
   ];
   await runStatements(occTables, 'occ tables');
 
+  // ── flights indexes: the flight processor, flight generation and the
+  //    dashboards all filter by status/time or aircraft/time. Without these
+  //    every tick seq-scanned the whole table. CONCURRENTLY so a boot never
+  //    blocks writes on a live table.
+  const flightIndexes = [
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_flights_aircraft_dep ON flights(aircraft_id, departure_time)`,
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_flights_status_dep ON flights(status, departure_time)`,
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_flights_status_arr ON flights(status, arrival_time)`,
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_flights_weekly_schedule ON flights(weekly_schedule_id)`,
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_flights_route ON flights(route_id)`,
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_flights_airline_arr ON flights(airline_id, arrival_time)`,
+    `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_flights_sat_pending ON flights(id) WHERE satisfaction_score IS NULL AND status <> 'cancelled'`,
+  ];
+  await runStatements(flightIndexes, 'flights indexes');
+
   // ── Enable RLS on tables exposed via Supabase PostgREST. Our backend
   //    connects as the DB owner (BYPASSRLS), so enabling RLS with no
   //    policies blocks anon/authenticated REST access without touching
@@ -527,7 +549,8 @@ async function initDatabase() {
     `ALTER TABLE flights DROP CONSTRAINT IF EXISTS flights_aircraft_id_fkey`,
     `ALTER TABLE flights ADD CONSTRAINT flights_aircraft_id_fkey FOREIGN KEY (aircraft_id) REFERENCES aircraft(id) ON DELETE SET NULL`,
   ];
-  await runStatements(fkFixes, 'flights FK to SET NULL');
+  // Once only: re-adding the FK validates the whole table under an exclusive lock.
+  await runOnce('fix:flights-aircraft-fk-set-null', () => runStatements(fkFixes, 'flights FK to SET NULL'));
 
   // ── One-time backfill of airline lifetime counters from existing flights.
   //    Guarded by lifetime_backfilled_at — runs once per airline.
@@ -538,6 +561,25 @@ async function initDatabase() {
       lifetime_backfilled_at    = NOW()
     WHERE lifetime_backfilled_at IS NULL
   `, null, 'lifetime backfill');
+
+  // ── One-time backfill of aircraft lifetime counters (must run before the
+  //    7-day flights prune ever deletes history). Same profit formula the
+  //    aircraft detail page used to compute live from flights.
+  //    If it fails the marker stays unset and pruneOldFlights() refuses to run.
+  await runOnce('backfill:aircraft-lifetime-counters', () => pool.query(`
+    UPDATE aircraft a SET
+      lifetime_flights    = s.cnt,
+      lifetime_passengers = s.pax,
+      lifetime_profit     = s.profit
+    FROM (
+      SELECT aircraft_id, COUNT(*) AS cnt, COALESCE(SUM(seats_sold), 0) AS pax,
+             COALESCE(SUM(revenue - COALESCE(fuel_cost, 0) - COALESCE(atc_fee, 0) - COALESCE(landing_fee, 0)
+                          - COALESCE(ground_handling_cost, 0) - COALESCE(catering_cost, 0)), 0) AS profit
+      FROM flights WHERE status = 'completed' AND aircraft_id IS NOT NULL
+      GROUP BY aircraft_id
+    ) s
+    WHERE s.aircraft_id = a.id
+  `)).catch(e => console.warn(`[db init] aircraft lifetime backfill failed: ${(e.message || '').substring(0, 150)}`));
 
   // ── One-time backfill of acknowledged_level: existing airlines should not
   //    get retroactive level-up popups for levels they already passed.

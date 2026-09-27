@@ -987,6 +987,9 @@ async function processBookings() {
 
     let totalNewPax = 0, totalRevenue = 0;
     const airlineTotals = {};
+    // Per-flight booking deltas, written in bulk after the loop (one UPDATE
+    // per chunk instead of one round trip per flight).
+    const upd = { id: [], eco: [], biz: [], fir: [], total: [], rev: [] };
 
     for (const f of flightsList) {
       let ecoCap = f.eco_cap;
@@ -1040,15 +1043,12 @@ async function processBookings() {
       const newTotal = (f.booked_eco + newEco) + (f.booked_biz + newBiz) + (f.booked_fir + newFir);
       const revToAdd = Math.round(addedRev);
 
-      await pool.query(`
-        UPDATE flights SET
-          booked_economy  = booked_economy  + $1,
-          booked_business = booked_business + $2,
-          booked_first    = booked_first    + $3,
-          seats_sold      = $4,
-          revenue         = revenue + $5
-        WHERE id = $6
-      `, [newEco, newBiz, newFir, newTotal, revToAdd, f.id]);
+      upd.id.push(f.id);
+      upd.eco.push(newEco);
+      upd.biz.push(newBiz);
+      upd.fir.push(newFir);
+      upd.total.push(newTotal);
+      upd.rev.push(revToAdd);
 
       if (revToAdd > 0) {
         if (!airlineTotals[f.airline_id]) airlineTotals[f.airline_id] = { revenue: 0, pax: 0 };
@@ -1058,6 +1058,22 @@ async function processBookings() {
 
       totalNewPax += newEco + newBiz + newFir;
       totalRevenue += revToAdd;
+    }
+
+    const BOOKING_CHUNK = 1000;
+    for (let i = 0; i < upd.id.length; i += BOOKING_CHUNK) {
+      const slice = (arr) => arr.slice(i, i + BOOKING_CHUNK);
+      await pool.query(`
+        UPDATE flights f SET
+          booked_economy  = f.booked_economy  + u.eco,
+          booked_business = f.booked_business + u.biz,
+          booked_first    = f.booked_first    + u.fir,
+          seats_sold      = u.total,
+          revenue         = f.revenue + u.rev
+        FROM unnest($1::int[], $2::int[], $3::int[], $4::int[], $5::int[], $6::int[])
+             AS u(id, eco, biz, fir, total, rev)
+        WHERE f.id = u.id
+      `, [slice(upd.id), slice(upd.eco), slice(upd.biz), slice(upd.fir), slice(upd.total), slice(upd.rev)]);
     }
 
     for (const [airlineId, totals] of Object.entries(airlineTotals)) {

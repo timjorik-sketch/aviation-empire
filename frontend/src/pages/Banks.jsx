@@ -94,6 +94,7 @@ export default function Banks({ airline, onBack, backLabel, onNavigateToAirport 
   const [loading, setLoading] = useState(true);
   const [selectedBankId, setSelectedBankId] = useState(null);
   const [dayFilter, setDayFilter] = useState('all');
+  const [tileView, setTileView] = useState({}); // hub code → 'banks' | 'airports'
 
   // Create / edit modal
   const [modalOpen, setModalOpen] = useState(false);
@@ -153,6 +154,31 @@ export default function Banks({ airline, onBack, backLabel, onNavigateToAirport 
   const selectedBank = banks.find(b => b.id === selectedBankId) || null;
   const bankColors = useMemo(() => bankColorMap(banks), [banks]);
   const bankStyle = (b) => ({ '--bk': bankColors[b.id] });
+
+  // Airport view: every airport linked to the hub by a scheduled flight, with
+  // per bank whether it has an arrival from / departure to that airport.
+  const hubAirports = useCallback((h) => {
+    const rows = new Map();
+    for (const e of entries) {
+      if (e.arrival_airport === h.code && !rows.has(e.departure_airport)) rows.set(e.departure_airport, e.departure_name);
+      if (e.departure_airport === h.code && !rows.has(e.arrival_airport)) rows.set(e.arrival_airport, e.arrival_name);
+    }
+    const legsFor = (list, code) => list.filter(l => l.other === code);
+    return [...rows.entries()]
+      .map(([code, name]) => ({
+        code, name,
+        cells: h.banks.map(b => ({
+          bank: b,
+          arr: legsFor(matches[b.id].arrivals, code),
+          dep: legsFor(matches[b.id].departures, code),
+        })),
+      }))
+      .sort((a, b) => a.code.localeCompare(b.code));
+  }, [entries, matches]);
+
+  const legTitle = (b, kind, legs) =>
+    `${b.name} · ${kind === 'arr' ? 'arrival' : 'departure'}\n` +
+    collapseLegs(legs).map(g => `${minutesToHHMM(g.localMin)} ${g.flight_number} (${daysLabel(g.days)})`).join('\n');
 
   const openModal = (bank = null, hub = '') => {
     setError('');
@@ -262,6 +288,24 @@ export default function Banks({ airline, onBack, backLabel, onNavigateToAirport 
         @media (max-width: 900px) { .bk-grid { grid-template-columns: 1fr; } }
         .bk-tile .bk-card-header { cursor: default; }
         .bk-iata { font-family: monospace; font-size: 1.05rem; font-weight: 800; color: white; letter-spacing: 0.04em; background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline dashed rgba(255,255,255,0.4); text-underline-offset: 3px; }
+        .bk-view-pill { display: inline-flex; background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.25); border-radius: 6px; padding: 2px; gap: 2px; }
+        .bk-view-btn { padding: 0.2rem 0.6rem; background: transparent; border: none; color: rgba(255,255,255,0.75); border-radius: 4px; font-size: 0.66rem; font-weight: 600; cursor: pointer; text-transform: uppercase; letter-spacing: 0.04em; }
+        .bk-view-btn:hover:not(.bk-view-btn--active) { background: rgba(255,255,255,0.1); color: white; }
+        .bk-view-btn--active { background: white; color: #2C2C2C; }
+
+        .bk-ap-table { width: 100%; border-collapse: collapse; }
+        .bk-ap-table th { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #999; background: #F7F7F7; padding: 7px 6px; text-align: center; }
+        .bk-ap-table thead tr:last-child th { border-bottom: 1px solid #E8E8E8; padding-top: 0; }
+        .bk-ap-dest-hd { text-align: left !important; padding-left: 20px !important; vertical-align: bottom; border-bottom: 1px solid #E8E8E8; }
+        .bk-ap-bank-hd button { background: none; border: none; padding: 0 0 3px; cursor: pointer; font: inherit; color: rgb(var(--bk)); border-bottom: 2px solid rgb(var(--bk)); text-transform: none; letter-spacing: 0.02em; font-size: 11px; white-space: nowrap; }
+        .bk-ap-sub { font-size: 9px !important; min-width: 34px; }
+        .bk-ap-first { border-left: 1px solid #EEE; }
+        .bk-ap-table td { border-bottom: 1px solid #F0F0F0; padding: 7px 6px; }
+        .bk-ap-table tbody tr:last-child td { border-bottom: none; }
+        .bk-ap-table tbody tr:hover td { background: #FAFAFA; }
+        .bk-ap-dest { padding-left: 20px !important; white-space: nowrap; }
+        .bk-ap-cell { text-align: center; }
+        .bk-ap-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: rgb(var(--bk)); vertical-align: middle; cursor: default; }
         .bk-tile-name { font-size: 12px; color: rgba(255,255,255,0.6); margin-left: 8px; }
 
         .bk-bank-row { display: block; width: 100%; text-align: left; background: white; border: none; border-bottom: 1px solid #F0F0F0; padding: 12px 20px; cursor: pointer; font: inherit; color: inherit; }
@@ -479,8 +523,60 @@ export default function Banks({ airline, onBack, backLabel, onNavigateToAirport 
                           <span className="bk-tile-name">{airportName(h.code)}</span>
                           <p className="bk-card-sub">{h.banks.length} bank{h.banks.length !== 1 ? 's' : ''}</p>
                         </div>
-                        <button className="bk-hdr-btn" onClick={() => openModal(null, h.code)}>+ Bank</button>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                          <div className="bk-view-pill" role="tablist" aria-label="Tile view">
+                            {[['banks', 'Banks'], ['airports', 'Airports']].map(([k, lbl]) => (
+                              <button key={k} role="tab" aria-selected={(tileView[h.code] || 'banks') === k}
+                                className={`bk-view-btn${(tileView[h.code] || 'banks') === k ? ' bk-view-btn--active' : ''}`}
+                                onClick={() => setTileView(v => ({ ...v, [h.code]: k }))}>{lbl}</button>
+                            ))}
+                          </div>
+                          <button className="bk-hdr-btn" onClick={() => openModal(null, h.code)}>+ Bank</button>
+                        </div>
                       </div>
+                      {(tileView[h.code] || 'banks') === 'airports' ? (() => {
+                        const rows = hubAirports(h);
+                        if (rows.length === 0) return <div className="bk-empty">No scheduled flights at {h.code} yet.</div>;
+                        return (
+                          <div style={{ overflowX: 'auto' }}>
+                            <table className="bk-ap-table">
+                              <thead>
+                                <tr>
+                                  <th rowSpan={2} className="bk-ap-dest-hd">Airport</th>
+                                  {h.banks.map(b => (
+                                    <th key={b.id} colSpan={2} className="bk-ap-bank-hd" style={bankStyle(b)}>
+                                      <button onClick={() => setSelectedBankId(b.id)} title={`Open ${b.name}`}>{b.name}</button>
+                                    </th>
+                                  ))}
+                                </tr>
+                                <tr>
+                                  {h.banks.map(b => [
+                                    <th key={`${b.id}a`} className="bk-ap-sub bk-ap-first">Arr</th>,
+                                    <th key={`${b.id}d`} className="bk-ap-sub">Dep</th>,
+                                  ])}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {rows.map(r => (
+                                  <tr key={r.code}>
+                                    <td className="bk-ap-dest">
+                                      <button className="bk-dest" onClick={() => onNavigateToAirport?.(r.code)} title={r.name}>{r.code}</button>
+                                    </td>
+                                    {r.cells.map(c => [
+                                      <td key={`${c.bank.id}a`} className="bk-ap-cell bk-ap-first" style={bankStyle(c.bank)}>
+                                        {c.arr.length > 0 && <span className="bk-ap-dot" title={legTitle(c.bank, 'arr', c.arr)} />}
+                                      </td>,
+                                      <td key={`${c.bank.id}d`} className="bk-ap-cell" style={bankStyle(c.bank)}>
+                                        {c.dep.length > 0 && <span className="bk-ap-dot" title={legTitle(c.bank, 'dep', c.dep)} />}
+                                      </td>,
+                                    ])}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        );
+                      })() : <>
                       {h.banks.map(b => {
                         const m = matches[b.id];
                         const dests = new Set([...m.arrivals, ...m.departures].map(l => l.other)).size;
@@ -505,6 +601,7 @@ export default function Banks({ airline, onBack, backLabel, onNavigateToAirport 
                         );
                       })}
                       <div style={{ padding: '0 20px 10px' }}><StripAxis /></div>
+                      </>}
                     </div>
                   ))}
                 </div>

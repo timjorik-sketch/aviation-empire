@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import TopBar from '../components/TopBar.jsx';
 import Loader from '../components/Loader.jsx';
+import { berlinToLocal, inWindow, minutesToHHMM, parseHM, windowLabel } from '../utils/bankWindows.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -100,6 +101,7 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
   const [selectedAirport, setSelectedAirport] = useState(null);
   const [distMode, setDistMode] = useState('departure'); // 'departure' | 'arrival'
   const [haulFilter, setHaulFilter] = useState('all'); // 'all' | 'short' | 'medium' | 'long'
+  const [banks, setBanks] = useState([]);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -108,7 +110,21 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
       .then(d => setEntries(d.entries || []))
       .catch(() => {})
       .finally(() => setLoading(false));
+    fetch(`${API_URL}/api/banks`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => setBanks(d.banks || []))
+      .catch(() => {});
   }, []);
+
+  // Bank windows are hub-local; in the distribution view the relevant window
+  // follows the mode — departure window for departures, arrival window for arrivals.
+  const bankWindow = (b, mode) => mode === 'departure'
+    ? [b.earliest_departure, b.latest_departure]
+    : [b.earliest_arrival, b.latest_arrival];
+  const airportBanks = useMemo(
+    () => banks.filter(b => b.hub_airport_code === selectedAirport),
+    [banks, selectedAirport]
+  );
 
   // Distribution view: every airport we touch (as origin or destination), with longitude
   const distAirports = useMemo(() => {
@@ -172,8 +188,21 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
         registration: e.registration,
       });
     }
-    return [...byTime.values()].sort((a, b) => a.time.localeCompare(b.time));
-  }, [entries, selectedAirport, selectedAirportLon, haulFilter, distMode]);
+    // Empty rows at each window edge so a bank's band stays visible even
+    // where it has no flights yet.
+    for (const b of airportBanks) {
+      for (const m of bankWindow(b, distMode)) {
+        const t = minutesToHHMM(m);
+        if (!byTime.has(t)) byTime.set(t, { time: t, days: {} });
+      }
+    }
+    return [...byTime.values()]
+      .map(row => {
+        const min = parseHM(row.time);
+        return { ...row, banks: airportBanks.filter(b => inWindow(min, ...bankWindow(b, distMode))) };
+      })
+      .sort((a, b) => a.time.localeCompare(b.time));
+  }, [entries, selectedAirport, selectedAirportLon, haulFilter, distMode, airportBanks]);
 
   // Group by departure_airport → flight_number
   const grouped = entries.reduce((acc, e) => {
@@ -442,6 +471,34 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
         }
         .fs-dist-pill:hover { background: #2C2C2C; color: white; border-color: #2C2C2C; }
 
+        /* Bank windows: light hatching over rows inside a departure / arrival window */
+        .fs-dist-row--bank .fs-dist-cell,
+        .fs-dist-row--bank .fs-dist-time {
+          background-image: repeating-linear-gradient(135deg, rgba(44,44,44,0.07) 0 2px, transparent 2px 7px);
+        }
+        .fs-dist-time { flex-direction: column; gap: 3px; }
+        .fs-bank-tag {
+          font-family: inherit; font-size: 9px; font-weight: 700;
+          text-transform: uppercase; letter-spacing: 0.04em;
+          color: #666; background: rgba(255,255,255,0.85);
+          border: 1px solid #DDD; border-radius: 3px; padding: 0 4px;
+          white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+        }
+        .fs-bank-legend {
+          display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+          padding: 8px 20px; font-size: 0.72rem; color: #777;
+          border-bottom: 1px solid #E8E8E8;
+        }
+        .fs-bank-legend-sw {
+          display: inline-block; width: 18px; height: 10px; margin-right: 6px; vertical-align: -1px;
+          border: 1px solid #DDD; border-radius: 2px;
+          background-image: repeating-linear-gradient(135deg, rgba(44,44,44,0.25) 0 2px, transparent 2px 5px);
+        }
+        .fs-pill--bank {
+          background-image: repeating-linear-gradient(135deg, rgba(44,44,44,0.12) 0 2px, transparent 2px 5px);
+          border-color: #CFCFCF;
+        }
+
         @media (max-width: 720px) {
           .fs-dist-head,
           .fs-dist-row { grid-template-columns: 54px repeat(7, 1fr); }
@@ -582,6 +639,16 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
                 </span>
               </div>
 
+              {airportBanks.length > 0 && (
+                <div className="fs-bank-legend">
+                  <span><span className="fs-bank-legend-sw" />{distMode === 'departure' ? 'Departure window' : 'Arrival window'}</span>
+                  {airportBanks.map(b => {
+                    const [s0, e0] = bankWindow(b, distMode);
+                    return <span key={b.id}><strong style={{ color: '#2C2C2C' }}>{b.name}</strong> {windowLabel(s0, e0)}</span>;
+                  })}
+                </div>
+              )}
+
               {distRows.length === 0 ? (
                 <div className="fs-empty">
                   No {distMode === 'departure' ? 'departures from' : 'arrivals at'} {selectedAirport}.
@@ -601,8 +668,13 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
                     )].sort();
                     const arrow = distMode === 'departure' ? '→' : '←';
                     return (
-                      <div key={row.time} className="fs-dist-row">
-                        <span className="fs-dist-time">{row.time}</span>
+                      <div key={row.time} className={`fs-dist-row${row.banks.length ? ' fs-dist-row--bank' : ''}`}>
+                        <span className="fs-dist-time">
+                          {row.time}
+                          {row.banks.map(b => (
+                            <span key={b.id} className="fs-bank-tag" title={`${b.name} · ${distMode === 'departure' ? 'departure' : 'arrival'} window`}>{b.name}</span>
+                          ))}
+                        </span>
                         {DAY_LABELS.map((_, di) => {
                           const cell = row.days[di] || [];
                           const byAp = {};
@@ -657,6 +729,13 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
 
                 {ap.flights.map(f => {
                   const schedRows = buildScheduleRows(f.slots);
+                  const originBanks = banks.filter(b => b.hub_airport_code === ap.iata);
+                  const depLon = f.slots[0]?.departure_longitude;
+                  const bankFor = (t) => {
+                    if (!originBanks.length || t === '—') return null;
+                    const local = berlinToLocal(t, 0, depLon).min;
+                    return originBanks.find(b => inWindow(local, b.earliest_departure, b.latest_departure)) || null;
+                  };
                   const acList = Object.values(f.aircraft);
                   return (
                     <div key={f.flight_number} className="fs-row">
@@ -674,9 +753,15 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
                           <div key={row.label} className="fs-day-row">
                             <span className="fs-day-lbl">{row.label}</span>
                             <div className="fs-pills">
-                              {row.times.map(t => (
-                                <span key={t} className="fs-pill">{t}</span>
-                              ))}
+                              {row.times.map(t => {
+                                const bk = bankFor(t);
+                                return (
+                                  <span key={t} className={`fs-pill${bk ? ' fs-pill--bank' : ''}`}
+                                    title={bk ? `${bk.name} · departure window ${windowLabel(bk.earliest_departure, bk.latest_departure)} (${ap.iata} local)` : undefined}>
+                                    {t}
+                                  </span>
+                                );
+                              })}
                             </div>
                           </div>
                         ))}

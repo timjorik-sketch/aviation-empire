@@ -38,6 +38,7 @@ import CabinProfiles from './pages/CabinProfiles';
 import OperationsControlCenter from './pages/OperationsControlCenter';
 import AirportPage from './pages/AirportPage';
 import HubsDestinations from './pages/HubsDestinations';
+import Banks from './pages/Banks';
 import AirportOverview from './pages/AirportOverview';
 import Personnel from './pages/Personnel.jsx';
 import EditProfile from './pages/EditProfile';
@@ -453,6 +454,7 @@ function App() {
     finances: 'Finances',
     routes: 'Route Planning',
     hubs: 'Network',
+    banks: 'Banks',
     'service-profiles': 'Service Profiles',
     'cabin-profiles': 'Cabin Profiles',
     'ops-control': 'Operations Control Center',
@@ -585,6 +587,9 @@ function App() {
   }
   if (currentPage === 'hubs') {
     return wrap(<HubsDestinations airline={activeAirline} onBack={() => setCurrentPage(hubsBackPage)} backLabel={PAGE_LABELS[hubsBackPage] || 'Dashboard'} onNavigateToAirport={(code) => navigateToAirport(code, 'hubs')} onBalanceUpdate={handleBalanceUpdate} onNavigate={(page) => navigate(page)} />);
+  }
+  if (currentPage === 'banks') {
+    return wrap(<Banks airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Dashboard'} onNavigateToAirport={(code) => navigateToAirport(code, 'banks')} />);
   }
   if (currentPage === 'airport-overview') {
     return wrap(<AirportOverview airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Dashboard'} onNavigateToAirport={(code) => navigateToAirport(code, 'airport-overview')} onBalanceUpdate={handleBalanceUpdate} savedState={airportOverviewState} />);

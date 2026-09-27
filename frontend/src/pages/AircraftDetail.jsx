@@ -344,6 +344,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [editSaving, setEditSaving]   = useState(false);
   // Show the weekly grid in the aircraft's home-base local time (vs raw game time).
   const [viewLocal, setViewLocal] = useState(true);
+  const [showBanks, setShowBanks] = useState(false);
   // Cabin profile change warning modal state
   const [showCpChangeModal, setShowCpChangeModal] = useState(false);
   const [pendingCpChangeId, setPendingCpChangeId] = useState(null);
@@ -680,6 +681,39 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   );
   const viewShiftMin =
     viewLocal && homeOffsetHours != null ? (homeOffsetHours - BERLIN_LON_OFFSET) * 60 : 0;
+
+  // ─── "Show Banks" overlay ─────────────────────────────────────────────────
+  // Banks at the aircraft's home base, drawn as background bands: arrival
+  // window and departure window in two colours. Bank times are hub-local, so
+  // they are moved back to game time and then into the current view.
+  const homeBanks = useMemo(
+    () => banks.filter(b => b.hub_airport_code === aircraft?.home_airport),
+    [banks, aircraft?.home_airport]
+  );
+  const bankBands = useMemo(() => {
+    if (!showBanks || homeBanks.length === 0) return [];
+    const hubShift = homeOffsetHours != null ? (homeOffsetHours - BERLIN_LON_OFFSET) * 60 : 0;
+    const bands = [];
+    const add = (bank, kind, start, end) => {
+      const len = ((end - start + 1440) % 1440) || 1;
+      for (let d = 0; d < 7; d++) {
+        let from = (((d * 1440 + start - hubShift + viewShiftMin) % 10080) + 10080) % 10080;
+        let left = len, first = true;
+        while (left > 0) {
+          const day = Math.floor(from / 1440) % 7;
+          const inDay = from % 1440;
+          const seg = Math.min(left, 1440 - inDay);
+          bands.push({ key: `${bank.id}-${kind}-${d}-${inDay}`, bank, kind, dayIndex: day, top: inDay * PX_PER_MIN, height: seg * PX_PER_MIN, label: first });
+          left -= seg; from = (day + 1) % 7 * 1440; first = false;
+        }
+      }
+    };
+    for (const b of homeBanks) {
+      add(b, 'arr', b.earliest_arrival, b.latest_arrival);
+      add(b, 'dep', b.earliest_departure, b.latest_departure);
+    }
+    return bands;
+  }, [showBanks, homeBanks, homeOffsetHours, viewShiftMin]);
 
   // Berlin slot (day + local "HH:MM" displayed) → Berlin storage slot.
   const viewToBerlin = useCallback((day, hhmm) => {
@@ -2692,6 +2726,14 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                 disabled={shiftingDay || isActive || !!bankPlan}
                 title="Drag existing flights and maintenance freely across days and times, then confirm"
               >{editMode ? 'Editing…' : 'Edit'}</button>
+              <button
+                className={`ad-btn-clear-sched${showBanks ? ' ad-btn-edit-on' : ''}`}
+                onClick={() => setShowBanks(v => !v)}
+                disabled={homeBanks.length === 0}
+                title={homeBanks.length === 0
+                  ? `No banks defined at ${aircraft?.home_airport || 'the home base'}`
+                  : `Show the banks at ${aircraft?.home_airport} in the grid`}
+              >Show Banks</button>
             </span>
             <button className="ad-btn-clear-sched" onClick={handleClearSchedule} disabled={editMode}>Clear All</button>
           </div>
@@ -2714,6 +2756,15 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
               <button className="ad-bank-confirm-btn" disabled={bankConfirming} onClick={confirmBankPlan}>
                 {bankConfirming ? 'Writing…' : 'Confirm & write'}
               </button>
+            </div>
+          )}
+          {showBanks && bankBands.length > 0 && (
+            <div className="ad-bank-legend">
+              <span><span className="ad-bank-sw ad-bank-band--arr" />Arrival window</span>
+              <span><span className="ad-bank-sw ad-bank-band--dep" />Departure window</span>
+              <span className="ad-bank-legend-names">
+                {aircraft?.home_airport}: {homeBanks.map(b => b.name).join(' · ')}
+              </span>
             </div>
           )}
           <div className="ad-grid-header">
@@ -2759,6 +2810,13 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     ))}
                     {Array.from({ length: 24 }, (_, h) => (
                       <div key={`hh-${h}`} className="ad-halfhour-line" style={{ top: h * HOUR_H + HOUR_H / 2 }} />
+                    ))}
+                    {bankBands.filter(b => b.dayIndex === di).map(b => (
+                      <div key={b.key} className={`ad-bank-band ad-bank-band--${b.kind}`}
+                        style={{ top: b.top, height: b.height }}
+                        title={`${b.bank.name} · ${b.kind === 'arr' ? 'arrival' : 'departure'} window`}>
+                        {b.label && <span className="ad-bank-band-lbl">{b.bank.name} · {b.kind === 'arr' ? 'ARR' : 'DEP'}</span>}
+                      </div>
                     ))}
                     {mGroundBars.map(m => (
                       <div key={`mg-${m.id}`} className="ad-grid-ground"
@@ -4804,6 +4862,16 @@ const styles = `
   .ad-hour-line { position: absolute; left: 0; right: 0; height: 1px; background: #E8E8E8; pointer-events: none; z-index: 0; }
   .ad-halfhour-line { position: absolute; left: 0; right: 0; height: 1px; border-top: 1px dashed #EEEEEE; pointer-events: none; z-index: 0; }
   .ad-grid-col:last-child { border-right: none; }
+  /* "Show Banks" overlay — arrival window blue, departure window amber */
+  .ad-bank-band { position: absolute; left: 0; right: 0; z-index: 0; pointer-events: none; box-sizing: border-box; }
+  .ad-bank-band--arr { background-color: rgba(37,99,235,0.07); background-image: repeating-linear-gradient(135deg, rgba(37,99,235,0.2) 0 2px, transparent 2px 7px); border-top: 1px solid rgba(37,99,235,0.45); border-bottom: 1px solid rgba(37,99,235,0.45); }
+  .ad-bank-band--dep { background-color: rgba(217,119,6,0.07); background-image: repeating-linear-gradient(45deg, rgba(217,119,6,0.22) 0 2px, transparent 2px 7px); border-top: 1px solid rgba(217,119,6,0.5); border-bottom: 1px solid rgba(217,119,6,0.5); }
+  .ad-bank-band-lbl { position: absolute; top: 1px; left: 3px; font-size: 8px; font-weight: 700; letter-spacing: 0.03em; white-space: nowrap; overflow: hidden; max-width: calc(100% - 6px); text-overflow: ellipsis; }
+  .ad-bank-band--arr .ad-bank-band-lbl { color: rgb(37,99,235); }
+  .ad-bank-band--dep .ad-bank-band-lbl { color: rgb(180,83,9); }
+  .ad-bank-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 6px 12px; font-size: 0.72rem; color: #666; border-bottom: 1px solid #EEEEEE; background: #FAFAFA; }
+  .ad-bank-sw { position: static; display: inline-block; width: 18px; height: 10px; margin-right: 6px; vertical-align: -1px; border-radius: 2px; }
+  .ad-bank-legend-names { color: #999; }
   .ad-grid-ground { position: absolute; left: 2px; right: 2px; border-radius: 0 0 3px 3px; z-index: 1; pointer-events: none; opacity: 0.55; box-sizing: border-box; border-top: none; }
   .ad-grid-maint { position: absolute; left: 2px; right: 2px; background: #6b7280; border-radius: 3px; padding: 2px 4px; z-index: 2; overflow: hidden; display: flex; flex-direction: column; gap: 1px; }
   .ad-grid-maint .ad-grid-fn { color: rgba(255,255,255,0.9); }

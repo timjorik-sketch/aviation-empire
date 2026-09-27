@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import TopBar from '../components/TopBar.jsx';
 import Loader from '../components/Loader.jsx';
 import {
-  minutesToHHMM, parseHM, inWindow, windowLabel, legLocalTimes,
+  minutesToHHMM, parseHM, inWindow, windowLabel, legLocalTimes, bankColorMap,
 } from '../utils/bankWindows.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -57,11 +57,11 @@ function collapseLegs(legs) {
 }
 
 // 24h strip: arrival window hatched, departure window solid, optional flight ticks.
-function DayStrip({ bank, arrTicks = [], depTicks = [], tall = false }) {
+function DayStrip({ bank, arrTicks = [], depTicks = [], tall = false, style }) {
   const segs = (s, e) => s <= e ? [[s, e]] : [[s, 1440], [0, e]];
   const pct = (m) => `${(m / 1440) * 100}%`;
   return (
-    <div className={`bk-strip${tall ? ' bk-strip--tall' : ''}`}>
+    <div className={`bk-strip${tall ? ' bk-strip--tall' : ''}`} style={style}>
       {[0, 360, 720, 1080].map(m => <span key={m} className="bk-strip-grid" style={{ left: pct(m) }} />)}
       {segs(bank.earliest_arrival, bank.latest_arrival).map(([s, e], i) => (
         <span key={`a${i}`} className="bk-strip-win bk-strip-win--arr" style={{ left: pct(s), width: pct(Math.max(e - s, 4)) }} />
@@ -151,6 +151,8 @@ export default function Banks({ airline, onBack, backLabel, onNavigateToAirport 
   }, [banks]);
 
   const selectedBank = banks.find(b => b.id === selectedBankId) || null;
+  const bankColors = useMemo(() => bankColorMap(banks), [banks]);
+  const bankStyle = (b) => ({ '--bk': bankColors[b.id] });
 
   const openModal = (bank = null, hub = '') => {
     setError('');
@@ -266,7 +268,8 @@ export default function Banks({ airline, onBack, backLabel, onNavigateToAirport 
         .bk-bank-row:last-child { border-bottom: none; }
         .bk-bank-row:hover { background: #F9F9F9; }
         .bk-bank-top { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
-        .bk-bank-name { font-weight: 700; font-size: 0.9rem; color: #2C2C2C; }
+        .bk-bank-name { font-weight: 700; font-size: 0.9rem; color: #2C2C2C; display: inline-flex; align-items: center; gap: 7px; }
+        .bk-dot { width: 9px; height: 9px; border-radius: 50%; background: rgb(var(--bk, 44,44,44)); flex-shrink: 0; }
         .bk-bank-stats { margin-left: auto; font-size: 11px; color: #999; font-variant-numeric: tabular-nums; white-space: nowrap; }
         .bk-bank-times { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: #666; margin-bottom: 8px; font-variant-numeric: tabular-nums; }
         .bk-bank-times b { font-weight: 600; color: #999; text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em; margin-right: 4px; }
@@ -275,8 +278,8 @@ export default function Banks({ airline, onBack, backLabel, onNavigateToAirport 
         .bk-strip--tall { height: 34px; }
         .bk-strip-grid { position: absolute; top: 0; bottom: 0; width: 1px; background: #E2E2E2; }
         .bk-strip-win { position: absolute; top: 0; bottom: 0; }
-        .bk-strip-win--arr { background: repeating-linear-gradient(135deg, rgba(44,44,44,0.35) 0 2px, transparent 2px 6px); border-left: 1px solid rgba(44,44,44,0.4); border-right: 1px solid rgba(44,44,44,0.4); }
-        .bk-strip-win--dep { background: rgba(44,44,44,0.22); border-left: 1px solid rgba(44,44,44,0.5); border-right: 1px solid rgba(44,44,44,0.5); }
+        .bk-strip-win--arr { background: repeating-linear-gradient(135deg, rgba(var(--bk, 44,44,44), 0.45) 0 2px, transparent 2px 6px); border-left: 1px solid rgba(var(--bk, 44,44,44), 0.5); border-right: 1px solid rgba(var(--bk, 44,44,44), 0.5); }
+        .bk-strip-win--dep { background: rgba(var(--bk, 44,44,44), 0.28); border-left: 1px solid rgba(var(--bk, 44,44,44), 0.6); border-right: 1px solid rgba(var(--bk, 44,44,44), 0.6); }
         .bk-strip-tick { position: absolute; width: 2px; margin-left: -1px; background: #2C2C2C; }
         .bk-strip-tick--arr { top: 0; height: 45%; }
         .bk-strip-tick--dep { bottom: 0; height: 45%; }
@@ -382,7 +385,7 @@ export default function Banks({ airline, onBack, backLabel, onNavigateToAirport 
                     <div className="bk-kpi"><div className="bk-kpi-val">{detail.outbound}</div><div className="bk-kpi-lbl">Onward destinations</div></div>
                     <div className="bk-kpi"><div className="bk-kpi-val">{detail.bothWays}</div><div className="bk-kpi-lbl">Served both ways</div></div>
                   </div>
-                  <DayStrip bank={selectedBank} arrTicks={detail.arrTicks} depTicks={detail.depTicks} tall />
+                  <DayStrip bank={selectedBank} arrTicks={detail.arrTicks} depTicks={detail.depTicks} tall style={bankStyle(selectedBank)} />
                   <StripAxis />
                   <div style={{ marginTop: 10 }}>
                     <span className="bk-legend"><span className="bk-legend-sw bk-strip-win--arr" style={{ position: 'static' }} />Arrival window (ticks above = arrivals)</span>
@@ -486,7 +489,7 @@ export default function Banks({ airline, onBack, backLabel, onNavigateToAirport 
                             onClick={() => setSelectedBankId(b.id)}
                             onKeyDown={e => { if (e.key === 'Enter') setSelectedBankId(b.id); }}>
                             <div className="bk-bank-top">
-                              <span className="bk-bank-name">{b.name}</span>
+                              <span className="bk-bank-name" style={bankStyle(b)}><span className="bk-dot" />{b.name}</span>
                               <span className="bk-bank-stats">{m.arrivals.length} arr · {m.departures.length} dep / wk · {dests} airports</span>
                               <span className="bk-mini-btns" onClick={e => e.stopPropagation()}>
                                 <button onClick={() => openModal(b)} title="Edit bank">Edit</button>
@@ -497,7 +500,7 @@ export default function Banks({ airline, onBack, backLabel, onNavigateToAirport 
                               <span><b>Arr</b>{windowLabel(b.earliest_arrival, b.latest_arrival)}</span>
                               <span><b>Dep</b>{windowLabel(b.earliest_departure, b.latest_departure)}</span>
                             </div>
-                            <DayStrip bank={b} />
+                            <DayStrip bank={b} style={bankStyle(b)} />
                           </div>
                         );
                       })}

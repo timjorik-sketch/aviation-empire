@@ -41,3 +41,18 @@ export function legLocalTimes(e) {
     arr: berlinToLocal(arr, arrDay, e.arrival_longitude),
   };
 }
+
+// Distinct colour per bank within its hub (banks ordered by arrival window),
+// as an "r,g,b" triplet for use in rgba() / CSS variables.
+export const BANK_COLORS = ['37,99,235', '217,119,6', '22,163,74', '147,51,234', '225,29,72'];
+
+export function bankColorMap(banks) {
+  const byHub = {};
+  for (const b of banks) (byHub[b.hub_airport_code] ||= []).push(b);
+  const map = {};
+  for (const list of Object.values(byHub)) {
+    list.sort((a, b) => a.earliest_arrival - b.earliest_arrival || a.id - b.id)
+      .forEach((b, i) => { map[b.id] = BANK_COLORS[i % BANK_COLORS.length]; });
+  }
+  return map;
+}

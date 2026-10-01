@@ -624,6 +624,149 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
     first: capacityAware ? adminSuggested.first : suggestPrice(adminMarket.first),
   } : null;
 
+  // Admin-only: Batch Routes — one departure, many ticked destinations, each
+  // created (with its return leg) at the same Suggest prices the single form
+  // offers. Reuses the admin cabin-profile target above, so the capacity-aware
+  // ladder applies to every destination in the batch.
+  const airportOptions = useMemo(() => groupAirportsForDropdown(airports), [airports]);
+  const [plannerTab, setPlannerTab] = useState('single'); // single | batch
+  const [batchDep, setBatchDep] = useState('');
+  const [batchSelected, setBatchSelected] = useState([]);  // arrival IATA codes
+  const [batchSearch, setBatchSearch] = useState('');
+  const [batchWithReturn, setBatchWithReturn] = useState(true);
+  const [batchQuotes, setBatchQuotes] = useState({});      // `${dep}-${arr}-${profile}` -> { distance_km, eco, biz, first } | { error }
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchProgress, setBatchProgress] = useState(null); // { done, total }
+  const [batchResults, setBatchResults] = useState([]);     // [{ arr, ok, msg }]
+
+  const quoteKey = (arr) => `${batchDep}-${arr}-${adminProfileId}`;
+  const routePairs = useMemo(() => new Set(routes.map(r => `${r.departure_airport}-${r.arrival_airport}`)), [routes]);
+
+  const batchCandidates = useMemo(() => {
+    if (!batchDep) return [];
+    const q = batchSearch.trim().toLowerCase();
+    const list = [...airportOptions.top, ...airportOptions.countries.flatMap(c => airportOptions.byCountry[c])];
+    return list
+      .filter(a => a.iata_code !== batchDep)
+      .filter(a => !q || a.iata_code.toLowerCase().includes(q) || (a.name || '').toLowerCase().includes(q) || (a.country || '').toLowerCase().includes(q))
+      .map(a => ({ ...a, exists: routePairs.has(`${batchDep}-${a.iata_code}`), returnExists: routePairs.has(`${a.iata_code}-${batchDep}`) }));
+  }, [batchDep, batchSearch, airports, routePairs]);
+
+  // Switching departure invalidates the selection.
+  useEffect(() => { setBatchSelected([]); setBatchResults([]); }, [batchDep]);
+
+  // Fetch Suggest prices for every ticked destination not yet quoted.
+  useEffect(() => {
+    if (!isAdmin || !batchDep) return;
+    const missing = batchSelected.filter(arr => !batchQuotes[quoteKey(arr)]);
+    if (!missing.length) return;
+    const token = localStorage.getItem('token');
+    const caps = adminCaps;
+    let cancelled = false;
+    (async () => {
+      for (let i = 0; i < missing.length; i += 6) {
+        const chunk = missing.slice(i, i + 6);
+        const quotes = await Promise.all(chunk.map(async arr => {
+          const qs = new URLSearchParams({ dep: batchDep, arr });
+          if (caps?.eco) qs.set('eco_cap', String(caps.eco));
+          if (caps?.biz) qs.set('biz_cap', String(caps.biz));
+          if (caps?.fir) qs.set('fir_cap', String(caps.fir));
+          try {
+            const r = await fetch(`${API_URL}/api/admin/market-price?${qs.toString()}`, { headers: { Authorization: `Bearer ${token}` } });
+            const d = await r.json();
+            if (!r.ok) return [arr, { error: d.error || 'No market price' }];
+            const pick = (cls, sKey) => d.suggested ? d.suggested[sKey] : suggestPrice(d.market?.[cls]);
+            return [arr, { distance_km: d.distance_km, eco: pick('eco', 'eco'), biz: pick('biz', 'biz'), first: pick('first', 'first') }];
+          } catch {
+            return [arr, { error: 'No market price' }];
+          }
+        }));
+        if (cancelled) return;
+        setBatchQuotes(prev => {
+          const next = { ...prev };
+          for (const [arr, q] of quotes) next[`${batchDep}-${arr}-${adminProfileId}`] = q;
+          return next;
+        });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isAdmin, batchDep, batchSelected, adminProfileId, adminProfiles]);
+
+  const toggleBatch = (arr) => setBatchSelected(s => s.includes(arr) ? s.filter(x => x !== arr) : [...s, arr]);
+  const selectableVisible = batchCandidates.filter(a => !a.exists).map(a => a.iata_code);
+  const allVisibleSelected = selectableVisible.length > 0 && selectableVisible.every(c => batchSelected.includes(c));
+  const toggleAllVisible = () => setBatchSelected(s => allVisibleSelected
+    ? s.filter(c => !selectableVisible.includes(c))
+    : [...new Set([...s, ...selectableVisible])]);
+  const batchQuotesReady = batchSelected.every(arr => batchQuotes[quoteKey(arr)]);
+
+  const handleCreateBatch = async () => {
+    if (!batchDep || !batchSelected.length) return;
+    setError(''); setSuccess(''); setBatchBusy(true); setBatchResults([]);
+    const token = localStorage.getItem('token');
+
+    // Hand out flight numbers from the next free suffix upward, outbound then
+    // return, skipping any suffix already in use.
+    const used = new Set(routes.map(r => String(r.flight_number || '').slice(-4)));
+    let cursor = parseInt(nextSuffix, 10);
+    const takeSuffix = () => {
+      while (cursor <= 9999 && used.has(String(cursor).padStart(4, '0'))) cursor++;
+      if (cursor > 9999) return null;
+      const s = String(cursor).padStart(4, '0');
+      used.add(s); cursor++;
+      return s;
+    };
+
+    // Keep the list order so flight numbers follow what the player sees.
+    const order = batchCandidates.map(a => a.iata_code);
+    const targets = [...batchSelected].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+    const results = [];
+    setBatchProgress({ done: 0, total: targets.length });
+
+    for (const arr of targets) {
+      const q = batchQuotes[quoteKey(arr)];
+      const withReturn = batchWithReturn && !routePairs.has(`${arr}-${batchDep}`);
+      if (!q || q.error || !q.eco) {
+        results.push({ arr, ok: false, msg: q?.error || 'No suggested economy price' });
+      } else {
+        const out = takeSuffix();
+        const ret = withReturn ? takeSuffix() : null;
+        if (!out || (withReturn && !ret)) {
+          results.push({ arr, ok: false, msg: 'No free flight numbers left' });
+        } else {
+          try {
+            const body = {
+              departure_airport: batchDep, arrival_airport: arr,
+              flight_number_suffix: out,
+              economy_price: q.eco, business_price: q.biz || null, first_price: q.first || null,
+            };
+            if (ret) body.return_flight_number_suffix = ret;
+            const res = await fetch(`${API_URL}/api/routes/create`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: JSON.stringify(body),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || (data.errors && data.errors[0]?.msg) || 'Failed to create route');
+            results.push({ arr, ok: true, msg: ret ? `${airlineCode}${out} / ${airlineCode}${ret}` : `${airlineCode}${out}` });
+          } catch (err) {
+            results.push({ arr, ok: false, msg: err.message });
+          }
+        }
+      }
+      setBatchProgress({ done: results.length, total: targets.length });
+    }
+
+    const okCount = results.filter(r => r.ok).length;
+    setBatchResults(results);
+    setBatchSelected(results.filter(r => !r.ok).map(r => r.arr));
+    if (okCount) setSuccess(`${okCount} of ${targets.length} destinations created from ${batchDep}`);
+    if (okCount < targets.length) setError(`${targets.length - okCount} destination(s) failed — see the list below`);
+    await refreshRoutes();
+    setBatchProgress(null);
+    setBatchBusy(false);
+  };
+
   const fetchData = async () => {
     const token = localStorage.getItem('token');
     try {
@@ -816,7 +959,6 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
   };
 
   const TIER_LABEL = { home_base: ' (Home-Base)', primary_hub: ' (Primary Hub)', hub: ' (Secondary Hub)', hub_restricted: ' (Secondary Hub)', base: ' 🔥' };
-  const airportOptions = useMemo(() => groupAirportsForDropdown(airports), [airports]);
   // country grouping still needed for the all-airports check tool (uses allAirportsByCountry)
   const homeCountry = airports.find(a => a.effective_type === 'home_base')?.country || '';
   const countrySort = (a, b) => {
@@ -868,6 +1010,23 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
         .rp-map-info-cell:last-child { border-right:none; }
         .rp-map-info-val { font-size:1.1rem; font-weight:700; color:#1a6dc4; font-family:monospace; font-variant-numeric:tabular-nums; }
         .rp-map-info-lbl { font-size:0.7rem; color:#999; text-transform:uppercase; letter-spacing:0.07em; margin-top:0.15rem; }
+        .rp-tabs { display:flex; gap:4px; margin-bottom:1.25rem; border-bottom:1px solid #E0E0E0; }
+        .rp-tab { background:transparent; border:none; border-bottom:2px solid transparent; padding:0.65rem 1.1rem; margin-bottom:-1px; cursor:pointer; font-size:0.78rem; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#999; transition:color 0.15s, border-color 0.15s; }
+        .rp-tab:hover { color:#2C2C2C; }
+        .rp-tab--on { color:#2C2C2C; border-bottom-color:#2C2C2C; }
+        .rp-batch-lbl { display:block; margin-bottom:0.4rem; font-weight:600; font-size:0.9rem; color:#2C2C2C; }
+        .rp-batch-mini { padding:0.45rem 0.8rem; background:white; border:1px solid #E0E0E0; border-radius:6px; font-size:0.78rem; font-weight:600; color:#2C2C2C; cursor:pointer; white-space:nowrap; }
+        .rp-batch-mini:disabled { opacity:0.5; cursor:not-allowed; }
+        .rp-batch-list { max-height:420px; overflow-y:auto; border:1px solid #E0E0E0; border-radius:6px; }
+        .rp-batch-row { display:grid; grid-template-columns:auto 44px 1fr auto; gap:10px; align-items:center; padding:0.45rem 0.75rem; border-bottom:1px solid #F0F0F0; font-size:0.83rem; cursor:pointer; }
+        .rp-batch-row:last-child { border-bottom:none; }
+        .rp-batch-row:hover { background:#FAFAFA; }
+        .rp-batch-row--on { background:#F5F5F5; }
+        .rp-batch-row--off { opacity:0.45; cursor:default; }
+        .rp-batch-row input { width:16px; height:16px; cursor:inherit; }
+        .rp-batch-iata { font-weight:700; font-family:monospace; color:#2C2C2C; }
+        .rp-batch-name { color:#2C2C2C; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+        .rp-batch-meta { font-size:0.75rem; color:#666; text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
         .rp-top-grid { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; margin-bottom:1.5rem; align-items:start; }
         .ma-select { width:100%; padding:0.5rem 0.6rem; border:1px solid #E0E0E0; border-radius:6px; font-size:0.88rem; background:white; color:#2C2C2C; }
         .ma-select:focus { outline:none; border-color:#2C2C2C; }
@@ -896,6 +1055,8 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
           .rp-table th, .rp-table td { padding:0.5rem; }
         }
         @media (max-width:480px) {
+          .rp-batch-row { grid-template-columns:auto 40px 1fr; }
+          .rp-batch-meta { grid-column:2 / -1; text-align:left; white-space:normal; }
           .rp-table { font-size:0.74rem; }
           .rp-table th, .rp-table td { padding:0.35rem 0.4rem; }
           .ma-class-grid { grid-template-columns:1fr; }
@@ -914,13 +1075,128 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
         <TopBar onBack={onBack} balance={airline.balance} backLabel={backLabel} airline={airline} />
         <Toast error={error} onClearError={() => setError('')} success={success} onClearSuccess={() => setSuccess('')} />
 
+        {isAdmin && (
+          <div className="rp-tabs">
+            <button className={`rp-tab${plannerTab === 'single' ? ' rp-tab--on' : ''}`} onClick={() => setPlannerTab('single')}>Single Route</button>
+            <button className={`rp-tab${plannerTab === 'batch' ? ' rp-tab--on' : ''}`} onClick={() => setPlannerTab('batch')}>Batch Routes</button>
+          </div>
+        )}
+
         {/* Top row: Create+Map left | Market Analysis right */}
         <div className="rp-top-grid">
 
         {/* Left: Create Route + Map stacked */}
         <div className="rp-create-grid">
 
-          {/* Form */}
+          {isAdmin && plannerTab === 'batch' ? (
+          <div className="info-card">
+            <div className="card-header-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span className="card-header-bar-title">Batch Routes</span>
+              {batchSelected.length > 0 && (
+                <span style={{ fontWeight: 400, opacity: 0.85, fontSize: '0.78rem', letterSpacing: '0.04em' }}>
+                  {batchSelected.length} selected
+                </span>
+              )}
+            </div>
+
+            <div style={{ marginBottom: '1rem' }}>
+              <label className="rp-batch-lbl">Departure</label>
+              <select value={batchDep} onChange={e => setBatchDep(e.target.value)} className="ma-select">
+                <option value="">Select...</option>
+                {airportOptions.top.map(a => (
+                  <option key={a.iata_code} value={a.iata_code}>{a.iata_code} – {a.name}{TIER_LABEL[a.effective_type] || ''}</option>
+                ))}
+                {airportOptions.countries.map(country => (
+                  <optgroup key={country} label={country}>
+                    {airportOptions.byCountry[country].map(a => (
+                      <option key={a.iata_code} value={a.iata_code}>{a.iata_code} – {a.name}{TIER_LABEL[a.effective_type] || ''}</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+
+            {adminProfiles.length > 0 && (
+              <div style={{ marginBottom: '1rem', padding: '8px 10px', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 6 }}>
+                <label style={{ display: 'block', marginBottom: 4, fontSize: '0.72rem', fontWeight: 700, color: '#4338ca', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  Admin · Suggest target (cabin profile)
+                </label>
+                <select value={adminProfileId} onChange={e => setAdminProfileId(e.target.value)}
+                  style={{ width: '100%', padding: '0.4rem', borderRadius: 4, border: '1px solid #c7d2fe', fontSize: '0.85rem', background: 'white' }}>
+                  <option value="">— 119% market cap (default) —</option>
+                  {adminProfiles.map(p => (
+                    <option key={p.id} value={p.id}>{p.name} · {p.aircraft_type_name} · {p.total_capacity} seats</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {batchDep && (<>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+                <input type="text" value={batchSearch} onChange={e => setBatchSearch(e.target.value)}
+                  placeholder="Filter by IATA, name or country…" className="ma-select" style={{ flex: 1 }} />
+                <button type="button" className="rp-batch-mini" onClick={toggleAllVisible} disabled={!selectableVisible.length}>
+                  {allVisibleSelected ? 'Clear' : 'Select all'}
+                </button>
+              </div>
+
+              <div className="rp-batch-list">
+                {batchCandidates.length === 0 && (
+                  <div style={{ padding: '1rem', color: '#999', fontSize: '0.85rem', textAlign: 'center' }}>No destinations match.</div>
+                )}
+                {batchCandidates.map(a => {
+                  const checked = batchSelected.includes(a.iata_code);
+                  const q = checked ? batchQuotes[quoteKey(a.iata_code)] : null;
+                  const res = batchResults.find(r => r.arr === a.iata_code);
+                  return (
+                    <label key={a.iata_code} className={`rp-batch-row${a.exists ? ' rp-batch-row--off' : ''}${checked ? ' rp-batch-row--on' : ''}`}>
+                      <input type="checkbox" checked={checked} disabled={a.exists || batchBusy} onChange={() => toggleBatch(a.iata_code)} />
+                      <span className="rp-batch-iata">{a.iata_code}</span>
+                      <span className="rp-batch-name">
+                        {a.name}<span style={{ color: '#999' }}> · {a.country}{TIER_LABEL[a.effective_type] || ''}</span>
+                        {res && !res.ok && <span style={{ display: 'block', color: '#dc2626', fontSize: '0.72rem' }}>{res.msg}</span>}
+                      </span>
+                      <span className="rp-batch-meta">
+                        {a.exists ? 'Route exists'
+                          : q?.error ? <span style={{ color: '#dc2626' }}>{q.error}</span>
+                          : q ? <>
+                              {q.distance_km?.toLocaleString()} km · <strong>{formatPrice(q.eco)}</strong>
+                              {q.biz ? ` / ${formatPrice(q.biz)}` : ''}{q.first ? ` / ${formatPrice(q.first)}` : ''}
+                              {batchWithReturn && a.returnExists && <span style={{ display: 'block', color: '#999' }}>return exists</span>}
+                            </>
+                          : checked ? '…' : ''}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', margin: '0.75rem 0', cursor: 'pointer', fontSize: '0.875rem', color: '#444' }}>
+                <input type="checkbox" checked={batchWithReturn} onChange={e => setBatchWithReturn(e.target.checked)}
+                  style={{ width: 16, height: 16, cursor: 'pointer' }} />
+                Also create return routes
+              </label>
+              <div style={{ fontSize: '0.75rem', color: '#999', marginBottom: '0.75rem' }}>
+                Prices = Suggest price per class (Eco / Business / First). Flight numbers are taken from {airlineCode}{nextSuffix} upward{batchWithReturn ? ', outbound then return' : ''}.
+              </div>
+
+              <button type="button" className="btn-primary" style={{ padding: '0.75rem 1.5rem' }}
+                disabled={batchBusy || !batchSelected.length || !batchQuotesReady} onClick={handleCreateBatch}>
+                {batchBusy
+                  ? `Creating… ${batchProgress ? `${batchProgress.done}/${batchProgress.total}` : ''}`
+                  : `Create ${batchSelected.length || ''} Route${batchSelected.length === 1 ? '' : 's'}${batchWithReturn ? ' + Returns' : ''}`}
+              </button>
+
+              {batchResults.some(r => r.ok) && (
+                <div style={{ marginTop: '1rem', fontSize: '0.8rem', color: '#166534' }}>
+                  {batchResults.filter(r => r.ok).map(r => (
+                    <div key={r.arr}>✓ {batchDep} ⇄ {r.arr} · {r.msg}</div>
+                  ))}
+                </div>
+              )}
+            </>)}
+          </div>
+          ) : (
           <div className="info-card">
             <div className="card-header-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span className="card-header-bar-title">{checkMode ? 'Check Route' : 'Create New Route'}</span>
@@ -1200,6 +1476,7 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
             </form>
             )}
           </div>
+          )}
 
         </div>{/* end rp-create-grid */}
 

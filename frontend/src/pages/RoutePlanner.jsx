@@ -633,6 +633,8 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
   const [batchDep, setBatchDep] = useState('');
   const [batchSelected, setBatchSelected] = useState([]);  // arrival IATA codes
   const [batchSearch, setBatchSearch] = useState('');
+  const [batchContinent, setBatchContinent] = useState('');
+  const [batchCountry, setBatchCountry] = useState('');
   const [batchWithReturn, setBatchWithReturn] = useState(true);
   const [batchQuotes, setBatchQuotes] = useState({});      // `${dep}-${arr}-${profile}` -> { distance_km, eco, biz, first } | { error }
   const [batchBusy, setBatchBusy] = useState(false);
@@ -642,15 +644,28 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
   const quoteKey = (arr) => `${batchDep}-${arr}-${adminProfileId}`;
   const routePairs = useMemo(() => new Set(routes.map(r => `${r.departure_airport}-${r.arrival_airport}`)), [routes]);
 
+  // Hubs first, then grouped by country — same order as the dropdowns.
+  const batchPool = useMemo(() => [
+    ...airportOptions.top.map(a => ({ ...a, group: 'Hubs' })),
+    ...airportOptions.countries.flatMap(c => airportOptions.byCountry[c].map(a => ({ ...a, group: c }))),
+  ].filter(a => a.iata_code !== batchDep), [airportOptions, batchDep]);
+
+  const batchContinentOptions = useMemo(() =>
+    [...new Set(batchPool.map(a => a.continent).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+  [batchPool]);
+  const batchCountryOptions = useMemo(() =>
+    [...new Set(batchPool.filter(a => !batchContinent || a.continent === batchContinent).map(a => a.country).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+  [batchPool, batchContinent]);
+
   const batchCandidates = useMemo(() => {
     if (!batchDep) return [];
     const q = batchSearch.trim().toLowerCase();
-    const list = [...airportOptions.top, ...airportOptions.countries.flatMap(c => airportOptions.byCountry[c])];
-    return list
-      .filter(a => a.iata_code !== batchDep)
+    return batchPool
+      .filter(a => !batchContinent || a.continent === batchContinent)
+      .filter(a => !batchCountry || a.country === batchCountry)
       .filter(a => !q || a.iata_code.toLowerCase().includes(q) || (a.name || '').toLowerCase().includes(q) || (a.country || '').toLowerCase().includes(q))
       .map(a => ({ ...a, exists: routePairs.has(`${batchDep}-${a.iata_code}`), returnExists: routePairs.has(`${a.iata_code}-${batchDep}`) }));
-  }, [batchDep, batchSearch, airports, routePairs]);
+  }, [batchDep, batchPool, batchSearch, batchContinent, batchCountry, routePairs]);
 
   // Switching departure invalidates the selection.
   useEffect(() => { setBatchSelected([]); setBatchResults([]); }, [batchDep]);
@@ -783,7 +798,7 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
       const dests = destsData.destinations || [];
       setAirports(dests.map(d => ({
         iata_code: d.airport_code, name: d.airport_name, country: d.country,
-        category: d.category,
+        continent: d.continent, category: d.category,
         effective_type: d.effective_type || d.destination_type,
         display_type: d.display_type || d.effective_type || d.destination_type,
       })));
@@ -1019,7 +1034,7 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
         .rp-batch-mini:disabled { opacity:0.5; cursor:not-allowed; }
         .rp-batch-list { max-height:420px; overflow-y:auto; border:1px solid #E0E0E0; border-radius:6px; }
         .rp-batch-row { display:grid; grid-template-columns:auto 44px 1fr auto; gap:10px; align-items:center; padding:0.45rem 0.75rem; border-bottom:1px solid #F0F0F0; font-size:0.83rem; cursor:pointer; }
-        .rp-batch-row:last-child { border-bottom:none; }
+        .rp-batch-group { position:sticky; top:0; z-index:1; background:#F5F5F5; padding:0.35rem 0.75rem; font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#666; border-bottom:1px solid #E0E0E0; }
         .rp-batch-row:hover { background:#FAFAFA; }
         .rp-batch-row--on { background:#F5F5F5; }
         .rp-batch-row--off { opacity:0.45; cursor:default; }
@@ -1132,6 +1147,16 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
             )}
 
             {batchDep && (<>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                <select value={batchContinent} onChange={e => { setBatchContinent(e.target.value); setBatchCountry(''); }} className="ma-select">
+                  <option value="">All continents</option>
+                  {batchContinentOptions.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <select value={batchCountry} onChange={e => setBatchCountry(e.target.value)} className="ma-select">
+                  <option value="">All countries</option>
+                  {batchCountryOptions.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
                 <input type="text" value={batchSearch} onChange={e => setBatchSearch(e.target.value)}
                   placeholder="Filter by IATA, name or country…" className="ma-select" style={{ flex: 1 }} />
@@ -1144,16 +1169,19 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                 {batchCandidates.length === 0 && (
                   <div style={{ padding: '1rem', color: '#999', fontSize: '0.85rem', textAlign: 'center' }}>No destinations match.</div>
                 )}
-                {batchCandidates.map(a => {
+                {batchCandidates.map((a, i) => {
                   const checked = batchSelected.includes(a.iata_code);
+                  const header = i === 0 || batchCandidates[i - 1].group !== a.group;
                   const q = checked ? batchQuotes[quoteKey(a.iata_code)] : null;
                   const res = batchResults.find(r => r.arr === a.iata_code);
                   return (
-                    <label key={a.iata_code} className={`rp-batch-row${a.exists ? ' rp-batch-row--off' : ''}${checked ? ' rp-batch-row--on' : ''}`}>
+                    <div key={a.iata_code}>
+                    {header && <div className="rp-batch-group">{a.group}</div>}
+                    <label className={`rp-batch-row${a.exists ? ' rp-batch-row--off' : ''}${checked ? ' rp-batch-row--on' : ''}`}>
                       <input type="checkbox" checked={checked} disabled={a.exists || batchBusy} onChange={() => toggleBatch(a.iata_code)} />
                       <span className="rp-batch-iata">{a.iata_code}</span>
                       <span className="rp-batch-name">
-                        {a.name}<span style={{ color: '#999' }}> · {a.country}{TIER_LABEL[a.effective_type] || ''}</span>
+                        {a.name}<span style={{ color: '#999' }}>{a.group === 'Hubs' ? ` · ${a.country}` : ''}{TIER_LABEL[a.effective_type] || ''}</span>
                         {res && !res.ok && <span style={{ display: 'block', color: '#dc2626', fontSize: '0.72rem' }}>{res.msg}</span>}
                       </span>
                       <span className="rp-batch-meta">
@@ -1167,6 +1195,7 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                           : checked ? '…' : ''}
                       </span>
                     </label>
+                    </div>
                   );
                 })}
               </div>

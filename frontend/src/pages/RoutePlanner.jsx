@@ -112,6 +112,7 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
   const [renumberScheme, setRenumberScheme] = useState('odd_even'); // odd_even | sequential | gap10
   const [renumberOrder, setRenumberOrder] = useState('country');    // country | flight_number | distance
   const [renumberBusy, setRenumberBusy] = useState(false);
+  const [excludeHubToHub, setExcludeHubToHub] = useState(false); // skip legs between two own hubs
   // Match mode: mirror one hub's numbering onto the other hubs. The reference
   // hub IS the pattern — nothing about it is stored, it is read back from the
   // numbers it already carries.
@@ -194,6 +195,10 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
     return true;
   });
 
+  // A leg between two of the airline's own hubs. It has no "destination", so
+  // neither the region ordering nor the match lookup has anything to work with.
+  const isHubToHub = (r) => hubCodeSet.has(r.departure_airport) && hubCodeSet.has(r.arrival_airport);
+
   // The non-hub ("destination") endpoint of a route, for ordering/labels
   const routeDest = (r) => hubCodeSet.has(r.arrival_airport)
     ? { iata: r.departure_airport, country: r.departure_country || '' }
@@ -207,16 +212,18 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
     if (!showRenumber) return { rows: [], hasConflict: false, total: 0 };
 
     const start = parseInt(renumberStart, 10);
-    const filteredIds = new Set(filteredRoutes.map(r => r.id));
-    // Numbers used by routes NOT in the current filter — these are collisions
-    const outsideNumbers = new Set(routes.filter(r => !filteredIds.has(r.id)).map(r => r.flight_number));
+    const planRoutes = excludeHubToHub ? filteredRoutes.filter(r => !isHubToHub(r)) : filteredRoutes;
+    const planIds = new Set(planRoutes.map(r => r.id));
+    // Numbers used by routes this run does not touch — these are collisions.
+    // Excluded hub-to-hub legs count as outside, so their numbers stay reserved.
+    const outsideNumbers = new Set(routes.filter(r => !planIds.has(r.id)).map(r => r.flight_number));
 
     // Pair routes by reversed airports (greedy)
     const used = new Set();
     const units = [];
-    for (const r of filteredRoutes) {
+    for (const r of planRoutes) {
       if (used.has(r.id)) continue;
-      const partner = filteredRoutes.find(p =>
+      const partner = planRoutes.find(p =>
         !used.has(p.id) && p.id !== r.id &&
         p.departure_airport === r.arrival_airport && p.arrival_airport === r.departure_airport);
       used.add(r.id);
@@ -294,7 +301,7 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
     }
 
     return { rows, hasConflict: rows.some(r => r.conflict), total: rows.length };
-  }, [showRenumber, renumberStart, renumberScheme, renumberOrder, filteredRoutes, routes, hubCodeSet, categoryOf, airlineCode]);
+  }, [showRenumber, renumberStart, renumberScheme, renumberOrder, excludeHubToHub, filteredRoutes, routes, hubCodeSet, categoryOf, airlineCode]);
 
   // ---- Match mode ----------------------------------------------------------
   // Hubs that can take part, the effective reference hub and target list. The
@@ -336,9 +343,10 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
     }
     return buildMatchPlan({
       routes, refHub, targetHubs, mask: matchMask, airlineCode,
+      hubCodes: hubCodeSet, skipHubToHub: excludeHubToHub,
       prefixOf: effectivePrefix,
     });
-  }, [showRenumber, renumberMode, refHub, targetHubs, matchMask, matchPrefix, prefixSuggestions, routes, airlineCode]);
+  }, [showRenumber, renumberMode, refHub, targetHubs, matchMask, matchPrefix, prefixSuggestions, excludeHubToHub, hubCodeSet, routes, airlineCode]);
 
   // The plan the modal previews and applies. Scheme mode writes every row it
   // lists; match mode writes only the rows that move.
@@ -2010,6 +2018,19 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                   </div>
                 </div>
               )}
+
+              {/* Shared option */}
+              <div style={{ padding: '12px 22px', borderBottom: '1px solid #F0F0F0' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.82rem', color: '#444' }}>
+                  <input type="checkbox" checked={excludeHubToHub}
+                    onChange={e => setExcludeHubToHub(e.target.checked)}
+                    style={{ cursor: 'pointer' }} />
+                  Exclude hub-to-hub flights
+                  <span style={{ color: '#999', fontSize: '0.76rem' }}>
+                    — legs where both airports are your own hubs keep their numbers
+                  </span>
+                </label>
+              </div>
 
               {/* Preview */}
               <div style={{ overflowY: 'auto', flex: 1 }}>

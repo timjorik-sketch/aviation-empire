@@ -22,13 +22,18 @@ export function flightSuffix(flightNumber) {
 // so that ring swaps land in one batch and the backend's temp-park pass can
 // resolve them; only rows flagged `changed` are meant to be submitted.
 //
-//   routes      [{ id, flight_number, departure_airport, arrival_airport }]
-//   refHub      IATA of the hub that already has the numbering you want
-//   targetHubs  IATA list of the hubs that should copy it
-//   mask        digits inherited from the reference (1-3)
-//   prefixOf    hub -> leading digits that stay hub-specific
-//   airlineCode prefix of every flight number, e.g. "AB"
-export function buildMatchPlan({ routes, refHub, targetHubs, mask, prefixOf, airlineCode }) {
+//   routes       [{ id, flight_number, departure_airport, arrival_airport }]
+//   refHub       IATA of the hub that already has the numbering you want
+//   targetHubs   IATA list of the hubs that should copy it
+//   mask         digits inherited from the reference (1-3)
+//   prefixOf     hub -> leading digits that stay hub-specific
+//   airlineCode  prefix of every flight number, e.g. "AB"
+//   hubCodes     Set of every own hub, needed only for skipHubToHub
+//   skipHubToHub leave legs between two own hubs out of the plan
+export function buildMatchPlan({
+  routes, refHub, targetHubs, mask, prefixOf, airlineCode,
+  hubCodes = null, skipHubToHub = false,
+}) {
   const empty = { rows: [], applyRows: [], hasConflict: false, total: 0, changed: 0 };
   if (!refHub || !Array.isArray(routes) || routes.length === 0) return empty;
 
@@ -66,9 +71,12 @@ export function buildMatchPlan({ routes, refHub, targetHubs, mask, prefixOf, air
         refNumber: ref ? ref.number : null,
         newSuffix: null, newNumber: null, changed: false, conflict: false, reason: '',
       };
-      // A leg between a target hub and the reference hub itself has no
-      // destination to match on, and which prefix it should wear is a judgement
-      // call — so it keeps its number.
+      // A leg between two own hubs has no destination pattern to copy. Legs to
+      // the reference hub itself are always left alone; the rest only when the
+      // caller asks, since they do have a reference number they could inherit.
+      if (skipHubToHub && hubCodes && hubCodes.has(dest)) {
+        rows.push({ ...base, reason: 'hub-to-hub — excluded' }); continue;
+      }
       if (dest === refHub) { rows.push({ ...base, reason: `${refHub} leg — left alone` }); continue; }
       if (!ref) { rows.push({ ...base, reason: `not flown from ${refHub}` }); continue; }
       if (prefixBad) { rows.push({ ...base, conflict: true, reason: `${hub} needs a ${prefixLen}-digit prefix` }); continue; }

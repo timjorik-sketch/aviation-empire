@@ -37,7 +37,8 @@ console.log('\n2) mask 2 inherits only the serial — collision is caught');
     { mask: 2, prefixOf: () => '21' });
   ok('both claim AB2101', row(p, 'MUC', 'CPT').newNumber === 'AB2101' && row(p, 'MUC', 'SIN').newNumber === 'AB2101');
   ok('flagged as conflict', p.hasConflict === true);
-  ok('reason names the clash', row(p, 'MUC', 'SIN').reason === 'two routes claim this number', row(p, 'MUC', 'SIN').reason);
+  ok('both clashing rows listed first', p.rows[0].newNumber === 'AB2101' && p.rows[1].newNumber === 'AB2101');
+  ok('reason names the clash', row(p, 'MUC', 'SIN').reason === 'also claimed by MUC → CPT (from AB1101)', row(p, 'MUC', 'SIN').reason);
   ok('nothing submitted', p.applyRows.length === 0);
 }
 

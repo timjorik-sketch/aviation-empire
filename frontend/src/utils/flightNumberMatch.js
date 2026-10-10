@@ -97,13 +97,27 @@ export function buildMatchPlan({
   const movingIds = new Set(rows.filter(r => r.changed).map(r => r.route_id));
   for (const [number, group] of claims) {
     if (group.length > 1) {
-      group.forEach(r => { r.conflict = true; r.reason = 'two routes claim this number'; });
+      // Name the other claimant(s): with a short mask the clash usually comes
+      // from two reference numbers that differ only in the dropped digits
+      // (AB1005 and AB1105 both end in "05"), which is invisible otherwise.
+      group.forEach(r => {
+        const others = group.filter(o => o !== r)
+          .map(o => `${o.dep} → ${o.arr}${o.refNumber ? ` (from ${o.refNumber})` : ''}`);
+        r.conflict = true;
+        r.reason = `also claimed by ${others.join(', ')}`;
+      });
     }
     const holder = holderOf.get(number);
     if (holder !== undefined && !movingIds.has(holder) && !group.some(r => r.route_id === holder)) {
       group.forEach(r => { r.conflict = true; r.reason = 'number in use elsewhere'; });
     }
   }
+
+  // Clashing rows go to the top, grouped by the number they fight over, so
+  // both sides of a conflict are visible next to each other.
+  const conflictRows = rows.filter(r => r.conflict)
+    .sort((a, b) => String(a.newNumber || '').localeCompare(String(b.newNumber || '')));
+  rows.splice(0, rows.length, ...conflictRows, ...rows.filter(r => !r.conflict));
 
   return {
     rows,

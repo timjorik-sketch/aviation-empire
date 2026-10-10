@@ -524,6 +524,98 @@ router.post('/bulk-renumber', authMiddleware, async (req, res) => {
   }
 });
 
+// Why a route cannot be deleted right now, or null if it can. A route that is
+// still in a flight plan or has pending flights must be cleared first.
+async function deleteBlocker(airlineId, routeId, flightNumber) {
+  // Block deletion if route is used in any aircraft schedule (by route_id or flight_number)
+  const schedResult = await pool.query(`
+    SELECT DISTINCT ac.registration FROM weekly_schedule ws
+    JOIN aircraft ac ON ws.aircraft_id = ac.id
+    WHERE ac.airline_id = $1 AND (ws.route_id = $2 OR ws.flight_number = $3)
+  `, [airlineId, routeId, flightNumber]);
+  const usedBy = schedResult.rows.map(r => r.registration);
+  if (usedBy.length > 0) {
+    return `Route ${flightNumber} is scheduled on aircraft: ${usedBy.join(', ')}. Remove it from those flight plans first.`;
+  }
+
+  // Block deletion if any pending flights still reference this route
+  const pendingResult = await pool.query(`
+    SELECT COUNT(*)::int AS cnt,
+           COALESCE(SUM(booked_economy + booked_business + booked_first), 0)::int AS booked
+    FROM flights
+    WHERE status IN ('scheduled','boarding','in-flight')
+      AND (route_id = $1 OR weekly_schedule_id IN (SELECT id FROM weekly_schedule WHERE route_id = $1))
+  `, [routeId]);
+  const pendingCnt = pendingResult.rows[0]?.cnt ?? 0;
+  const pendingBooked = pendingResult.rows[0]?.booked ?? 0;
+  if (pendingCnt > 0) {
+    return `Route ${flightNumber} has ${pendingCnt} pending flight(s)${pendingBooked > 0 ? ` with ${pendingBooked} booked passenger(s)` : ''}. Cancel or wait for them to complete before deleting.`;
+  }
+  return null;
+}
+
+// Delete the given routes in one transaction. Clears remaining references
+// first: market_analyses.route_id and weekly_schedule.route_id have no ON
+// DELETE action, so a route with a past market analysis could never be
+// deleted. Historical flights keep their record (route_id is nullable, like
+// transfer flights).
+async function deleteRoutes(routeIds) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM market_analyses WHERE route_id = ANY($1)', [routeIds]);
+    await client.query('UPDATE weekly_schedule SET route_id = NULL WHERE route_id = ANY($1)', [routeIds]);
+    await client.query('UPDATE flights SET route_id = NULL WHERE route_id = ANY($1)', [routeIds]);
+    await client.query('DELETE FROM routes WHERE id = ANY($1)', [routeIds]);
+    await client.query('COMMIT');
+  } catch (txErr) {
+    await client.query('ROLLBACK');
+    throw txErr;
+  } finally {
+    client.release();
+  }
+}
+
+// Delete several routes at once. Routes that are blocked (in a flight plan,
+// pending flights) are skipped and reported; the rest are deleted.
+router.post('/bulk-delete', authMiddleware, async (req, res) => {
+  const airlineId = req.airlineId;
+  if (!airlineId) return res.status(400).json({ error: 'No active airline' });
+
+  const ids = Array.isArray(req.body?.route_ids) ? [...new Set(req.body.route_ids.map(id => parseInt(id)))] : null;
+  if (!ids || ids.length === 0 || ids.some(id => !Number.isInteger(id))) {
+    return res.status(400).json({ error: 'No routes provided' });
+  }
+
+  try {
+    const own = await pool.query(
+      'SELECT id, flight_number FROM routes WHERE airline_id = $1 AND id = ANY($2)',
+      [airlineId, ids]
+    );
+    if (own.rows.length !== ids.length) return res.status(404).json({ error: 'Route not found' });
+
+    const deletable = [];
+    const skipped = [];
+    for (const r of own.rows) {
+      const reason = await deleteBlocker(airlineId, r.id, r.flight_number);
+      if (reason) skipped.push({ route_id: r.id, flight_number: r.flight_number, reason });
+      else deletable.push(r.id);
+    }
+
+    if (deletable.length > 0) await deleteRoutes(deletable);
+
+    const n = deletable.length;
+    res.json({
+      message: `Deleted ${n} route${n === 1 ? '' : 's'}${skipped.length ? `, ${skipped.length} skipped` : ''}`,
+      deleted: deletable,
+      skipped,
+    });
+  } catch (error) {
+    console.error('Bulk delete routes error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Delete route
 router.delete('/:id', authMiddleware, async (req, res) => {
   try {
@@ -538,57 +630,11 @@ router.delete('/:id', authMiddleware, async (req, res) => {
     if (!routeResult.rows[0]) {
       return res.status(404).json({ error: 'Route not found' });
     }
-    const flightNumber = routeResult.rows[0].flight_number;
 
-    // Block deletion if route is used in any aircraft schedule (by route_id or flight_number)
-    const schedResult = await pool.query(`
-      SELECT DISTINCT ac.registration FROM weekly_schedule ws
-      JOIN aircraft ac ON ws.aircraft_id = ac.id
-      WHERE ac.airline_id = $1 AND (ws.route_id = $2 OR ws.flight_number = $3)
-    `, [airlineId, routeId, flightNumber]);
-    const usedBy = schedResult.rows.map(r => r.registration);
+    const blocker = await deleteBlocker(airlineId, routeId, routeResult.rows[0].flight_number);
+    if (blocker) return res.status(400).json({ error: blocker });
 
-    if (usedBy.length > 0) {
-      return res.status(400).json({
-        error: `Route ${flightNumber} is scheduled on aircraft: ${usedBy.join(', ')}. Remove it from those flight plans first.`
-      });
-    }
-
-    // Block deletion if any pending flights still reference this route
-    const pendingResult = await pool.query(`
-      SELECT COUNT(*)::int AS cnt,
-             COALESCE(SUM(booked_economy + booked_business + booked_first), 0)::int AS booked
-      FROM flights
-      WHERE status IN ('scheduled','boarding','in-flight')
-        AND (route_id = $1 OR weekly_schedule_id IN (SELECT id FROM weekly_schedule WHERE route_id = $1))
-    `, [routeId]);
-    const pendingCnt = pendingResult.rows[0]?.cnt ?? 0;
-    const pendingBooked = pendingResult.rows[0]?.booked ?? 0;
-    if (pendingCnt > 0) {
-      return res.status(400).json({
-        error: `Route ${flightNumber} has ${pendingCnt} pending flight(s)${pendingBooked > 0 ? ` with ${pendingBooked} booked passenger(s)` : ''}. Cancel or wait for them to complete before deleting.`
-      });
-    }
-
-    // Clear remaining references first: market_analyses.route_id and
-    // weekly_schedule.route_id have no ON DELETE action, so a route with a past
-    // market analysis could never be deleted. Historical flights keep their
-    // record (route_id is nullable, like transfer flights).
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query('DELETE FROM market_analyses WHERE route_id = $1', [routeId]);
-      await client.query('UPDATE weekly_schedule SET route_id = NULL WHERE route_id = $1', [routeId]);
-      await client.query('UPDATE flights SET route_id = NULL WHERE route_id = $1', [routeId]);
-      await client.query('DELETE FROM routes WHERE id = $1', [routeId]);
-      await client.query('COMMIT');
-    } catch (txErr) {
-      await client.query('ROLLBACK');
-      throw txErr;
-    } finally {
-      client.release();
-    }
-
+    await deleteRoutes([routeId]);
     res.json({ message: 'Route deleted successfully' });
   } catch (error) {
     console.error('Delete route error:', error);

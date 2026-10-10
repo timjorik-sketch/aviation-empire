@@ -966,6 +966,47 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
     }
   };
 
+  // Multi-select for bulk delete. Only ids still present and visible count, so
+  // a filter change or a refresh never deletes something the player can't see.
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const selectedRoutes = filteredRoutes.filter(r => selectedIds.has(r.id));
+  const allRoutesSelected = filteredRoutes.length > 0 && selectedRoutes.length === filteredRoutes.length;
+  const toggleSelected = (id) => setSelectedIds(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const toggleSelectAll = () => setSelectedIds(allRoutesSelected ? new Set() : new Set(filteredRoutes.map(r => r.id)));
+
+  const handleBulkDelete = async () => {
+    const targets = selectedRoutes;
+    if (targets.length === 0) return;
+    const list = targets.slice(0, 10).map(r => r.flight_number).join(', ') + (targets.length > 10 ? ', …' : '');
+    if (!confirm(`Delete ${targets.length} route${targets.length === 1 ? '' : 's'}?\n\n${list}`)) return;
+    const token = localStorage.getItem('token');
+    setError(''); setBulkDeleting(true);
+    try {
+      const res = await fetch(`${API_URL}/api/routes/bulk-delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ route_ids: targets.map(r => r.id) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete routes');
+      const skipped = data.skipped || [];
+      if (data.deleted?.length) setSuccess(data.message);
+      if (skipped.length) setError(`Not deleted: ${skipped.map(s => s.reason).join(' ')}`);
+      // Keep the skipped ones selected so the player sees what is left.
+      setSelectedIds(new Set(skipped.map(s => s.route_id)));
+      await refreshRoutes();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   const handleDeleteRoute = async (routeId, flightNumber) => {
     if (!confirm(`Delete route ${flightNumber}?`)) return;
     const token = localStorage.getItem('token');
@@ -1720,9 +1761,26 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
               <p style={{ color: '#666666', marginTop: '1rem' }}>No routes match the selected filters.</p>
             ) : (
               <div style={{ overflowX: 'auto' }}>
+                {selectedRoutes.length > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0.5rem 0.75rem', margin: '0.75rem 0 0.25rem', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 6, fontSize: '0.82rem', color: '#444' }}>
+                    <span><strong>{selectedRoutes.length}</strong> route{selectedRoutes.length === 1 ? '' : 's'} selected</span>
+                    <button type="button" onClick={() => setSelectedIds(new Set())}
+                      style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '0.78rem', textDecoration: 'underline', padding: 0 }}>
+                      Clear selection
+                    </button>
+                    <button type="button" className="rp-btn-delete" onClick={handleBulkDelete} disabled={bulkDeleting} style={{ marginLeft: 'auto' }}>
+                      {bulkDeleting ? 'Deleting…' : `Delete ${selectedRoutes.length} selected`}
+                    </button>
+                  </div>
+                )}
                 <table className="rp-table">
                   <thead>
                     <tr>
+                      <th style={{ width: '28px', textAlign: 'center' }}>
+                        <input type="checkbox" checked={allRoutesSelected} onChange={toggleSelectAll}
+                          ref={el => { if (el) el.indeterminate = selectedRoutes.length > 0 && !allRoutesSelected; }}
+                          title="Select all routes shown" style={{ cursor: 'pointer' }} />
+                      </th>
                       <th style={{ width: '28px' }}></th>
                       {[
                         { col: 'flight_number', label: 'Flight' },
@@ -1744,7 +1802,10 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                       const aircraft = routeAircraft[route.id];
                       return (
                         <>
-                        <tr key={route.id}>
+                        <tr key={route.id} style={selectedIds.has(route.id) ? { background: '#FEF7F7' } : undefined}>
+                          <td style={{ padding: '0.4rem 0.5rem', textAlign: 'center' }}>
+                            <input type="checkbox" checked={selectedIds.has(route.id)} onChange={() => toggleSelected(route.id)} style={{ cursor: 'pointer' }} />
+                          </td>
                           <td style={{ padding: '0.4rem 0.5rem', textAlign: 'center' }}>
                             <button
                               onClick={() => toggleExpand(route.id)}
@@ -1778,7 +1839,7 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                         </tr>
                         {isExpanded && (
                           <tr key={`${route.id}-expand`}>
-                            <td colSpan={6} style={{ padding: 0, background: '#F9F9F9', borderBottom: '2px solid #E8E8E8' }}>
+                            <td colSpan={7} style={{ padding: 0, background: '#F9F9F9', borderBottom: '2px solid #E8E8E8' }}>
                               <div style={{ padding: '14px 16px 14px 44px' }}>
 
                                 {/* Flight Number */}

@@ -263,6 +263,26 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
     } catch (e) { setErrorMsg('Failed to update home base'); }
   };
 
+  const handleToggleActive = async (ac) => {
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch(`${API_URL}/api/aircraft/${ac.id}/active`, {
+        method: 'PATCH', headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.error === 'slot_capacity_exceeded') {
+          const airports = (data.violations || []).map(v => v.airport).join(', ');
+          setErrorMsg(`${ac.registration}: slot capacity exceeded at ${airports}. Open the aircraft to buy expansion levels.`);
+          return;
+        }
+        throw new Error(data.message || data.error || 'Failed');
+      }
+      setFleetOverview(prev => prev.map(a => a.id !== ac.id ? a : { ...a, is_active: data.is_active }));
+      setSuccessMsg(`${ac.registration}: ${data.message}`);
+    } catch (e) { setErrorMsg(e.message || 'Failed to change active state'); }
+  };
+
   const handleDecommission = (ac) => {
     setDecommModal(ac);
   };
@@ -724,6 +744,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                                 <>
                                   <th>Cabin Profile</th>
                                   <th>Home Base</th>
+                                  <th>Status</th>
                                   <th>Decommission</th>
                                 </>
                               ) : viewMode === 'financials' ? (
@@ -852,6 +873,14 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
                                             </optgroup>
                                           ))}
                                         </select>
+                                      </td>
+                                      <td>
+                                        <button
+                                          className={ac.is_active ? 'ov-btn-deactivate' : 'ov-btn-activate'}
+                                          onClick={() => handleToggleActive(ac)}
+                                        >
+                                          {ac.is_active ? 'Deactivate' : 'Activate'}
+                                        </button>
                                       </td>
                                       <td>
                                         <button
@@ -1578,6 +1607,22 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
           transition: background 0.15s, color 0.15s;
         }
         .ov-btn-decomm:hover { background: #dc2626; color: white; }
+
+        .ov-btn-activate,
+        .ov-btn-deactivate {
+          padding: 0.3rem 0.75rem;
+          background: white;
+          border-radius: 6px;
+          font-size: 0.8rem;
+          font-weight: 600;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: background 0.15s, color 0.15s;
+        }
+        .ov-btn-activate { border: 1px solid #16a34a; color: #16a34a; }
+        .ov-btn-activate:hover { background: #16a34a; color: white; }
+        .ov-btn-deactivate { border: 1px solid #6b7280; color: #6b7280; }
+        .ov-btn-deactivate:hover { background: #6b7280; color: white; }
 
         /* Decommission choice modal */
         .decomm-modal-overlay { position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1000;padding:1rem; }

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import TopBar from '../components/TopBar.jsx';
 import Loader from '../components/Loader.jsx';
-import { bankColorMap, berlinToLocal, inWindow, minutesToHHMM, parseHM, windowLabel } from '../utils/bankWindows.js';
+import { bankColorMap, inWindow, minutesToHHMM, parseHM, windowLabel } from '../utils/bankWindows.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -9,7 +9,6 @@ const DAY_LABELS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 
 const fmt = {
   time: (t) => t ? t.slice(0, 5) : '—',
-  flightNum: (fn) => fn.length > 4 ? fn.slice(0, fn.length - 4) + '\u00A0' + fn.slice(-4) : fn,
   reg: (r) => r ? r.replace('-', '–') : r,
 };
 
@@ -45,59 +44,9 @@ function haulCategory(distance_km) {
   return 'long';
 }
 
-// Build day→times map, then compress into display rows
-function buildScheduleRows(slots) {
-  const dayTimes = {};
-  for (const s of slots) {
-    const d = s.day_of_week;
-    if (!dayTimes[d]) dayTimes[d] = new Set();
-    dayTimes[d].add(fmt.time(s.departure_time));
-  }
-
-  // Serialize each day's times as sorted string key
-  const dayPattern = {};
-  for (const [d, set] of Object.entries(dayTimes)) {
-    const key = [...set].sort().join('|');
-    if (!dayPattern[key]) dayPattern[key] = { times: [...set].sort(), days: [] };
-    dayPattern[key].days.push(Number(d));
-  }
-
-  const rows = Object.values(dayPattern).map(({ times, days }) => {
-    days.sort((a, b) => a - b);
-    let label;
-    if (days.length === 7) {
-      label = 'Daily';
-    } else {
-      // Split into consecutive runs, format each as range or single day
-      const runs = [];
-      let runStart = days[0], runEnd = days[0];
-      for (let i = 1; i < days.length; i++) {
-        if (days[i] === runEnd + 1) {
-          runEnd = days[i];
-        } else {
-          runs.push(runStart === runEnd ? DAY_LABELS[runStart] : runEnd - runStart === 1 ? `${DAY_LABELS[runStart]} ${DAY_LABELS[runEnd]}` : `${DAY_LABELS[runStart]}–${DAY_LABELS[runEnd]}`);
-          runStart = runEnd = days[i];
-        }
-      }
-      runs.push(runStart === runEnd ? DAY_LABELS[runStart] : runEnd - runStart === 1 ? `${DAY_LABELS[runStart]} ${DAY_LABELS[runEnd]}` : `${DAY_LABELS[runStart]}–${DAY_LABELS[runEnd]}`);
-      label = runs.join(', ');
-    }
-    return { label, times };
-  });
-
-  // Sort rows: daily first, then by first day index
-  rows.sort((a, b) => {
-    if (a.label === 'Daily') return -1;
-    if (b.label === 'Daily') return 1;
-    return 0;
-  });
-  return rows;
-}
-
-function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAircraft }) {
+function FlightSchedule({ airline, onBack, onNavigateToAirport }) {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState('routes'); // 'routes' | 'distribution'
   const [selectedAirport, setSelectedAirport] = useState(null);
   const [distMode, setDistMode] = useState('departure'); // 'departure' | 'arrival'
   const [haulFilter, setHaulFilter] = useState('all'); // 'all' | 'short' | 'medium' | 'long'
@@ -116,8 +65,7 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
       .catch(() => {});
   }, []);
 
-  // Bank windows are hub-local; in the distribution view the relevant window
-  // follows the mode — departure window for departures, arrival window for arrivals.
+  // Bank windows are hub-local; the relevant window follows the mode — departure window for departures, arrival window for arrivals.
   const bankWindow = (b, mode) => mode === 'departure'
     ? [b.earliest_departure, b.latest_departure]
     : [b.earliest_arrival, b.latest_arrival];
@@ -128,7 +76,7 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
     [banks, selectedAirport]
   );
 
-  // Distribution view: every airport we touch (as origin or destination), with longitude
+  // Every airport we touch (as origin or destination), with longitude
   const distAirports = useMemo(() => {
     const map = new Map();
     for (const e of entries) {
@@ -206,148 +154,14 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
       .sort((a, b) => a.time.localeCompare(b.time));
   }, [entries, selectedAirport, selectedAirportLon, haulFilter, distMode, airportBanks]);
 
-  // Group by departure_airport → flight_number
-  const grouped = entries.reduce((acc, e) => {
-    const depKey = e.departure_airport;
-    if (!acc[depKey]) acc[depKey] = { iata: depKey, name: e.departure_name, byFlight: {} };
-    const fnKey = e.flight_number;
-    if (!acc[depKey].byFlight[fnKey]) {
-      acc[depKey].byFlight[fnKey] = {
-        flight_number: fnKey,
-        arrival_airport: e.arrival_airport,
-        arrival_name: e.arrival_name,
-        slots: [],
-        aircraft: {},
-      };
-    }
-    acc[depKey].byFlight[fnKey].slots.push(e);
-    acc[depKey].byFlight[fnKey].aircraft[e.aircraft_id] = {
-      id: e.aircraft_id, registration: e.registration, is_operating: e.is_operating,
-    };
-    return acc;
-  }, {});
-
-  const airports = Object.values(grouped)
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map(ap => ({
-      ...ap,
-      flights: Object.values(ap.byFlight).sort((a, b) => a.flight_number.localeCompare(b.flight_number)),
-    }));
-
-  const totalRoutes = airports.reduce((s, ap) => s + ap.flights.length, 0);
+  // Header counts: routes = distinct flight numbers per origin airport
+  const totalRoutes = new Set(entries.map(e => `${e.departure_airport}|${e.flight_number}`)).size;
+  const originCount = new Set(entries.map(e => e.departure_airport)).size;
 
   return (
     <div className="app">
       <style>{`
-        /* Section header */
-        .fs-apt-hd {
-          display: flex; align-items: center; gap: 10px;
-          padding: 9px 20px;
-          background: #EFEFEF;
-          border-top: 1px solid #E0E0E0;
-          border-bottom: 1px solid #E0E0E0;
-        }
-        .fs-apt-hd:first-child { border-top: none; }
-        .fs-apt-iata {
-          font-family: monospace; font-size: 0.88rem; font-weight: 800;
-          color: #2C2C2C; letter-spacing: 0.04em; background: none; border: none;
-          padding: 0; cursor: pointer;
-          text-decoration: underline; text-decoration-style: dashed;
-          text-underline-offset: 3px; text-decoration-color: rgba(0,0,0,0.4);
-        }
-        .fs-apt-iata:hover { color: #555; }
-        .fs-apt-name { font-size: 0.78rem; color: #999; }
-        .fs-apt-count { font-size: 0.72rem; color: #BBB; margin-left: auto; }
-
-        /* Flight row */
-        .fs-row {
-          display: grid;
-          grid-template-columns: 72px 44px 1fr auto;
-          align-items: start;
-          gap: 12px;
-          padding: 8px 20px;
-          border-bottom: 0.5px solid #EBEBEB;
-        }
-        .fs-row:last-child { border-bottom: none; }
-        .fs-row:hover { background: #F7F7F7; }
-
-        /* Flight number */
-        .fs-fn {
-          font-family: monospace; font-size: 0.82rem; font-weight: 700;
-          color: #2C2C2C; letter-spacing: 0.02em; padding-top: 1px;
-        }
-
-        /* Destination link */
-        .fs-dest-link {
-          font-family: monospace; font-size: 0.82rem; font-weight: 700;
-          color: #2C2C2C; background: none; border: none; padding: 0; cursor: pointer;
-          text-decoration: underline; text-decoration-style: dashed;
-          text-underline-offset: 3px; text-decoration-color: rgba(0,0,0,0.4);
-          padding-top: 1px;
-        }
-        .fs-dest-link:hover { color: #555; }
-
-        /* Times column */
-        .fs-times { display: flex; flex-direction: column; gap: 4px; }
-        .fs-day-row { display: flex; align-items: center; gap: 6px; }
-        .fs-day-lbl {
-          font-size: 11px; color: #AAA; font-weight: 600;
-          min-width: 58px; flex-shrink: 0;
-        }
-        .fs-pills { display: flex; flex-wrap: wrap; gap: 3px; }
-        .fs-pill {
-          font-size: 11px; font-variant-numeric: tabular-nums;
-          background: #F2F2F2; border: 1px solid #E4E4E4;
-          border-radius: 4px; padding: 1px 5px; color: #444;
-          font-family: monospace;
-        }
-
-        /* Aircraft column */
-        .fs-regs {
-          display: flex; flex-direction: column; align-items: flex-end;
-          gap: 2px; padding-top: 1px;
-        }
-        .fs-reg {
-          font-size: 11px; color: #AAA; font-family: monospace;
-          background: none; border: none; padding: 0; cursor: pointer;
-          text-align: right;
-        }
-        .fs-reg:hover { color: #666; }
-
         .fs-empty { color: #AAA; font-style: italic; font-size: 0.85rem; padding: 2rem 1.5rem; }
-
-        /* View mode pill (header) */
-        .fs-view-pill {
-          display: inline-flex;
-          background: rgba(0,0,0,0.18);
-          border: 1px solid rgba(255,255,255,0.25);
-          border-radius: 6px;
-          padding: 2px;
-          gap: 2px;
-          flex-shrink: 0;
-        }
-        .card-header-bar .fs-view-pill-btn {
-          padding: 0.3rem 0.9rem;
-          background: transparent;
-          border: none;
-          color: rgba(255,255,255,0.75);
-          border-radius: 4px;
-          font-size: 0.7rem;
-          font-weight: 600;
-          cursor: pointer;
-          text-transform: uppercase;
-          letter-spacing: 0.04em;
-          transition: background 0.15s, color 0.15s;
-          white-space: nowrap;
-        }
-        .card-header-bar .fs-view-pill-btn:hover:not(.fs-view-pill-btn--active) {
-          background: rgba(255,255,255,0.1);
-          color: white;
-        }
-        .card-header-bar .fs-view-pill-btn--active {
-          background: white;
-          color: #2C2C2C;
-        }
 
         /* Distribution view */
         .fs-dist-controls {
@@ -490,12 +304,6 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
           border: 1px solid rgba(var(--bk), 0.5); border-radius: 2px;
           background-image: repeating-linear-gradient(135deg, rgba(var(--bk), 0.45) 0 2px, transparent 2px 5px);
         }
-        .fs-pill--bank {
-          background-color: rgba(var(--bk), 0.06);
-          background-image: repeating-linear-gradient(135deg, rgba(var(--bk), 0.2) 0 2px, transparent 2px 5px);
-          border-color: rgba(var(--bk), 0.45);
-        }
-
         @media (max-width: 720px) {
           .fs-dist-head,
           .fs-dist-row { grid-template-columns: 54px repeat(7, 1fr); }
@@ -515,24 +323,6 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
           }
           .fs-header-sub { display: none; }
-          .fs-view-pill { flex-shrink: 0; }
-        }
-
-        @media (max-width: 480px) {
-          .fs-row {
-            grid-template-columns: 60px 38px 1fr;
-            gap: 6px 8px;
-            padding: 8px 12px;
-          }
-          .fs-regs { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px; }
-          .fs-reg { font-size: 10px; }
-          .fs-fn { font-size: 0.75rem; }
-          .fs-dest-link { font-size: 0.75rem; }
-          .fs-day-lbl { min-width: 46px; font-size: 10px; }
-          .fs-pill { font-size: 10px; padding: 1px 4px; }
-          .fs-apt-hd { padding: 7px 12px; gap: 8px; }
-          .fs-apt-iata { font-size: 0.82rem; }
-          .fs-apt-name { font-size: 0.72rem; }
         }
       `}</style>
 
@@ -551,28 +341,8 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
             <div className="fs-header-titles" style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
               <span className="card-header-bar-title">{airline.name} — Flightplan</span>
               <span className="fs-header-sub" style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.5)' }}>
-                {totalRoutes} routes · {airports.length} airports
+                {totalRoutes} routes · {originCount} airports
               </span>
-            </div>
-            <div className="fs-view-pill" role="tablist" aria-label="Flightplan view mode">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={viewMode === 'routes'}
-                className={`fs-view-pill-btn${viewMode === 'routes' ? ' fs-view-pill-btn--active' : ''}`}
-                onClick={() => setViewMode('routes')}
-              >
-                Routes
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={viewMode === 'distribution'}
-                className={`fs-view-pill-btn${viewMode === 'distribution' ? ' fs-view-pill-btn--active' : ''}`}
-                onClick={() => setViewMode('distribution')}
-              >
-                Time Distribution
-              </button>
             </div>
           </div>
 
@@ -580,7 +350,7 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
             <Loader />
           ) : entries.length === 0 ? (
             <div className="fs-empty">No flights scheduled. Assign routes in fleet management.</div>
-          ) : viewMode === 'distribution' ? (
+          ) : (
             <div className="fs-dist">
               <div className="fs-dist-controls">
                 <label className="fs-dist-label">
@@ -716,70 +486,6 @@ function FlightSchedule({ airline, onBack, onNavigateToAirport, onNavigateToAirc
                 </div>
               )}
             </div>
-          ) : (
-            airports.map(ap => (
-              <div key={ap.iata}>
-                <div className="fs-apt-hd">
-                  <button className="fs-apt-iata" onClick={() => onNavigateToAirport?.(ap.iata)}>
-                    {ap.iata}
-                  </button>
-                  <span className="fs-apt-name">{ap.name}</span>
-                  <span className="fs-apt-count">{ap.flights.length} route{ap.flights.length !== 1 ? 's' : ''}</span>
-                </div>
-
-                {ap.flights.map(f => {
-                  const schedRows = buildScheduleRows(f.slots);
-                  const originBanks = banks.filter(b => b.hub_airport_code === ap.iata);
-                  const depLon = f.slots[0]?.departure_longitude;
-                  const bankFor = (t) => {
-                    if (!originBanks.length || t === '—') return null;
-                    const local = berlinToLocal(t, 0, depLon).min;
-                    return originBanks.find(b => inWindow(local, b.earliest_departure, b.latest_departure)) || null;
-                  };
-                  const acList = Object.values(f.aircraft);
-                  return (
-                    <div key={f.flight_number} className="fs-row">
-                      {/* Col 1: flight number */}
-                      <span className="fs-fn">{fmt.flightNum(f.flight_number)}</span>
-
-                      {/* Col 2: destination */}
-                      <button className="fs-dest-link" onClick={() => onNavigateToAirport?.(f.arrival_airport)}>
-                        {f.arrival_airport}
-                      </button>
-
-                      {/* Col 3: departure times by day */}
-                      <div className="fs-times">
-                        {schedRows.map(row => (
-                          <div key={row.label} className="fs-day-row">
-                            <span className="fs-day-lbl">{row.label}</span>
-                            <div className="fs-pills">
-                              {row.times.map(t => {
-                                const bk = bankFor(t);
-                                return (
-                                  <span key={t} className={`fs-pill${bk ? ' fs-pill--bank' : ''}`} style={bankStyle(bk)}
-                                    title={bk ? `${bk.name} · departure window ${windowLabel(bk.earliest_departure, bk.latest_departure)} (${ap.iata} local)` : undefined}>
-                                    {t}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Col 4: aircraft registrations */}
-                      <div className="fs-regs">
-                        {acList.map(ac => (
-                          <button key={ac.id} className="fs-reg" onClick={() => onNavigateToAircraft?.(ac.id)}>
-                            {fmt.reg(ac.registration)}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ))
           )}
         </div>
       </div>

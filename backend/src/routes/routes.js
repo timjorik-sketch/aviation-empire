@@ -570,7 +570,24 @@ router.delete('/:id', authMiddleware, async (req, res) => {
       });
     }
 
-    await pool.query('DELETE FROM routes WHERE id = $1', [routeId]);
+    // Clear remaining references first: market_analyses.route_id and
+    // weekly_schedule.route_id have no ON DELETE action, so a route with a past
+    // market analysis could never be deleted. Historical flights keep their
+    // record (route_id is nullable, like transfer flights).
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM market_analyses WHERE route_id = $1', [routeId]);
+      await client.query('UPDATE weekly_schedule SET route_id = NULL WHERE route_id = $1', [routeId]);
+      await client.query('UPDATE flights SET route_id = NULL WHERE route_id = $1', [routeId]);
+      await client.query('DELETE FROM routes WHERE id = $1', [routeId]);
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
 
     res.json({ message: 'Route deleted successfully' });
   } catch (error) {

@@ -2295,29 +2295,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
   const aircraftRange = aircraft?.range_km ?? null;
 
-  // 3 most recently created routes plus each one's reverse direction (if it exists),
-  // shown in a "Recent" optgroup at the top of the route dropdowns.
-  const recentRoutes = useMemo(() => {
-    if (!routes.length) return [];
-    const sorted = [...routes].sort((a, b) => {
-      const aT = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const bT = b.created_at ? new Date(b.created_at).getTime() : 0;
-      return bT - aT;
-    });
-    const seen = new Set();
-    const out = [];
-    for (const r of sorted.slice(0, 3)) {
-      if (!seen.has(r.id)) { seen.add(r.id); out.push(r); }
-      const reverse = routes.find(x =>
-        x.id !== r.id &&
-        x.departure_airport === r.arrival_airport &&
-        x.arrival_airport === r.departure_airport
-      );
-      if (reverse && !seen.has(reverse.id)) { seen.add(reverse.id); out.push(reverse); }
-    }
-    return out;
-  }, [routes]);
-
   // Marker in front of every route option, so the closed dropdown shows at a
   // glance whether the route is already flown:
   //   ●  already planned   ○  not planned yet   ⚠  out of range (disabled)
@@ -3122,11 +3099,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                   </label>
                   <select value={sRouteId} onChange={e => { setSRouteId(e.target.value); setSEcoPrice(''); setSBizPrice(''); setSFirstPrice(''); }}>
                     <option value="">— select route —</option>
-                    {recentRoutes.length > 0 && (
-                      <optgroup label="Recent">
-                        {recentRoutes.map(r => renderRouteOption(r, 's-recent-'))}
-                      </optgroup>
-                    )}
                     {renderAllRouteGroups('s-')}
                   </select>
                 </div>
@@ -3208,11 +3180,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                   <label>Outbound</label>
                   <select value={outRouteId} onChange={e => { setOutRouteId(e.target.value); setInRouteId(''); setREcoPrice(''); setRBizPrice(''); setRFirstPrice(''); }}>
                     <option value="">— select —</option>
-                    {recentRoutes.length > 0 && (
-                      <optgroup label="Recent">
-                        {recentRoutes.map(r => renderRouteOption(r, 'out-recent-'))}
-                      </optgroup>
-                    )}
                     {renderAllRouteGroups('out-')}
                   </select>
                 </div>
@@ -3220,11 +3187,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                   <label>Inbound</label>
                   <select value={inRouteId} onChange={e => setInRouteId(e.target.value)}>
                     <option value="">— select —</option>
-                    {recentRoutes.length > 0 && (
-                      <optgroup label="Recent">
-                        {recentRoutes.map(r => renderRouteOption(r, 'in-recent-'))}
-                      </optgroup>
-                    )}
                     {renderAllRouteGroups('in-')}
                   </select>
                 </div>
@@ -3404,9 +3366,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                   </label>
                   <select value={bankForwardRouteId} onChange={e => setBankForwardRouteId(e.target.value)}>
                     <option value="">— select route —</option>
-                    {recentRoutes.length > 0 && (
-                      <optgroup label="Recent">{recentRoutes.map(r => renderRouteOption(r, 'bank-recent-'))}</optgroup>
-                    )}
                     {renderAllRouteGroups('bank-')}
                   </select>
                 </div>

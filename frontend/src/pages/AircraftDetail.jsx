@@ -2333,6 +2333,32 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     );
   };
 
+  // Routes for the "All routes" part of the dropdowns: first the ones departing
+  // from the aircraft's home base, then all others, each sorted by flight number.
+  const byFlightNumber = (a, b) =>
+    String(a.flight_number || '').localeCompare(String(b.flight_number || ''), undefined, { numeric: true });
+  const homeBase = aircraft?.home_airport || '';
+  const homeRoutes = useMemo(
+    () => (homeBase ? routes.filter(r => r.departure_airport === homeBase) : []).sort(byFlightNumber),
+    [routes, homeBase]
+  );
+  const otherRoutes = useMemo(
+    () => routes.filter(r => !homeBase || r.departure_airport !== homeBase).sort(byFlightNumber),
+    [routes, homeBase]
+  );
+  const renderAllRouteGroups = (keyPrefix) => (
+    <>
+      {homeRoutes.length > 0 && (
+        <optgroup label={`From ${homeBase}`}>
+          {homeRoutes.map(r => renderRouteOption(r, `${keyPrefix}home-`))}
+        </optgroup>
+      )}
+      <optgroup label={homeRoutes.length > 0 ? 'Other routes' : 'All routes'}>
+        {otherRoutes.map(r => renderRouteOption(r, `${keyPrefix}all-`))}
+      </optgroup>
+    </>
+  );
+
   // Shared legend, placed under each route picker.
   const routeLegend = (
     <div className="sched-route-legend">
@@ -3101,9 +3127,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                         {recentRoutes.map(r => renderRouteOption(r, 's-recent-'))}
                       </optgroup>
                     )}
-                    <optgroup label="All Routes">
-                      {routes.map(r => renderRouteOption(r, 's-all-'))}
-                    </optgroup>
+                    {renderAllRouteGroups('s-')}
                   </select>
                 </div>
                 {routeLegend}
@@ -3189,9 +3213,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                         {recentRoutes.map(r => renderRouteOption(r, 'out-recent-'))}
                       </optgroup>
                     )}
-                    <optgroup label="All Routes">
-                      {routes.map(r => renderRouteOption(r, 'out-all-'))}
-                    </optgroup>
+                    {renderAllRouteGroups('out-')}
                   </select>
                 </div>
                 <div className="sched-form-row">
@@ -3203,9 +3225,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                         {recentRoutes.map(r => renderRouteOption(r, 'in-recent-'))}
                       </optgroup>
                     )}
-                    <optgroup label="All Routes">
-                      {routes.map(r => renderRouteOption(r, 'in-all-'))}
-                    </optgroup>
+                    {renderAllRouteGroups('in-')}
                   </select>
                 </div>
                 {routeLegend}
@@ -3387,7 +3407,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     {recentRoutes.length > 0 && (
                       <optgroup label="Recent">{recentRoutes.map(r => renderRouteOption(r, 'bank-recent-'))}</optgroup>
                     )}
-                    <optgroup label="All routes">{routes.map(r => renderRouteOption(r, 'bank-all-'))}</optgroup>
+                    {renderAllRouteGroups('bank-')}
                   </select>
                 </div>
                 {routeLegend}

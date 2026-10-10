@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import AirportLink from '../components/AirportLink.jsx';
 import { groupAirportsForDropdown } from '../utils/airportSort.js';
-import { buildMatchPlan, suggestPrefix } from '../utils/flightNumberMatch.js';
+import { buildMatchPlan, suggestPrefix, suggestOffset } from '../utils/flightNumberMatch.js';
 import TopBar from '../components/TopBar.jsx';
 import Toast from '../components/Toast.jsx';
 import RoutePreviewMap from '../components/RoutePreviewMap.jsx';
@@ -119,7 +119,7 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
   const [renumberMode, setRenumberMode] = useState('scheme'); // scheme | match
   const [matchRefHub, setMatchRefHub] = useState('');         // '' = first hub
   const [matchTargets, setMatchTargets] = useState(null);     // null = every other hub
-  const [matchMask, setMatchMask] = useState(3);              // digits inherited from the reference
+  const [matchMask, setMatchMask] = useState(3);              // digits inherited from the reference, 0 = offset
   const [matchPrefix, setMatchPrefix] = useState({});         // hub -> manual prefix override
 
   const handleSort = (col) => {
@@ -319,9 +319,11 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
   // most often. Manual edits in the modal win over the proposal.
   const prefixSuggestions = useMemo(() => {
     const out = {};
-    for (const hub of matchHubs) out[hub] = suggestPrefix(routes, hub, prefixLen);
+    for (const hub of matchHubs) {
+      out[hub] = matchMask === 0 ? suggestOffset(routes, refHub, hub) : suggestPrefix(routes, hub, prefixLen);
+    }
     return out;
-  }, [routes, matchHubs, prefixLen]);
+  }, [routes, matchHubs, prefixLen, matchMask, refHub]);
 
   const effectivePrefix = (hub) => {
     const override = matchPrefix[hub];
@@ -1979,12 +1981,13 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                         <option value={3}>Last 3 digits — region + serial</option>
                         <option value={2}>Last 2 digits — serial only</option>
                         <option value={1}>Last digit — direction only</option>
+                        <option value={0}>Whole number + offset</option>
                       </select>
                     </div>
                   </div>
 
                   <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: '#666', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '14px 0 6px' }}>
-                    Hubs to match — prefix + inherited digits
+                    {matchMask === 0 ? 'Hubs to match — offset added to the reference number' : 'Hubs to match — prefix + inherited digits'}
                   </label>
                   {matchHubs.filter(h => h !== refHub).length === 0 ? (
                     <div style={{ fontSize: '0.8rem', color: '#999' }}>No other hub flies a route yet.</div>
@@ -1998,12 +2001,15 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                             <input type="checkbox" checked={on} onChange={() => toggleMatchTarget(hub)} style={{ cursor: 'pointer' }} />
                             <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.85rem', color: on ? '#2C2C2C' : '#AAA' }}>{hub}</span>
                             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <input type="text" value={prefix} disabled={!on} maxLength={prefixLen}
-                                onChange={e => setMatchPrefix(prev => ({ ...prev, [hub]: e.target.value.replace(/\D/g, '').slice(0, prefixLen) }))}
-                                style={{ width: 14 + prefixLen * 11, padding: '0.3rem 0.2rem', borderRadius: 4, textAlign: 'center',
-                                  border: (on && prefix.length !== prefixLen) ? '1px solid #dc2626' : '1px solid #E0E0E0',
+                              {matchMask === 0 && <span style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: '#AAA', paddingRight: 3 }}>+</span>}
+                              <input type="text" value={prefix} disabled={!on} maxLength={matchMask === 0 ? 5 : prefixLen}
+                                onChange={e => setMatchPrefix(prev => ({ ...prev, [hub]: matchMask === 0
+                                  ? e.target.value.replace(/[^\d-]/g, '').replace(/(?!^)-/g, '').slice(0, 5)
+                                  : e.target.value.replace(/\D/g, '').slice(0, prefixLen) }))}
+                                style={{ width: 14 + (matchMask === 0 ? 4 : prefixLen) * 11, padding: '0.3rem 0.2rem', borderRadius: 4, textAlign: 'center',
+                                  border: (on && (matchMask === 0 ? !/^-?\d+$/.test(prefix) : prefix.length !== prefixLen)) ? '1px solid #dc2626' : '1px solid #E0E0E0',
                                   fontSize: '0.85rem', fontFamily: 'monospace', fontWeight: 700, boxSizing: 'content-box' }} />
-                              <span style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: '#CCC', letterSpacing: '2px', paddingLeft: 3 }}>{'\u00b7'.repeat(matchMask)}</span>
+                              {matchMask > 0 && <span style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: '#CCC', letterSpacing: '2px', paddingLeft: 3 }}>{'\u00b7'.repeat(matchMask)}</span>}
                             </div>
                           </div>
                         );
@@ -2012,7 +2018,9 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                   )}
 
                   <div style={{ fontSize: '0.74rem', color: '#888', marginTop: 10, lineHeight: 1.5 }}>
-                    Every target route inherits the last {matchMask} digit{matchMask === 1 ? '' : 's'} of {refHub || 'the reference hub'}&rsquo;s route to the same destination, behind that hub&rsquo;s prefix.
+                    {matchMask === 0
+                      ? <>Every target route takes {refHub || 'the reference hub'}&rsquo;s number to the same destination plus that hub&rsquo;s offset.</>
+                      : <>Every target route inherits the last {matchMask} digit{matchMask === 1 ? '' : 's'} of {refHub || 'the reference hub'}&rsquo;s route to the same destination, behind that hub&rsquo;s prefix.</>}
                     {matchExample && <> Example: <span style={{ fontFamily: 'monospace', color: '#444' }}>{matchExample.refNumber} &rarr; {matchExample.newNumber}</span> ({matchExample.dep} &rarr; {matchExample.arr}).</>}
                     {' '}Destinations {refHub || 'it'} does not serve are left untouched.
                   </div>

@@ -1,6 +1,6 @@
 // Scenarios for buildMatchPlan(). No test runner in this repo — run it with:
 //   node frontend/src/utils/flightNumberMatch.test.mjs
-import { buildMatchPlan, suggestPrefix } from './flightNumberMatch.js';
+import { buildMatchPlan, suggestPrefix, suggestOffset } from './flightNumberMatch.js';
 
 let pass = 0, fail = 0;
 const ok = (name, cond, extra = '') => {
@@ -161,6 +161,22 @@ console.log('\n13) excluding is safe without a hub set');
   // hubCodes omitted — the switch must not throw, it simply cannot apply.
   const p = plan([...ref, R(5, 'AB2905', 'MUC', 'CPT')], { skipHubToHub: true });
   ok('plan still builds', p.applyRows.length === 1 && row(p, 'MUC', 'CPT').newNumber === 'AB2101');
+}
+
+console.log('\noffset mode: whole reference number plus a per-hub offset');
+{
+  const muc = [R(101, 'AB1000', 'MUC', 'LCY'), R(102, 'AB1001', 'LCY', 'MUC'), R(103, 'AB1120', 'MUC', 'OSL'), R(104, 'AB1105', 'MUC', 'VCE')];
+  const cdg = [R(201, 'AB2045', 'CDG', 'LCY'), R(202, 'AB2046', 'LCY', 'CDG'), R(203, 'AB2047', 'CDG', 'OSL'), R(204, 'AB2048', 'CDG', 'VCE')];
+  const p = buildMatchPlan({ routes: [...muc, ...cdg], refHub: 'MUC', targetHubs: ['CDG'], mask: 0, airlineCode: 'AB', prefixOf: () => '500' });
+  ok('CDG->LCY becomes 1500', row(p, 'CDG', 'LCY').newNumber === 'AB1500', row(p, 'CDG', 'LCY').newNumber);
+  ok('LCY->CDG becomes 1501', row(p, 'LCY', 'CDG').newNumber === 'AB1501', row(p, 'LCY', 'CDG').newNumber);
+  ok('CDG->OSL becomes 1620', row(p, 'CDG', 'OSL').newNumber === 'AB1620', row(p, 'CDG', 'OSL').newNumber);
+  ok('x05 and x105 do not clash', row(p, 'CDG', 'VCE').newNumber === 'AB1605' && !p.hasConflict);
+  const bad = buildMatchPlan({ routes: [...muc, ...cdg], refHub: 'MUC', targetHubs: ['CDG'], mask: 0, airlineCode: 'AB', prefixOf: () => '' });
+  ok('missing offset is a conflict', bad.hasConflict && bad.rows.every(r => r.reason === 'CDG needs an offset'));
+  const over = buildMatchPlan({ routes: [...muc, ...cdg], refHub: 'MUC', targetHubs: ['CDG'], mask: 0, airlineCode: 'AB', prefixOf: () => '9000' });
+  ok('overflow is a conflict', over.rows.every(r => r.conflict));
+  ok('suggestOffset rounds to the hundred', suggestOffset([...muc, ...cdg], 'MUC', 'CDG') === '1000', suggestOffset([...muc, ...cdg], 'MUC', 'CDG'));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -25,8 +25,11 @@ export function flightSuffix(flightNumber) {
 //   routes       [{ id, flight_number, departure_airport, arrival_airport }]
 //   refHub       IATA of the hub that already has the numbering you want
 //   targetHubs   IATA list of the hubs that should copy it
-//   mask         digits inherited from the reference (1-3)
-//   prefixOf     hub -> leading digits that stay hub-specific
+//   mask         digits inherited from the reference (1-3), or 0 for offset
+//                mode: the whole reference number plus a per-hub offset
+//                (MUC 1000-1120, offset 500 => CDG 1500-1620)
+//   prefixOf     hub -> leading digits that stay hub-specific, or in offset
+//                mode the offset as a string ("500", "-200")
 //   airlineCode  prefix of every flight number, e.g. "AB"
 //   hubCodes     Set of every own hub, needed only for skipHubToHub
 //   skipHubToHub leave legs between two own hubs out of the plan
@@ -37,6 +40,7 @@ export function buildMatchPlan({
   const empty = { rows: [], applyRows: [], hasConflict: false, total: 0, changed: 0 };
   if (!refHub || !Array.isArray(routes) || routes.length === 0) return empty;
 
+  const offsetMode = mask === 0;
   const prefixLen = 4 - mask;
 
   // What the reference hub flies, keyed by destination + direction.
@@ -54,8 +58,9 @@ export function buildMatchPlan({
   const rows = [];
   const seen = new Set();
   for (const hub of targetHubs) {
-    const prefix = prefixOf(hub);
-    const prefixBad = prefix.length !== prefixLen;
+    const prefix = String(prefixOf(hub) ?? '');
+    const offset = offsetMode && /^[+-]?\d+$/.test(prefix) ? parseInt(prefix, 10) : null;
+    const prefixBad = offsetMode ? offset === null : prefix.length !== prefixLen;
     const hubRoutes = routes
       .filter(r => r.departure_airport === hub || r.arrival_airport === hub)
       .sort((a, b) => String(a.flight_number).localeCompare(String(b.flight_number)));
@@ -79,8 +84,18 @@ export function buildMatchPlan({
       }
       if (dest === refHub) { rows.push({ ...base, reason: `${refHub} leg — left alone` }); continue; }
       if (!ref) { rows.push({ ...base, reason: `not flown from ${refHub}` }); continue; }
-      if (prefixBad) { rows.push({ ...base, conflict: true, reason: `${hub} needs a ${prefixLen}-digit prefix` }); continue; }
-      const newSuffix = prefix + ref.suffix.slice(prefixLen);
+      if (prefixBad) {
+        rows.push({ ...base, conflict: true, reason: offsetMode ? `${hub} needs an offset` : `${hub} needs a ${prefixLen}-digit prefix` });
+        continue;
+      }
+      let newSuffix;
+      if (offsetMode) {
+        const n = parseInt(ref.suffix, 10) + offset;
+        if (n < 1 || n > 9999) { rows.push({ ...base, conflict: true, reason: 'outside 0001-9999' }); continue; }
+        newSuffix = String(n).padStart(4, '0');
+      } else {
+        newSuffix = prefix + ref.suffix.slice(prefixLen);
+      }
       const newNumber = `${airlineCode}${newSuffix}`;
       rows.push({ ...base, newSuffix, newNumber, changed: newNumber !== r.flight_number });
     }
@@ -143,4 +158,24 @@ export function suggestPrefix(routes, hub, prefixLen) {
   let best = '', bestCount = 0;
   for (const [pre, n] of counts) if (n > bestCount) { best = pre; bestCount = n; }
   return best;
+}
+
+// Offset mode: the distance between the lowest number the reference hub flies
+// and the lowest the target hub flies, rounded to the hundred. A target that
+// already sits in its own block (MUC 1000s, CDG 1500s) gets "500" proposed.
+export function suggestOffset(routes, refHub, hub) {
+  const lowest = (h) => {
+    let min = null;
+    for (const r of routes) {
+      if (r.departure_airport !== h && r.arrival_airport !== h) continue;
+      const suf = flightSuffix(r.flight_number);
+      if (suf === null) continue;
+      const n = parseInt(suf, 10);
+      if (min === null || n < min) min = n;
+    }
+    return min;
+  };
+  const a = lowest(refHub), b = lowest(hub);
+  if (a === null || b === null) return '';
+  return String(Math.round((b - a) / 100) * 100);
 }

@@ -1231,36 +1231,41 @@ async function initDatabase() {
     await safeQuery('INSERT INTO fuel_prices (price_per_liter) VALUES ($1)', [0.72], 'fuel seed');
   }
 
-  // ── ONE-TIME RETAG: legacy 'cascade' rows that were really 'wrong_location'.
-  // Before the boarding-hook fallback was split out, every aircraft-not-at-dep
-  // cancellation was tagged 'cascade'. Re-tag rows that are NOT within 24h
-  // after a 'technical_air' event on the same aircraft — those are the genuine
-  // wrong_location cases (no upstream disruption window to attribute them to).
-  // Idempotent: nothing matches once a row is already 'wrong_location'.
-  await safeQuery(`
-    UPDATE flight_delay_events fde
-    SET event_type = 'wrong_location'
-    WHERE fde.event_type = 'cascade'
-      AND NOT EXISTS (
-        SELECT 1 FROM flight_delay_events ta
-        WHERE ta.aircraft_id = fde.aircraft_id
-          AND ta.event_type = 'technical_air'
-          AND ta.created_at <= fde.created_at
-          AND ta.created_at >= fde.created_at - INTERVAL '24 hours'
-      )
-  `, null, 'cascade→wrong_location retag (events)');
-
+  // ── RETAG: 'wrong_location' cancels that were really knock-ons ─────────────
+  // A leg whose previous leg (same aircraft) was planned to land at its
+  // departure airport but got cancelled is a cascade, not a planning error.
+  // Same rule as the boarding hook in processFlights. Idempotent.
   await safeQuery(`
     UPDATE flights f
-    SET delay_reason = 'wrong_location'
-    WHERE f.delay_reason = 'cascade'
+    SET delay_reason = 'cascade'
+    WHERE f.delay_reason = 'wrong_location'
       AND f.status = 'cancelled'
-      AND EXISTS (
-        SELECT 1 FROM flight_delay_events fde
-        WHERE fde.flight_id = f.id
-          AND fde.event_type = 'wrong_location'
-      )
-  `, null, 'cascade→wrong_location retag (flights)');
+      AND (
+        SELECT p.status = 'cancelled'
+           AND COALESCE(pr.arrival_airport, pws.arrival_airport)
+             = (SELECT COALESCE(r.departure_airport, ws.departure_airport)
+                FROM flights x
+                LEFT JOIN routes r           ON x.route_id           = r.id
+                LEFT JOIN weekly_schedule ws ON x.weekly_schedule_id = ws.id
+                WHERE x.id = f.id)
+        FROM flights p
+        LEFT JOIN routes pr           ON p.route_id           = pr.id
+        LEFT JOIN weekly_schedule pws ON p.weekly_schedule_id = pws.id
+        WHERE p.aircraft_id = f.aircraft_id AND p.id <> f.id
+          AND p.departure_time < f.departure_time
+        ORDER BY p.departure_time DESC
+        LIMIT 1
+      ) IS TRUE
+  `, null, 'wrong_location→cascade retag (flights)');
+
+  await safeQuery(`
+    UPDATE flight_delay_events fde
+    SET event_type = 'cascade'
+    FROM flights f
+    WHERE fde.flight_id = f.id
+      AND fde.event_type = 'wrong_location'
+      AND f.delay_reason = 'cascade'
+  `, null, 'wrong_location→cascade retag (events)');
 
   // ── CLEANUP: drop legacy/unused tables ───────────────────────────────────────
   await safeQuery(`ALTER TABLE flights DROP CONSTRAINT IF EXISTS flights_service_profile_id_fkey`, null, 'drop sp fkey');

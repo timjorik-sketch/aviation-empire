@@ -1718,7 +1718,19 @@ async function processFlights() {
             AND p.status = 'completed'
           ORDER BY p.departure_time DESC
           LIMIT 1
-        ) AS prev_arrival
+        ) AS prev_arrival,
+        (
+          SELECT p.status = 'cancelled'
+             AND COALESCE(pr.arrival_airport, pws.arrival_airport)
+               = COALESCE(r.departure_airport, ws.departure_airport)
+          FROM flights p
+          LEFT JOIN routes pr           ON p.route_id           = pr.id
+          LEFT JOIN weekly_schedule pws ON p.weekly_schedule_id = pws.id
+          WHERE p.aircraft_id = f.aircraft_id AND p.id <> f.id
+            AND p.departure_time < f.departure_time
+          ORDER BY p.departure_time DESC
+          LIMIT 1
+        ) AS prev_leg_cancelled_here
       FROM flights f
       LEFT JOIN routes r           ON f.route_id           = r.id
       LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
@@ -1773,21 +1785,23 @@ async function processFlights() {
       if (f.aircraft_id && f.has_pending_earlier) continue;
 
       // ── Aircraft can't operate this flight: wrong location OR in repair ──
-      // All cancels caused by the aircraft being unavailable share the same
-      // root cause from the player's perspective and are tagged
-      // 'wrong_location' — whether discovered at boarding time or eagerly
-      // cancelled inside an upstream disruption window.
+      // If the schedule itself chains here (the previous leg was planned to
+      // land at this departure airport) but that leg got cancelled, the
+      // aircraft is only out of position because of the earlier disruption:
+      // tag it 'cascade'. Otherwise the rotation doesn't connect (or the
+      // aircraft is in repair) and it stays 'wrong_location'.
       const inRepair      = f.unavailable_until && new Date(f.unavailable_until) > now;
       const wrongLocation = f.current_location !== null && f.current_location !== f.dep_airport;
       if (wrongLocation || inRepair) {
+        const reason = (!inRepair && f.prev_leg_cancelled_here) ? 'cascade' : 'wrong_location';
         const totalBooked = (f.booked_eco || 0) + (f.booked_biz || 0) + (f.booked_fir || 0);
         const seats = totalBooked > 0 ? totalBooked : (f.seats_sold || 0);
         const cancel = calcCancelCosts(seats, f.hotel_partnership, !depIsHub);
         const cost = cancel.totalCost;
 
         await pool.query(
-          "UPDATE flights SET status = 'cancelled', delay_reason = 'wrong_location', is_wet_leased = false WHERE id = $1",
-          [f.id]
+          "UPDATE flights SET status = 'cancelled', delay_reason = $1, is_wet_leased = false WHERE id = $2",
+          [reason, f.id]
         );
 
         if (cost > 0) {
@@ -1801,11 +1815,11 @@ async function processFlights() {
 
         await logDelayEvent({
           flightId: f.id, airlineId: f.airline_id, aircraftId: f.aircraft_id,
-          eventType: 'wrong_location', outcome: 'cancelled',
+          eventType: reason, outcome: 'cancelled',
           cost, satisfactionMalus: 20, wetLeased: false,
         });
 
-        console.log(`[FlightProc] ${f.flight_number} CANCELLED wrong_location (${inRepair ? 'in repair' : `at ${f.current_location}`}), cost $${cost}`);
+        console.log(`[FlightProc] ${f.flight_number} CANCELLED ${reason} (${inRepair ? 'in repair' : `at ${f.current_location}`}), cost $${cost}`);
         continue;
       }
 
@@ -1983,9 +1997,9 @@ async function processFlights() {
         // Eager-cancel every scheduled flight of this aircraft whose
         // departure_time falls inside the disruption window (now → new arrival).
         // These ARE cascade effects of a known upstream Tech Air event, so
-        // we tag them 'cascade'. Later location mismatches that aren't tied
-        // to such a window are caught by the boarding-hook fallback above
-        // and tagged 'wrong_location'.
+        // we tag them 'cascade'. Legs after the window that then find the
+        // aircraft out of position are caught by the boarding hook above,
+        // which also tags them 'cascade' (previous leg cancelled).
         await cancelNextRotations({
           aircraftId: f.aircraft_id,
           airlineId: f.airline_id,

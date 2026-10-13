@@ -61,6 +61,10 @@ const FLAVORS = {
     'Aircraft positioning issue',
     'Aircraft not at scheduled gate',
   ],
+  cascade: [
+    'Aircraft out of position after earlier cancellation',
+    'Knock-on from earlier disruption',
+  ],
   medical_cascade: [
     'Aircraft late after medical diversion',
     'Knock-on from medical diversion',

@@ -1535,7 +1535,9 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const onDragMove = useCallback((e) => {
     const d = dragRef.current; if (!d) return;
     let deltaMin = Math.round((e.clientY - d.startY) / PX_PER_MIN);
-    if (e.shiftKey) deltaMin = Math.round(deltaMin / 5) * 5;   // Shift = 5-minute increments
+    // Shift = 5-minute increments; touch/pen always snaps (no Shift key there).
+    const snap5 = e.shiftKey || d.touch;
+    if (snap5) deltaMin = Math.round(deltaMin / 5) * 5;
     if (d.kind === 'maint') {
       // Horizontal movement shifts the target across day columns; clampMaint then
       // snaps to the nearest valid gap (which may be on that other day).
@@ -1548,7 +1550,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       const WK = 7 * 1440;
       const dayDelta = d.colWidth ? Math.round((e.clientX - d.startX) / d.colWidth) : 0;
       let val = d.startVal + dayDelta * 1440 + deltaMin;
-      if (e.shiftKey) val = Math.round(val / 5) * 5;   // Shift = snap to a 5-minute rhythm
+      if (snap5) val = Math.round(val / 5) * 5;   // snap to a 5-minute rhythm
       val = ((val % WK) + WK) % WK;
       if (d.target === 'maint') setEditMaints(prev => prev.map((m, i) => i === d.idx ? { ...m, wkStart: val } : m));
       else                      setEditLegs(prev => prev.map((l, i) => i === d.idx ? { ...l, wkDep: val } : l));
@@ -1565,9 +1567,10 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   }, [onDragMove]);
   const onGhostMouseDown = useCallback((e, idx) => {
     e.preventDefault(); e.stopPropagation();
+    const touch = e.pointerType !== 'mouse';
     setPlanLegs(prev => {
       const leg = prev[idx];
-      dragRef.current = { kind: 'leg', idx, startY: e.clientY, startVal: leg.drag === 'dep' ? leg.week_dep : leg.week_arr };
+      dragRef.current = { kind: 'leg', idx, touch, startY: e.clientY, startVal: leg.drag === 'dep' ? leg.week_dep : leg.week_arr };
       return prev;
     });
     document.body.style.userSelect = 'none';
@@ -1580,7 +1583,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     if (!planMeta || maintGaps.autoRaw == null) return;
     const startVal = maintOverride != null ? maintOverride : maintGaps.autoRaw;
     const colWidth = e.currentTarget?.parentElement?.getBoundingClientRect().width || 0;
-    dragRef.current = { kind: 'maint', startY: e.clientY, startX: e.clientX, colWidth, startVal, gaps: maintGaps.gaps, duration: planMeta.maintDuration, turnaround: planMeta.turnaround };
+    dragRef.current = { kind: 'maint', touch: e.pointerType !== 'mouse', startY: e.clientY, startX: e.clientX, colWidth, startVal, gaps: maintGaps.gaps, duration: planMeta.maintDuration, turnaround: planMeta.turnaround };
     document.body.style.userSelect = 'none';
     window.addEventListener('pointermove', onDragMove);
     window.addEventListener('pointerup', onDragUp);
@@ -1594,7 +1597,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     const startVal = target === 'maint'
       ? (editMaints[idx]?.wkStart ?? 0)
       : (editLegs[idx]?.wkDep ?? 0);
-    dragRef.current = { kind: 'edit', target, idx, startY: e.clientY, startX: e.clientX, colWidth, startVal };
+    dragRef.current = { kind: 'edit', target, idx, touch: e.pointerType !== 'mouse', startY: e.clientY, startX: e.clientX, colWidth, startVal };
     document.body.style.userSelect = 'none';
     window.addEventListener('pointermove', onDragMove);
     window.addEventListener('pointerup', onDragUp);

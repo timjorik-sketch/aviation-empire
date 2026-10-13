@@ -7,15 +7,20 @@ const router = express.Router();
 
 export const DEPARTURES_PER_LEVEL = 100;
 export const SECONDARY_HUB_LEVEL = 12;
-// Every level costs the same: airport category × $1M (category 8 → $8M per level).
-const COST_PER_CATEGORY_POINT = 1_000_000;
+const MULTIPLIERS = [1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0];
 
 export function getCostForNextLevel(category, currentLevel) {
-  return Math.round(category * COST_PER_CATEGORY_POINT);
+  const multiplier = currentLevel >= 9 ? 8.0 : MULTIPLIERS[currentLevel];
+  return Math.round(category * multiplier * 1_000_000);
 }
 
 export function getTotalCostForLevel(category, level) {
-  return Math.round(category * COST_PER_CATEGORY_POINT) * level;
+  let total = 0;
+  for (let i = 0; i < level; i++) {
+    const mult = i >= 9 ? 8.0 : MULTIPLIERS[i];
+    total += Math.round(category * mult * 1_000_000);
+  }
+  return total;
 }
 
 export function getCurrentWeekStart() {

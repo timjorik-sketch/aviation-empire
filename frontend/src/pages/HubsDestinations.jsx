@@ -409,13 +409,14 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
   );
 
   // Expansion cost preview for selected airport
+  const MULTIPLIERS = [1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0];
   const expSelectedDest = destinations.find(d => d.airport_code === expAirport);
   const expExisting = expansions.find(e => e.airport_code === expAirport);
   const expCurrentLevel = expExisting?.expansion_level || 0;
   const expNextLevel = expCurrentLevel + 1;
   const expCategory = expSelectedDest?.category || 4;
-  // Same price for every level: category × $1M (matches backend expansions.js).
-  const expCost = expSelectedDest ? Math.round(expCategory * 1_000_000) : null;
+  const expMultiplier = expCurrentLevel >= 9 ? 8.0 : MULTIPLIERS[expCurrentLevel];
+  const expCost = expSelectedDest ? Math.round(expCategory * expMultiplier * 1_000_000) : null;
 
   // ── Add view: country list based on continent ──────────────────────────────
   const countriesInContinent = useMemo(() => {
@@ -975,7 +976,7 @@ export default function HubsDestinations({ airline, onBack, backLabel = 'Dashboa
             {expAirport && expCost != null && (
               <div className="hd-cost-preview">
                 <div style={{ fontSize: 13, color: '#666', marginBottom: 4 }}>
-                  Level 1 · Cat {expCategory} × $1M · +100 dep/week
+                  Level 1 · Cat {expCategory} × ${expMultiplier}M · +100 dep/week
                 </div>
                 <div className="hd-cost-big">${expCost.toLocaleString()}</div>
               </div>

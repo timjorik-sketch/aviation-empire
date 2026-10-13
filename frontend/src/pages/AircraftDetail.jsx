@@ -1559,8 +1559,9 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const onDragUp = useCallback(() => {
     dragRef.current = null;
     document.body.style.userSelect = '';
-    window.removeEventListener('mousemove', onDragMove);
-    window.removeEventListener('mouseup', onDragUp);
+    window.removeEventListener('pointermove', onDragMove);
+    window.removeEventListener('pointerup', onDragUp);
+    window.removeEventListener('pointercancel', onDragUp);
   }, [onDragMove]);
   const onGhostMouseDown = useCallback((e, idx) => {
     e.preventDefault(); e.stopPropagation();
@@ -1570,8 +1571,9 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       return prev;
     });
     document.body.style.userSelect = 'none';
-    window.addEventListener('mousemove', onDragMove);
-    window.addEventListener('mouseup', onDragUp);
+    window.addEventListener('pointermove', onDragMove);
+    window.addEventListener('pointerup', onDragUp);
+    window.addEventListener('pointercancel', onDragUp);
   }, [onDragMove, onDragUp]);
   const onMaintMouseDown = useCallback((e) => {
     e.preventDefault(); e.stopPropagation();
@@ -1580,8 +1582,9 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     const colWidth = e.currentTarget?.parentElement?.getBoundingClientRect().width || 0;
     dragRef.current = { kind: 'maint', startY: e.clientY, startX: e.clientX, colWidth, startVal, gaps: maintGaps.gaps, duration: planMeta.maintDuration, turnaround: planMeta.turnaround };
     document.body.style.userSelect = 'none';
-    window.addEventListener('mousemove', onDragMove);
-    window.addEventListener('mouseup', onDragUp);
+    window.addEventListener('pointermove', onDragMove);
+    window.addEventListener('pointerup', onDragUp);
+    window.addEventListener('pointercancel', onDragUp);
   }, [planMeta, maintGaps, maintOverride, onDragMove, onDragUp]);
 
   // Drag an existing (draft) flight or maintenance block anywhere in the week.
@@ -1593,8 +1596,9 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       : (editLegs[idx]?.wkDep ?? 0);
     dragRef.current = { kind: 'edit', target, idx, startY: e.clientY, startX: e.clientX, colWidth, startVal };
     document.body.style.userSelect = 'none';
-    window.addEventListener('mousemove', onDragMove);
-    window.addEventListener('mouseup', onDragUp);
+    window.addEventListener('pointermove', onDragMove);
+    window.addEventListener('pointerup', onDragUp);
+    window.addEventListener('pointercancel', onDragUp);
   }, [editLegs, editMaints, onDragMove, onDragUp]);
 
   const openBankModal = (bank = null) => {
@@ -2987,7 +2991,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                       <div key={b.key}
                         className={`ad-grid-ghost ad-grid-ghost--drag ad-grid-ghost--move${editConflicts.has(`f-${b.legIndex}`) ? ' ad-grid-ghost--conflict' : ''}`}
                         style={{ top: b.top, height: b.height }}
-                        onMouseDown={(e) => onEditMouseDown(e, 'flight', b.legIndex)}
+                        onPointerDown={(e) => onEditMouseDown(e, 'flight', b.legIndex)}
                         title={`${b.flight_number}: ${b.departure_airport}→${b.arrival_airport}\nDrag across days and times · Shift = 5-min steps\nDep ${b.departure_time}\nArr ${b.arrival_time}`}>
                         <span className="ad-grid-fn">{b.flight_number}</span>
                         {b.height > 24 && <span className="ad-grid-rt">{b.departure_airport}→{b.arrival_airport}</span>}
@@ -3008,7 +3012,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                       <div key={m.key}
                         className={`ad-grid-ghost ad-grid-ghost--maint ad-grid-ghost--drag ad-grid-ghost--move${editConflicts.has(`m-${m.maintIndex}`) ? ' ad-grid-ghost--conflict' : ''}`}
                         style={{ top: m.top, height: m.height }}
-                        onMouseDown={(e) => onEditMouseDown(e, 'maint', m.maintIndex)}
+                        onPointerDown={(e) => onEditMouseDown(e, 'maint', m.maintIndex)}
                         title={'Maintenance (A-Check)\nDrag across days and times · Shift = 5-min steps'}>
                         <span className="ad-grid-fn">A-Check</span>
                         {m.height > 24 && <span className="ad-grid-rt">{minsToHM(m.start_minutes)}</span>}
@@ -3026,7 +3030,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     {gBars.map(g => (
                       <div key={g.key} className="ad-grid-ghost ad-grid-ghost--drag"
                         style={{ top: g.top, height: g.height }}
-                        onMouseDown={(e) => onGhostMouseDown(e, g.legIndex)}
+                        onPointerDown={(e) => onGhostMouseDown(e, g.legIndex)}
                         title={`${g.flight_number}: ${g.departure_airport}→${g.arrival_airport}\nDrag to shift within the bank · Shift = 5-min steps\nDep ${g.departure_time}${g.depLocal ? ` (${g.depLocal} ${g.departure_airport} local)` : ''}\nArr ${g.arrival_time}${g.arrLocal ? ` (${g.arrLocal} ${g.arrival_airport} local)` : ''}`}>
                         <span className="ad-grid-fn">{g.flight_number}</span>
                         {g.height > 24 && <span className="ad-grid-rt">{g.departure_airport}→{g.arrival_airport}</span>}
@@ -3045,7 +3049,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     {ghostMaint && ghostMaint.dayIndex === di && (
                       <div className="ad-grid-ghost ad-grid-ghost--maint ad-grid-ghost--drag"
                         style={{ top: ghostMaint.top, height: ghostMaint.height }}
-                        onMouseDown={onMaintMouseDown}
+                        onPointerDown={onMaintMouseDown}
                         title="Planned maintenance (A-Check)&#10;Drag across days/times to any free gap · Shift = 5-min steps">
                         <span className="ad-grid-fn">A-Check</span>
                         {ghostMaint.height > 24 && <span className="ad-grid-rt">{minsToHM(ghostMaint.start_minutes)}</span>}
@@ -4886,7 +4890,7 @@ const styles = `
   .ad-grid-flight.conflict { outline: 2px solid #FF4444; outline-offset: -2px; }
   /* Bank plan ghost preview bars — anthracite, dashed, clearly "not yet written" */
   .ad-grid-ghost { position: absolute; left: 2px; right: 2px; border-radius: 3px; padding: 2px 4px; overflow: hidden; z-index: 5; display: flex; flex-direction: column; gap: 1px; pointer-events: none; background: #2C2C2C; opacity: 0.5; border: 1.5px dashed #2C2C2C; box-sizing: border-box; }
-  .ad-grid-ghost--drag { pointer-events: auto; cursor: ns-resize; }
+  .ad-grid-ghost--drag { pointer-events: auto; cursor: ns-resize; touch-action: none; }
   .ad-grid-ghost--drag:hover { opacity: 0.68; }
   .ad-grid-ghost--maint { background: #6b7280; border-color: #4b5563; }
   .ad-grid-ghost .ad-grid-fn, .ad-grid-ghost .ad-grid-rt, .ad-grid-ghost .ad-grid-tm { color: #fff; }

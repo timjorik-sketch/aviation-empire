@@ -345,6 +345,8 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   // Show the weekly grid in the aircraft's home-base local time (vs raw game time).
   const [viewLocal, setViewLocal] = useState(true);
   const [showBanks, setShowBanks] = useState(false);
+  // Banks switched off in the "Show Banks" legend (all shown by default).
+  const [hiddenBankIds, setHiddenBankIds] = useState(() => new Set());
   // Cabin profile change warning modal state
   const [showCpChangeModal, setShowCpChangeModal] = useState(false);
   const [pendingCpChangeId, setPendingCpChangeId] = useState(null);
@@ -709,11 +711,19 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       }
     };
     for (const b of homeBanks) {
+      if (hiddenBankIds.has(b.id)) continue;
       add(b, 'arr', b.earliest_arrival, b.latest_arrival);
       add(b, 'dep', b.earliest_departure, b.latest_departure);
     }
     return bands;
-  }, [showBanks, homeBanks, homeOffsetHours, viewShiftMin]);
+  }, [showBanks, homeBanks, hiddenBankIds, homeOffsetHours, viewShiftMin]);
+  const toggleBankVisible = useCallback((id) => {
+    setHiddenBankIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
 
   // Berlin slot (day + local "HH:MM" displayed) → Berlin storage slot.
   const viewToBerlin = useCallback((day, hhmm) => {
@@ -2761,12 +2771,24 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
               </button>
             </div>
           )}
-          {showBanks && bankBands.length > 0 && (
+          {showBanks && homeBanks.length > 0 && (
             <div className="ad-bank-legend">
               <span><span className="ad-bank-sw ad-bank-band--arr" />Arrival window</span>
               <span><span className="ad-bank-sw ad-bank-band--dep" />Departure window</span>
               <span className="ad-bank-legend-names">
-                {aircraft?.home_airport}: {homeBanks.map(b => b.name).join(' · ')}
+                {aircraft?.home_airport}:
+                {homeBanks.map(b => {
+                  const on = !hiddenBankIds.has(b.id);
+                  return (
+                    <button
+                      key={b.id}
+                      type="button"
+                      className={`ad-bank-chip${on ? ' ad-bank-chip--on' : ''}`}
+                      onClick={() => toggleBankVisible(b.id)}
+                      title={on ? `Hide ${b.name}` : `Show ${b.name}`}
+                    >{b.name}</button>
+                  );
+                })}
               </span>
             </div>
           )}
@@ -4850,7 +4872,10 @@ const styles = `
   .ad-bank-band--dep .ad-bank-band-lbl { color: rgb(30,58,138); }
   .ad-bank-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 6px 12px; font-size: 0.72rem; color: #666; border-bottom: 1px solid #EEEEEE; background: #FAFAFA; }
   .ad-bank-sw { position: static; display: inline-block; width: 18px; height: 10px; margin-right: 6px; vertical-align: -1px; border-radius: 2px; }
-  .ad-bank-legend-names { color: #999; }
+  .ad-bank-legend-names { color: #999; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+  .ad-bank-chip { font: inherit; font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; border: 1px solid #D0D0D0; background: white; color: #AAAAAA; cursor: pointer; text-decoration: line-through; }
+  .ad-bank-chip--on { color: #1E3A8A; border-color: rgba(30,58,138,0.45); background: rgba(30,58,138,0.06); text-decoration: none; }
+  .ad-bank-chip:hover { border-color: #1E3A8A; }
   .ad-grid-ground { position: absolute; left: 2px; right: 2px; border-radius: 0 0 3px 3px; z-index: 1; pointer-events: none; opacity: 0.55; box-sizing: border-box; border-top: none; }
   .ad-grid-maint { position: absolute; left: 2px; right: 2px; background: #6b7280; border-radius: 3px; padding: 2px 4px; z-index: 2; overflow: hidden; display: flex; flex-direction: column; gap: 1px; }
   .ad-grid-maint .ad-grid-fn { color: rgba(255,255,255,0.9); }

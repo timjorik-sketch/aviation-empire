@@ -3001,8 +3001,9 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     ))}
                     {eOverflowBars.map(b => (
                       <div key={`${b.key}-ov`}
-                        className={`ad-grid-ghost${editConflicts.has(`f-${b.legIndex}`) ? ' ad-grid-ghost--conflict' : ''}`}
+                        className={`ad-grid-ghost ad-grid-ghost--drag ad-grid-ghost--move${editConflicts.has(`f-${b.legIndex}`) ? ' ad-grid-ghost--conflict' : ''}`}
                         style={{ top: 0, height: b.overflowHeight, borderTop: '2px dashed #2C2C2C' }}
+                        onPointerDown={(e) => onEditMouseDown(e, 'flight', b.legIndex)}
                         title={`${b.flight_number}: ${b.departure_airport}→${b.arrival_airport} (cont.)`}>
                         <span className="ad-grid-fn">{b.flight_number}</span>
                         {b.overflowHeight > 24 && <span className="ad-grid-rt">→{b.arrival_airport}</span>}
@@ -3020,13 +3021,14 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                     ))}
                     {eMaintOverflow.map(m => (
                       <div key={`${m.key}-ov`}
-                        className={`ad-grid-ghost ad-grid-ghost--maint${editConflicts.has(`m-${m.maintIndex}`) ? ' ad-grid-ghost--conflict' : ''}`}
+                        className={`ad-grid-ghost ad-grid-ghost--maint ad-grid-ghost--drag ad-grid-ghost--move${editConflicts.has(`m-${m.maintIndex}`) ? ' ad-grid-ghost--conflict' : ''}`}
                         style={{ top: 0, height: m.overflowHeight, borderTop: '2px dashed #6b7280' }}
+                        onPointerDown={(e) => onEditMouseDown(e, 'maint', m.maintIndex)}
                         title="Maintenance (A-Check, cont.)">
                         <span className="ad-grid-fn">A-Check</span>
                       </div>
                     ))}
-                    {/* Bank plan ghost preview — half-transparent, non-interactive */}
+                    {/* Bank plan ghost preview — half-transparent, draggable */}
                     {gBars.map(g => (
                       <div key={g.key} className="ad-grid-ghost ad-grid-ghost--drag"
                         style={{ top: g.top, height: g.height }}
@@ -3039,8 +3041,9 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                       </div>
                     ))}
                     {gOverflowBars.map(g => (
-                      <div key={`${g.key}-ov`} className="ad-grid-ghost"
+                      <div key={`${g.key}-ov`} className="ad-grid-ghost ad-grid-ghost--drag"
                         style={{ top: 0, height: g.overflowHeight, borderTop: '2px dashed #2C2C2C' }}
+                        onPointerDown={(e) => onGhostMouseDown(e, g.legIndex)}
                         title={`${g.flight_number}: ${g.departure_airport}→${g.arrival_airport} (cont.)`}>
                         <span className="ad-grid-fn">{g.flight_number}</span>
                         {g.overflowHeight > 24 && <span className="ad-grid-rt">→{g.arrival_airport}</span>}
@@ -3056,8 +3059,9 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                       </div>
                     )}
                     {ghostMaint && ghostMaint.overflowDayIndex === di && (
-                      <div className="ad-grid-ghost ad-grid-ghost--maint"
+                      <div className="ad-grid-ghost ad-grid-ghost--maint ad-grid-ghost--drag"
                         style={{ top: 0, height: ghostMaint.overflowHeight, borderTop: '2px dashed #6b7280' }}
+                        onPointerDown={onMaintMouseDown}
                         title="Planned maintenance (A-Check, cont.)">
                         <span className="ad-grid-fn">A-Check</span>
                       </div>

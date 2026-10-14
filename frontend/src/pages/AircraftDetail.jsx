@@ -2771,10 +2771,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
           </div>
           {editMode && (
             <div className="ad-bank-overlay">
-              <span className="ad-bank-overlay-label">
-                Edit Mode — drag to move · Shift = 5-min steps
-                {editConflicts.size > 0 && <span className="ad-edit-warn"> · overlaps</span>}
-              </span>
+              {editConflicts.size > 0 && <span className="ad-bank-overlay-label ad-edit-warn">Overlaps</span>}
               <button className="ad-btn-clear-sched" onClick={cancelEditMode} disabled={editSaving}>Cancel</button>
               <button className="ad-bank-confirm-btn" disabled={editSaving || editConflicts.size > 0} onClick={confirmEditMode}>
                 {editSaving ? 'Saving…' : 'Confirm & save'}
@@ -4901,7 +4898,7 @@ const styles = `
   .ad-grid-ghost--move { cursor: move; }
   .ad-grid-ghost--conflict { outline: 2px solid #FF4444; outline-offset: -2px; opacity: 0.72; }
   /* Bank plan confirm overlay — floats over the grid, dark toolbar language */
-  .ad-bank-overlay { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 12px; background: #2C2C2C; padding: 8px 10px 8px 16px; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.28); }
+  .ad-bank-overlay { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 12px; background: #2C2C2C; padding: 8px 10px; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.28); max-width: calc(100% - 16px); box-sizing: border-box; }
   .ad-bank-overlay-label { color: white; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
   .ad-bank-confirm-btn { background: white; color: #2C2C2C; border: none; padding: 0.4rem 1.05rem; border-radius: 5px; font-weight: 700; font-size: 0.82rem; cursor: pointer; transition: background 0.15s; }
   .ad-bank-confirm-btn:hover { background: #EDEDED; }

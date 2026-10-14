@@ -456,9 +456,11 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [transferSubmitting, setTransferSubmitting] = useState(false);
   const [allAirports, setAllAirports]             = useState([]);
 
-  // Copy schedule modal (clone another same-type aircraft's weekly plan, with a uniform time shift)
+  // Copy schedule modal (clone another aircraft's weekly plan, with a uniform time shift).
+  // Other types are allowed when this aircraft passes the checks in copyIncompat.
   const [showCopyModal, setShowCopyModal]   = useState(false);
-  const [copyFleet, setCopyFleet]           = useState([]);   // same-type aircraft, current excluded
+  const [copyFleet, setCopyFleet]           = useState([]);   // fleet, current excluded
+  const [copySourceAircraft, setCopySourceAircraft] = useState(null);
   const [copyFleetLoading, setCopyFleetLoading] = useState(false);
   const [copySourceId, setCopySourceId]     = useState('');
   const [copySourceSchedule, setCopySourceSchedule] = useState([]);
@@ -1865,7 +1867,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     finally { setTransferSubmitting(false); }
   };
 
-  // ── Copy schedule from another same-type aircraft (with uniform time shift) ──
+  // ── Copy schedule from another aircraft (with uniform time shift) ──
   const copyShiftMin = useMemo(() => {
     const h = parseInt(copyShiftH) || 0;
     const m = parseInt(copyShiftM) || 0;
@@ -1902,6 +1904,39 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     return [...flights, ...maint].sort((a, b) => a.sortKey - b.sortKey);
   }, [copySourceSchedule, copySourceMaint, copyShiftMin, copyDayMode, copyReverse, findReverseRoute]);
 
+  // Can THIS aircraft fly the source's week? Block times only depend on distance,
+  // so the checks are range, runways at both ends, and a turnaround no longer than
+  // the source's (a longer one would break the source's tight connections).
+  const copyIncompat = useMemo(() => {
+    if (!aircraft || !copySourceAircraft) return [];
+    const reasons = [];
+    const myTurn  = WAKE_TURNAROUND[aircraft.wake_turbulence_category] ?? 40;
+    const srcTurn = WAKE_TURNAROUND[copySourceAircraft.wake_turbulence_category] ?? 40;
+    if (myTurn > srcTurn) reasons.push(`Turnaround ${myTurn} min is longer than the source's ${srcTurn} min`);
+    const rwy = new Map();
+    for (const r of routes) {
+      if (r.dep_runway_m != null) rwy.set(r.departure_airport, r.dep_runway_m);
+      if (r.arr_runway_m != null) rwy.set(r.arrival_airport, r.arr_runway_m);
+    }
+    const seen = new Set();
+    const add = (msg) => { if (!seen.has(msg)) { seen.add(msg); reasons.push(msg); } };
+    for (const e of copySourceSchedule) {
+      const dep = copyReverse ? e.arrival_airport : e.departure_airport;
+      const arr = copyReverse ? e.departure_airport : e.arrival_airport;
+      if (aircraft.range_km && e.distance_km > aircraft.range_km) {
+        add(`Range ${aircraft.range_km} km < ${dep}–${arr} ${Math.round(e.distance_km)} km`);
+      }
+      const depR = rwy.get(dep), arrR = rwy.get(arr);
+      if (aircraft.min_runway_takeoff_m && depR != null && depR < aircraft.min_runway_takeoff_m) {
+        add(`Runway at ${dep} too short for takeoff`);
+      }
+      if (aircraft.min_runway_landing_m && arrR != null && arrR < aircraft.min_runway_landing_m) {
+        add(`Runway at ${arr} too short for landing`);
+      }
+    }
+    return reasons;
+  }, [aircraft, copySourceAircraft, copySourceSchedule, copyReverse, routes]);
+
   const copyMissingReverse = useMemo(
     () => copyPreview.filter(p => p.kind === 'flight' && p.missing).length,
     [copyPreview]
@@ -1909,17 +1944,19 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
   const openCopyModal = async () => {
     setShowCopyModal(true); setError(''); setSuccess('');
-    setCopySourceId(''); setCopySourceSchedule([]); setCopySourceMaint([]);
+    setCopySourceId(''); setCopySourceSchedule([]); setCopySourceMaint([]); setCopySourceAircraft(null);
     setCopyShiftDir('+'); setCopyShiftH('0'); setCopyShiftM('00'); setCopyDayMode('same'); setCopyReverse(false);
     setCopyFleetLoading(true);
     try {
       const res  = await fetch(`${API_URL}/api/aircraft/fleet`, { headers });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load fleet');
+      // Same type first, then the rest; each group alphabetical.
       const typeId = aircraft?.type_id;
+      const label = a => a.name || a.registration || '';
       const list = (Array.isArray(data) ? data : data.fleet || [])
-        .filter(a => Number(a.id) !== Number(aircraftId) && a.type_id === typeId)
-        .sort((a, b) => (a.name || a.registration || '').localeCompare(b.name || b.registration || ''));
+        .filter(a => Number(a.id) !== Number(aircraftId))
+        .sort((a, b) => ((b.type_id === typeId) - (a.type_id === typeId)) || label(a).localeCompare(label(b)));
       setCopyFleet(list);
     } catch (err) { setError(err.message); }
     finally { setCopyFleetLoading(false); }
@@ -1927,7 +1964,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
   const selectCopySource = async (sourceId) => {
     setCopySourceId(sourceId);
-    setCopySourceSchedule([]); setCopySourceMaint([]);
+    setCopySourceSchedule([]); setCopySourceMaint([]); setCopySourceAircraft(null);
     if (!sourceId) return;
     setCopySourceLoading(true);
     try {
@@ -1936,12 +1973,15 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       if (!res.ok) throw new Error(data.error || 'Failed to load source schedule');
       setCopySourceSchedule(data.schedule || []);
       setCopySourceMaint(data.maintenance || []);
+      setCopySourceAircraft(data.aircraft || null);
     } catch (err) { setError(err.message); }
     finally { setCopySourceLoading(false); }
   };
 
   const handleCopySubmit = async () => {
     if (!copySourceId) { setError('Select a source aircraft'); return; }
+    // Checked before the target's schedule is wiped below.
+    if (copyIncompat.length) { setError(`This aircraft can't fly that schedule: ${copyIncompat[0]}`); return; }
     if (copySourceSchedule.length === 0 && copySourceMaint.length === 0) {
       setError('Selected aircraft has nothing to copy'); return;
     }
@@ -2006,8 +2046,8 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         if (!res.ok) throw new Error(data.error || 'Failed to copy transfer legs');
       }
 
-      // Maintenance: duration is derived from aircraft type (identical here), so we
-      // only forward the shifted day + start time. Posted after flights so the
+      // Maintenance: duration is derived from this aircraft's type, so we only
+      // forward the shifted day + start time. Posted after flights so the
       // server's flight-overlap check sees the new schedule.
       let maintFailed = 0;
       for (const mt of copySourceMaint) {
@@ -4378,9 +4418,11 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                   disabled={copyFleetLoading}
                   style={{ width: '100%', padding: '0.5rem 0.6rem', border: '1px solid #E0E0E0', borderRadius: 6, fontSize: '0.88rem', color: '#2C2C2C', background: 'white' }}
                 >
-                  <option value="">{copyFleetLoading ? 'Loading…' : copyFleet.length ? '— select aircraft —' : 'No other aircraft of this type'}</option>
+                  <option value="">{copyFleetLoading ? 'Loading…' : copyFleet.length ? '— select aircraft —' : 'No other aircraft'}</option>
                   {copyFleet.map(a => (
-                    <option key={a.id} value={a.id}>{a.registration}{a.name ? ` – ${a.name}` : ''}</option>
+                    <option key={a.id} value={a.id}>
+                      {a.registration}{a.name ? ` – ${a.name}` : ''}{a.type_id !== aircraft?.type_id && a.full_name ? ` (${a.full_name})` : ''}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -4425,6 +4467,15 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
               {copySourceLoading && <div style={{ fontSize: '0.82rem', color: '#888' }}>Loading schedule…</div>}
 
+              {!copySourceLoading && copyIncompat.length > 0 && (
+                <div style={{ marginBottom: '0.8rem', background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', borderRadius: 6, padding: '8px 12px', fontSize: '0.8rem' }}>
+                  <strong>{aircraft?.full_name || 'This aircraft'} can't fly this schedule:</strong>
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                    {copyIncompat.map(r => <li key={r}>{r}</li>)}
+                  </ul>
+                </div>
+              )}
+
               {!copySourceLoading && copySourceId && copyPreview.length > 0 && (
                 <div style={{ border: '1px solid #E0E0E0', borderRadius: 6, overflow: 'hidden' }}>
                   <div style={{ background: '#F5F5F5', padding: '6px 12px', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#666' }}>
@@ -4462,7 +4513,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
               <button
                 className="sched-btn-submit"
                 onClick={handleCopySubmit}
-                disabled={copySubmitting || !copySourceId || copyPreview.length === 0 ||
+                disabled={copySubmitting || !copySourceId || copyPreview.length === 0 || copyIncompat.length > 0 ||
                   (copyReverse && copySourceMaint.length === 0 && copyMissingReverse >= copySourceSchedule.length)}
               >
                 {copySubmitting ? 'Copying…' : 'Replace & Copy'}

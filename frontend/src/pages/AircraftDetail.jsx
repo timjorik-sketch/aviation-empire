@@ -2106,15 +2106,16 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
           + `but the next leg ${name(next)} ${next.departure_airport}→${next.arrival_airport} (${at(next)}) departs from ${next.departure_airport}.`);
       }
     }
-    if (currentLocation) {
+    const locCode = currentLocation?.code;   // { code, name } from the detail endpoint
+    if (locCode) {
       const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
         timeZone: 'Europe/Berlin', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
       }).formatToParts(new Date()).map(p => [p.type, p.value]));
       const dayIdx = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(parts.weekday);
       const nowPos = dayIdx * 1440 + parseInt(parts.hour) * 60 + parseInt(parts.minute);
       const first = legs.find(l => l.pos >= nowPos) || legs[0];
-      if (dayIdx >= 0 && first.departure_airport !== currentLocation) {
-        issues.push(`The aircraft is at ${currentLocation}, but its next leg ${name(first)} `
+      if (dayIdx >= 0 && first.departure_airport !== locCode) {
+        issues.push(`The aircraft is at ${locCode}, but its next leg ${name(first)} `
           + `${first.departure_airport}→${first.arrival_airport} (${at(first)}) departs from ${first.departure_airport}.`);
       }
     }

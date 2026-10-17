@@ -1393,15 +1393,12 @@ async function getExpansionDepartures(airlineId, aircraftId) {
 // depart — while the booking pass (which does filter on is_active) has already
 // stopped selling seats for them. Every path that grounds an aircraft must go
 // through here. Pass a transaction client to join an open transaction.
-// keepBoarding: let a flight that is already boarding (≤15 min to departure)
-// still go, so a player grounding an aircraft doesn't strand its last leg.
-export async function deactivateAircraft(aircraftId, client = pool, { keepBoarding = false } = {}) {
+export async function deactivateAircraft(aircraftId, client = pool) {
   await client.query('UPDATE aircraft SET is_active = 0 WHERE id = $1', [aircraftId]);
-  const statuses = keepBoarding ? ['scheduled'] : ['scheduled', 'boarding'];
   const cancelled = await client.query(
     `UPDATE flights SET status = 'cancelled'
-     WHERE aircraft_id = $1 AND status = ANY($2)`,
-    [aircraftId, statuses]
+     WHERE aircraft_id = $1 AND status IN ('scheduled', 'boarding')`,
+    [aircraftId]
   );
   return cancelled.rowCount;
 }
@@ -1506,7 +1503,7 @@ router.patch('/:id/active', authMiddleware, async (req, res) => {
         return res.status(status || 400).json(payload);
       }
     } else {
-      cancelledFlights = await deactivateAircraft(aircraftId, pool, { keepBoarding: true });
+      cancelledFlights = await deactivateAircraft(aircraftId);
     }
 
     res.json({

@@ -1,7 +1,7 @@
 // Group planner: spread ONE round-trip route across SEVERAL aircraft so that every
 // selected bank gets a departure on every day of the week.
 //
-// Why this exists: bankPlanner.js packs the best possible week for a SINGLE
+// Why this exists: the (since removed) single-aircraft bank planner packed the best possible week for a SINGLE
 // aircraft. On long-haul that is never a daily service — DXB–JFK is ~806 min one
 // way, so a round trip incl. turnaround runs ~27.9 h. Because that exceeds 24 h,
 // one aircraft can only depart every OTHER day (Mon/Wed/Fri). Two aircraft cover
@@ -33,7 +33,7 @@ const WEEK = 7 * DAY;
 const mod = (v, m) => ((v % m) + m) % m;
 
 // A "latest" earlier than its "earliest" is a window across midnight — unwrap it
-// by pushing the end onto the next day (same convention as bankPlanner).
+// by pushing the end onto the next day (same convention as the old single-aircraft bank planner).
 function unwrap(lo, hi) {
   return hi < lo ? [lo, hi + DAY] : [lo, hi];
 }
@@ -230,7 +230,7 @@ function bestAssignment(rots, prefer) {
 
 // Every idle stretch of one plane's week: the hub gap after each round trip and
 // the layover at the destination inside it. Maintenance resets condition wherever
-// the aircraft sits, so both are usable (same rule as bankPlanner).
+// the aircraft sits, so both are usable (same rule as the old single-aircraft bank planner).
 function planeGaps(rots, oneWay, turnaround) {
   const gaps = [];
   for (let i = 0; i < rots.length; i++) {

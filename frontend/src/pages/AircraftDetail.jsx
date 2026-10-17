@@ -125,23 +125,6 @@ function localHMFromBerlin(berlinMin, lon) {
   return minsToHM(berlinMin + (off - BERLIN_LON_OFFSET) * 60);
 }
 
-// Clamp a maintenance start (absolute week-min) to the nearest valid spot: it
-// must sit inside some idle gap, turnaround-padded on both sides. Lets the block
-// be dragged and "snap" to the next fitting gap. Returns null if none fits.
-function clampMaint(target, gaps, duration, turnaround) {
-  const ivs = gaps
-    .filter(g => g.size >= duration + 2 * turnaround)
-    .map(g => ({ lo: g.start + turnaround, hi: g.start + g.size - duration - turnaround }))
-    .sort((a, b) => a.lo - b.lo);
-  if (!ivs.length) return null;
-  for (const iv of ivs) if (target >= iv.lo && target <= iv.hi) return target;
-  let best = ivs[0].lo, bd = Infinity;
-  for (const iv of ivs) for (const b of [iv.lo, iv.hi]) {
-    const dd = Math.abs(b - target);
-    if (dd < bd) { bd = dd; best = b; }
-  }
-  return best;
-}
 
 function formatHours(min) {
   if (!min) return '0m';
@@ -401,33 +384,9 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [alignOffset, setAlignOffset] = useState(0);  // Offset xx:MM (0-59): where the rounding grid sits on the clock
   const [repeatCount, setRepeatCount]     = useState(1);
 
-  // Banks (hub-banking) planner
+  // Banks, for the "Show Banks" overlay
   const [banks, setBanks]                 = useState([]);
-  const [bankForwardRouteId, setBankForwardRouteId] = useState('');
-  const [bankReturnRouteId, setBankReturnRouteId]   = useState('');
-  const [selectedBankIds, setSelectedBankIds]       = useState([]);
-  const [bankEcoPrice, setBankEcoPrice]   = useState('');
-  const [bankBizPrice, setBankBizPrice]   = useState('');
-  const [bankFirstPrice, setBankFirstPrice] = useState('');
-  const [bankServiceProfileId, setBankServiceProfileId] = useState('');
-  const [bankPlan, setBankPlan]           = useState(null);  // server response { legs, maintenance, summary }
-  const [planLegs, setPlanLegs]           = useState([]);    // editable legs (absolute game week-minutes)
-  const [planMeta, setPlanMeta]           = useState(null);  // { oneWay, turnaround, maintDuration }
-  const [maintOverride, setMaintOverride] = useState(null);  // dragged maintenance start (raw plan week-min), or null=auto
   const dragRef  = useRef(null);
-  const metaRef  = useRef(null);
-  const [bankComputing, setBankComputing] = useState(false);
-  const [bankConfirming, setBankConfirming] = useState(false);
-  // Bank create/edit modal
-  const [showBankModal, setShowBankModal] = useState(false);
-  const [editingBankId, setEditingBankId] = useState(null);
-  const [bankName, setBankName]           = useState('');
-  const [bankHub, setBankHub]             = useState('');
-  const [bankEarlyArr, setBankEarlyArr]   = useState('04:00');
-  const [bankLateArr, setBankLateArr]     = useState('06:00');
-  const [bankEarlyDep, setBankEarlyDep]   = useState('07:00');
-  const [bankLateDep, setBankLateDep]     = useState('09:00');
-  const [bankSaving, setBankSaving]       = useState(false);
 
   const groundMin = useMemo(
     () => WAKE_TURNAROUND[aircraft?.wake_turbulence_category] ?? 40,
@@ -631,25 +590,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       }
     }
   }, [outRouteId]);
-
-  // Banks planner: auto-pick the reverse route + load the route's saved pricing.
-  useEffect(() => {
-    if (bankForwardRouteId) {
-      const out = routes.find(r => r.id === parseInt(bankForwardRouteId));
-      if (out) {
-        const reverse = routes.find(r =>
-          r.departure_airport === out.arrival_airport && r.arrival_airport === out.departure_airport
-        );
-        setBankReturnRouteId(reverse ? String(reverse.id) : '');
-        setBankEcoPrice(out.economy_price ? String(out.economy_price) : '');
-        if (hasBusiness) setBankBizPrice(out.business_price ? String(out.business_price) : '');
-        if (hasFirst)    setBankFirstPrice(out.first_price   ? String(out.first_price)   : '');
-      }
-    } else {
-      setBankReturnRouteId('');
-    }
-    setBankPlan(null); setPlanLegs([]); setPlanMeta(null); setMaintOverride(null); // route change invalidates any preview
-  }, [bankForwardRouteId, routes]);
 
   useEffect(() => {
     if (sRouteId) {
@@ -855,7 +795,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     };
   }), [viewMaintenance, groundMin]);
 
-  // ─── Bank plan ghost preview bars (rendered half-transparent in the grid) ──
+  // ─── Edit mode draft bars ─────────────────────────────────────────────────
 
   // Convert an absolute game week-minute into a view-shifted bar {day, minuteOfDay}.
   const wkToView = (wk) => {
@@ -863,96 +803,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     const mod = ((wk % 1440) + 1440) % 1440;
     return shiftWeekSlot(dow, mod, viewShiftMin, 'roll');
   };
-
-  const ghostBars = useMemo(() => {
-    return planLegs.map((l, i) => {
-      const dur    = Math.max(1, l.week_arr - l.week_dep);
-      const bDepMod = ((l.week_dep % 1440) + 1440) % 1440;
-      const bArrMod = ((l.week_arr % 1440) + 1440) % 1440;
-      // Per-airport local wall-clock — from the (game) times, same as viewSchedule.
-      const depLocal = localHMFromBerlin(bDepMod, l.dep_longitude);
-      const arrLocal = localHMFromBerlin(bArrMod, l.arr_longitude);
-      const sv     = wkToView(l.week_dep);
-      const depMin = sv.minuteOfDay;
-      const day    = sv.day;
-      const arrMin = (depMin + dur) % 1440;
-      const crossesMidnight = depMin + dur > 1440;
-      const seg1H = crossesMidnight ? (1440 - depMin) * PX_PER_MIN : dur * PX_PER_MIN;
-      return {
-        key: `ghost-${i}`, legIndex: i,
-        flight_number: l.flight_number,
-        departure_airport: l.departure_airport, arrival_airport: l.arrival_airport,
-        departure_time: minutesToHHMM(depMin), arrival_time: minutesToHHMM(arrMin),
-        depLocal, arrLocal,
-        dayIndex: day,
-        top: depMin * PX_PER_MIN,
-        height: Math.max(seg1H, 14),
-        overflowDayIndex: crossesMidnight ? (day + 1) % 7 : null,
-        overflowHeight:   crossesMidnight ? Math.max(arrMin * PX_PER_MIN, 14) : 0,
-      };
-    });
-  }, [planLegs, viewShiftMin]);
-
-  // Maintenance placement, recomputed live from the (possibly dragged) legs so the
-  // preview always matches what will be written. Mirrors the backend's largest-gap
-  // rule. Returns the absolute game week-minute start, or null if it no longer fits.
-  // All idle gaps (destination layover inside each round trip + hub gap between
-  // them) and the auto-placed maintenance start — used both to render and to clamp
-  // dragging. Times are absolute plan week-minutes (un-normalised).
-  const maintGaps = useMemo(() => {
-    if (!planMeta || !planMeta.maintDuration || planLegs.length < 2) return { gaps: [], autoRaw: null };
-    const WK = 7 * 1440, { turnaround } = planMeta;
-    const rts = [];
-    for (let k = 0; k + 1 < planLegs.length; k += 2) {
-      rts.push({ depWk: planLegs[k].week_dep, destArr: planLegs[k].week_arr, destDep: planLegs[k + 1].week_dep, arrWk: planLegs[k + 1].week_arr });
-    }
-    if (!rts.length) return { gaps: [], autoRaw: null };
-    rts.sort((a, b) => a.depWk - b.depWk);
-    const gaps = [];
-    for (let i = 0; i < rts.length; i++) {
-      const rt = rts[i];
-      gaps.push({ start: rt.destArr, size: rt.destDep - rt.destArr });        // destination layover
-      const nx = rts[(i + 1) % rts.length];
-      const nextDep = i + 1 < rts.length ? nx.depWk : nx.depWk + WK;
-      gaps.push({ start: rt.arrWk, size: nextDep - rt.arrWk });               // hub gap
-    }
-    const need = planMeta.maintDuration + 2 * turnaround;
-    let best = null;
-    for (const g of gaps) if (g.size >= need && (best === null || g.size > best.size)) best = g;
-    return { gaps, autoRaw: best ? best.start + turnaround : null };
-  }, [planLegs, planMeta]);
-
-  // Effective maintenance start (normalised week-min): the dragged override if it
-  // still fits, otherwise the auto placement.
-  const planMaintWk = useMemo(() => {
-    if (maintGaps.autoRaw == null) return null;
-    const WK = 7 * 1440;
-    let raw = maintGaps.autoRaw;
-    if (maintOverride != null) {
-      const c = clampMaint(maintOverride, maintGaps.gaps, planMeta.maintDuration, planMeta.turnaround);
-      if (c != null) raw = c;
-    }
-    return ((raw % WK) + WK) % WK;
-  }, [maintGaps, maintOverride, planMeta]);
-
-  const ghostMaint = useMemo(() => {
-    if (planMaintWk == null || !planMeta) return null;
-    const dur = planMeta.maintDuration;
-    const sv = wkToView(planMaintWk);
-    const start = sv.minuteOfDay, day = sv.day;
-    const crossesMidnight = start + dur > 1440;
-    const seg1H = crossesMidnight ? (1440 - start) * PX_PER_MIN : dur * PX_PER_MIN;
-    return {
-      dayIndex: day,
-      top: start * PX_PER_MIN,
-      height: Math.max(seg1H, 14),
-      overflowDayIndex: crossesMidnight ? (day + 1) % 7 : null,
-      overflowHeight:   crossesMidnight ? (start + dur - 1440) * PX_PER_MIN : 0,
-      start_minutes: start, duration_minutes: dur,
-    };
-  }, [planMaintWk, planMeta, viewShiftMin]);
-
-  // ─── Edit mode draft bars (same gray look as the bank ghosts) ─────────────
 
   // Draft flights, laid out exactly like flightBars but sourced from the dragged
   // week-minute drafts (turnaround band included, so a bar that visually fits a
@@ -1045,17 +895,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     });
     return bad;
   }, [editLegs, editMaints, groundMin]);
-
-  const bankForwardRoute = useMemo(
-    () => routes.find(r => r.id === parseInt(bankForwardRouteId)) || null,
-    [routes, bankForwardRouteId]
-  );
-  const bankHubCode = bankForwardRoute?.departure_airport || null;
-  // Only banks at the outbound origin (the hub) apply to this plan.
-  const visibleBanks = useMemo(
-    () => bankHubCode ? banks.filter(b => b.hub_airport_code === bankHubCode) : banks,
-    [banks, bankHubCode]
-  );
 
   // ─── Series preview (pure time arithmetic — no Date objects) ─────────────
 
@@ -1431,108 +1270,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     finally { setSubmitting(false); }
   };
 
-  // ─── Banks planner handlers ──────────────────────────────────────────────
-
-  const clearBankPlan = () => { setBankPlan(null); setPlanLegs([]); setPlanMeta(null); setMaintOverride(null); };
-
-  const bankPlanBody = (commit) => ({
-    forward_route_id: parseInt(bankForwardRouteId),
-    return_route_id: parseInt(bankReturnRouteId),
-    bank_ids: selectedBankIds,
-    economy_price: bankEcoPrice || undefined,
-    business_price: bankBizPrice || undefined,
-    first_price: bankFirstPrice || undefined,
-    service_profile_id: bankServiceProfileId ? parseInt(bankServiceProfileId) : undefined,
-    commit,
-  });
-
-  const computeBankPlan = async () => {
-    setError(''); setSuccess('');
-    if (!bankForwardRouteId || !bankReturnRouteId) { setError('Select an outbound route that has a matching return route.'); return; }
-    if (selectedBankIds.length === 0) { setError('Select at least one bank.'); return; }
-    setBankComputing(true);
-    try {
-      const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/bank-plan`, {
-        method: 'POST', headers: jsonHeaders, body: JSON.stringify(bankPlanBody(false)),
-      });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error || 'Could not compute plan'); clearBankPlan(); }
-      else {
-        setBankPlan(data);
-        setPlanLegs((data.legs || []).map(l => ({ ...l })));
-        setPlanMeta({ oneWay: data.summary.one_way_minutes, turnaround: data.summary.turnaround, maintDuration: data.summary.maint_duration });
-        setMaintOverride(null);
-      }
-    } catch { setError('Network error'); clearBankPlan(); }
-    finally { setBankComputing(false); }
-  };
-
-  const confirmBankPlan = async () => {
-    if (!planLegs.length) return;
-    if (!bankEcoPrice) { setError('Enter an economy price before writing the plan.'); return; }
-    setBankConfirming(true); setError(''); setSuccess('');
-    try {
-      // Send the (possibly dragged) legs + maintenance explicitly so what's written
-      // matches the preview exactly.
-      const editedLegs = planLegs.map(l => {
-        const dow = Math.floor(l.week_dep / 1440) % 7;
-        const m = ((l.week_dep % 1440) + 1440) % 1440;
-        return { route_id: l.route_id, day_of_week: dow, departure_time: `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}` };
-      });
-      const editedMaint = planMaintWk != null ? {
-        day_of_week: Math.floor(planMaintWk / 1440) % 7,
-        start_minutes: ((planMaintWk % 1440) + 1440) % 1440,
-        duration_minutes: planMeta.maintDuration,
-      } : null;
-      const res  = await fetch(`${API_URL}/api/aircraft/${aircraftId}/bank-plan`, {
-        method: 'POST', headers: jsonHeaders,
-        body: JSON.stringify({ ...bankPlanBody(true), legs: editedLegs, maintenance: editedMaint }),
-      });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error || 'Could not write plan'); }
-      else { setSuccess(data.message); clearBankPlan(); fetchSchedule(); }
-    } catch { setError('Network error'); }
-    finally { setBankConfirming(false); }
-  };
-
-  const discardBankPlan = () => { clearBankPlan(); setError(''); };
-
-  const toggleBankSelected = (id) => {
-    clearBankPlan();
-    setSelectedBankIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id]);
-  };
-
-  // ─── Drag a ghost leg vertically, clamped to its bank window + neighbours ───
-  useEffect(() => { metaRef.current = planMeta; }, [planMeta]);
-
-  const applyLegDrag = (legs, idx, target, meta) => {
-    if (!meta) return legs;
-    const { oneWay, turnaround } = meta;
-    const WK = 7 * 1440;
-    const n = legs.length;
-    const leg = legs[idx];
-    const next = legs[(idx + 1) % n];
-    const prev = legs[(idx - 1 + n) % n];
-    let lo, hi, val, updated;
-    if (leg.drag === 'dep') {                    // outbound: move hub departure
-      const prevArr = idx > 0 ? prev.week_arr : prev.week_arr - WK;   // previous return leg
-      lo = Math.max(leg.bound_lo, prevArr + turnaround);
-      hi = Math.min(leg.bound_hi, next.week_arr - 2 * oneWay - turnaround); // keep dest wait ≥ turnaround
-      if (hi < lo) return legs;
-      val = Math.max(lo, Math.min(hi, target));
-      updated = { ...leg, week_dep: val, week_arr: val + oneWay };
-    } else {                                      // inbound: move hub arrival
-      const nextDep = idx < n - 1 ? next.week_dep : legs[0].week_dep + WK; // next outbound leg
-      lo = Math.max(leg.bound_lo, prev.week_arr + oneWay + turnaround);    // dest wait after outbound
-      hi = Math.min(leg.bound_hi, nextDep - turnaround);
-      if (hi < lo) return legs;
-      val = Math.max(lo, Math.min(hi, target));
-      updated = { ...leg, week_arr: val, week_dep: val - oneWay };
-    }
-    const out = legs.slice();
-    out[idx] = updated;
-    return out;
-  };
+  // ─── Drag handling (edit mode) ───────────────────────────────────────────
 
   const onDragMove = useCallback((e) => {
     const d = dragRef.current; if (!d) return;
@@ -1540,13 +1278,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     // Shift = 5-minute increments; touch/pen always snaps (no Shift key there).
     const snap5 = e.shiftKey || d.touch;
     if (snap5) deltaMin = Math.round(deltaMin / 5) * 5;
-    if (d.kind === 'maint') {
-      // Horizontal movement shifts the target across day columns; clampMaint then
-      // snaps to the nearest valid gap (which may be on that other day).
-      const dayDelta = d.colWidth ? Math.round((e.clientX - d.startX) / d.colWidth) : 0;
-      const raw = clampMaint(d.startVal + dayDelta * 1440 + deltaMin, d.gaps, d.duration, d.turnaround);
-      if (raw != null) setMaintOverride(raw);
-    } else if (d.kind === 'edit') {
+    if (d.kind === 'edit') {
       // Free move across the whole week: vertical = time, horizontal = day column.
       // The week is circular, so Sun→Mon simply wraps.
       const WK = 7 * 1440;
@@ -1556,8 +1288,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       val = ((val % WK) + WK) % WK;
       if (d.target === 'maint') setEditMaints(prev => prev.map((m, i) => i === d.idx ? { ...m, wkStart: val } : m));
       else                      setEditLegs(prev => prev.map((l, i) => i === d.idx ? { ...l, wkDep: val } : l));
-    } else {
-      setPlanLegs(prev => applyLegDrag(prev, d.idx, d.startVal + deltaMin, metaRef.current));
     }
   }, []);
   const onDragUp = useCallback(() => {
@@ -1567,31 +1297,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     window.removeEventListener('pointerup', onDragUp);
     window.removeEventListener('pointercancel', onDragUp);
   }, [onDragMove]);
-  const onGhostMouseDown = useCallback((e, idx) => {
-    e.preventDefault(); e.stopPropagation();
-    const touch = e.pointerType !== 'mouse';
-    setPlanLegs(prev => {
-      const leg = prev[idx];
-      dragRef.current = { kind: 'leg', idx, touch, startY: e.clientY, startVal: leg.drag === 'dep' ? leg.week_dep : leg.week_arr };
-      return prev;
-    });
-    document.body.style.userSelect = 'none';
-    window.addEventListener('pointermove', onDragMove);
-    window.addEventListener('pointerup', onDragUp);
-    window.addEventListener('pointercancel', onDragUp);
-  }, [onDragMove, onDragUp]);
-  const onMaintMouseDown = useCallback((e) => {
-    e.preventDefault(); e.stopPropagation();
-    if (!planMeta || maintGaps.autoRaw == null) return;
-    const startVal = maintOverride != null ? maintOverride : maintGaps.autoRaw;
-    const colWidth = e.currentTarget?.parentElement?.getBoundingClientRect().width || 0;
-    dragRef.current = { kind: 'maint', touch: e.pointerType !== 'mouse', startY: e.clientY, startX: e.clientX, colWidth, startVal, gaps: maintGaps.gaps, duration: planMeta.maintDuration, turnaround: planMeta.turnaround };
-    document.body.style.userSelect = 'none';
-    window.addEventListener('pointermove', onDragMove);
-    window.addEventListener('pointerup', onDragUp);
-    window.addEventListener('pointercancel', onDragUp);
-  }, [planMeta, maintGaps, maintOverride, onDragMove, onDragUp]);
-
   // Drag an existing (draft) flight or maintenance block anywhere in the week.
   const onEditMouseDown = useCallback((e, target, idx) => {
     e.preventDefault(); e.stopPropagation();
@@ -1605,57 +1310,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     window.addEventListener('pointerup', onDragUp);
     window.addEventListener('pointercancel', onDragUp);
   }, [editLegs, editMaints, onDragMove, onDragUp]);
-
-  const openBankModal = (bank = null) => {
-    setError('');
-    if (bank) {
-      setEditingBankId(bank.id);
-      setBankName(bank.name);
-      setBankHub(bank.hub_airport_code);
-      setBankEarlyArr(minutesToHHMM(bank.earliest_arrival));
-      setBankLateArr(minutesToHHMM(bank.latest_arrival));
-      setBankEarlyDep(minutesToHHMM(bank.earliest_departure));
-      setBankLateDep(minutesToHHMM(bank.latest_departure));
-    } else {
-      setEditingBankId(null);
-      setBankName('');
-      setBankHub(bankForwardRoute?.departure_airport || '');
-      setBankEarlyArr('04:00'); setBankLateArr('06:00');
-      setBankEarlyDep('07:00'); setBankLateDep('09:00');
-    }
-    setShowBankModal(true);
-  };
-
-  const saveBank = async () => {
-    if (!bankName.trim()) { setError('Bank name is required'); return; }
-    if (!bankHub) { setError('Select a hub airport'); return; }
-    setBankSaving(true); setError('');
-    try {
-      const body = {
-        name: bankName.trim(), hub_airport_code: bankHub,
-        earliest_arrival: parseHM(bankEarlyArr), latest_arrival: parseHM(bankLateArr),
-        earliest_departure: parseHM(bankEarlyDep), latest_departure: parseHM(bankLateDep),
-      };
-      const url = editingBankId ? `${API_URL}/api/banks/${editingBankId}` : `${API_URL}/api/banks`;
-      const res = await fetch(url, { method: editingBankId ? 'PUT' : 'POST', headers: jsonHeaders, body: JSON.stringify(body) });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error || 'Could not save bank'); }
-      else { setShowBankModal(false); fetchBanks(); }
-    } catch { setError('Network error'); }
-    finally { setBankSaving(false); }
-  };
-
-  const deleteBank = async (id) => {
-    if (!window.confirm('Delete this bank?')) return;
-    try {
-      const res = await fetch(`${API_URL}/api/banks/${id}`, { method: 'DELETE', headers });
-      if (res.ok) {
-        setSelectedBankIds(ids => ids.filter(x => x !== id));
-        clearBankPlan();
-        fetchBanks();
-      }
-    } catch {}
-  };
 
   const handleMaintenanceSubmit = async () => {
     setSubmitting(true); setError(''); setSuccess('');
@@ -1780,7 +1434,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const enterEditMode = () => {
     if (isActive) { setError('Aircraft must be inactive to edit schedule. Deactivate the aircraft first.'); return; }
     if (schedule.length === 0 && maintenance.length === 0) { setError('Nothing to edit — the weekly schedule is empty.'); return; }
-    clearBankPlan();
     setEditLegs(schedule.map(e => {
       const dep = parseHM(e.departure_time);
       const arr = parseHM(e.arrival_time);
@@ -2815,7 +2468,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
               <button
                 className={`ad-btn-clear-sched${editMode ? ' ad-btn-edit-on' : ''}`}
                 onClick={() => (editMode ? cancelEditMode() : enterEditMode())}
-                disabled={shiftingDay || isActive || !!bankPlan}
+                disabled={shiftingDay || isActive}
                 title="Drag existing flights and maintenance freely across days and times, then confirm"
               >{editMode ? 'Editing…' : 'Edit'}</button>
               <button
@@ -2847,15 +2500,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
               <button className="ad-btn-clear-sched" onClick={cancelEditMode} disabled={editSaving}>Cancel</button>
               <button className="ad-bank-confirm-btn" disabled={editSaving || editConflicts.size > 0} onClick={confirmEditMode}>
                 {editSaving ? 'Saving…' : 'Confirm & save'}
-              </button>
-            </div>
-          )}
-          {bankPlan && (
-            <div className="ad-bank-overlay">
-              <span className="ad-bank-overlay-label">Bank Plan Preview</span>
-              <button className="ad-btn-clear-sched" onClick={discardBankPlan}>Discard</button>
-              <button className="ad-bank-confirm-btn" disabled={bankConfirming} onClick={confirmBankPlan}>
-                {bankConfirming ? 'Writing…' : 'Confirm & write'}
               </button>
             </div>
           )}
@@ -2891,8 +2535,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                 const mOverflowBars    = realMaint.filter(m => m.overflowDayIndex === di);
                 const mGroundBars      = realMaint.filter(m => m.groundDayIndex === di);
                 const mGroundOverflowBars = realMaint.filter(m => m.groundOverflowDayIndex === di);
-                const gBars            = ghostBars.filter(g => g.dayIndex === di);
-                const gOverflowBars    = ghostBars.filter(g => g.overflowDayIndex === di);
                 const eBars            = editBars.filter(b => b.dayIndex === di);
                 const eOverflowBars    = editBars.filter(b => b.overflowDayIndex === di);
                 const eGroundBars      = editBars.filter(b => b.groundDayIndex === di);
@@ -3100,44 +2742,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                         <span className="ad-grid-fn">A-Check</span>
                       </div>
                     ))}
-                    {/* Bank plan ghost preview — half-transparent, draggable */}
-                    {gBars.map(g => (
-                      <div key={g.key} className="ad-grid-ghost ad-grid-ghost--drag"
-                        style={{ top: g.top, height: g.height }}
-                        onPointerDown={(e) => onGhostMouseDown(e, g.legIndex)}
-                        title={`${g.flight_number}: ${g.departure_airport}→${g.arrival_airport}\nDrag to shift within the bank · Shift = 5-min steps\nDep ${g.departure_time}${g.depLocal ? ` (${g.depLocal} ${g.departure_airport} local)` : ''}\nArr ${g.arrival_time}${g.arrLocal ? ` (${g.arrLocal} ${g.arrival_airport} local)` : ''}`}>
-                        <span className="ad-grid-fn">{g.flight_number}</span>
-                        {g.height > 24 && <span className="ad-grid-rt">{g.departure_airport}→{g.arrival_airport}</span>}
-                        {g.height > 38 && <span className="ad-grid-tm">{g.departure_time}{g.depLocal && ` (${g.depLocal})`}</span>}
-                        {g.height > 50 && <span className="ad-grid-tm">{g.arrival_time}{g.arrLocal && ` (${g.arrLocal})`}</span>}
-                      </div>
-                    ))}
-                    {gOverflowBars.map(g => (
-                      <div key={`${g.key}-ov`} className="ad-grid-ghost ad-grid-ghost--drag"
-                        style={{ top: 0, height: g.overflowHeight, borderTop: '2px dashed #2C2C2C' }}
-                        onPointerDown={(e) => onGhostMouseDown(e, g.legIndex)}
-                        title={`${g.flight_number}: ${g.departure_airport}→${g.arrival_airport} (cont.)`}>
-                        <span className="ad-grid-fn">{g.flight_number}</span>
-                        {g.overflowHeight > 24 && <span className="ad-grid-rt">→{g.arrival_airport}</span>}
-                      </div>
-                    ))}
-                    {ghostMaint && ghostMaint.dayIndex === di && (
-                      <div className="ad-grid-ghost ad-grid-ghost--maint ad-grid-ghost--drag"
-                        style={{ top: ghostMaint.top, height: ghostMaint.height }}
-                        onPointerDown={onMaintMouseDown}
-                        title="Planned maintenance (A-Check)&#10;Drag across days/times to any free gap · Shift = 5-min steps">
-                        <span className="ad-grid-fn">A-Check</span>
-                        {ghostMaint.height > 24 && <span className="ad-grid-rt">{minsToHM(ghostMaint.start_minutes)}</span>}
-                      </div>
-                    )}
-                    {ghostMaint && ghostMaint.overflowDayIndex === di && (
-                      <div className="ad-grid-ghost ad-grid-ghost--maint ad-grid-ghost--drag"
-                        style={{ top: 0, height: ghostMaint.overflowHeight, borderTop: '2px dashed #6b7280' }}
-                        onPointerDown={onMaintMouseDown}
-                        title="Planned maintenance (A-Check, cont.)">
-                        <span className="ad-grid-fn">A-Check</span>
-                      </div>
-                    )}
                   </div>
                 );
               })}
@@ -3167,7 +2771,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
               onChange={e => { setScheduleTab(e.target.value); setError(''); setSuccess(''); }}>
               <option value="single">Single Flight</option>
               <option value="series">Series Flight</option>
-              <option value="banks">Banks</option>
               <option value="transfer">Transfer</option>
               <option value="maintenance">Maintenance</option>
             </select>
@@ -3446,100 +3049,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                 <button className="sched-btn-submit" onClick={handleSeriesSubmit}
                   disabled={submitting || !outRouteId || !rEcoPrice || seriesHasConflict || !routeInRange(outRouteId) || !routeInRange(inRouteId)}>
                   {submitting ? 'Scheduling...' : `Schedule ${seriesPreview.length || ''} Entries`}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Banks (hub-banking planner) */}
-          {scheduleTab === 'banks' && selectedCabinProfileId && (
-            <div className="sched-form-body">
-              <div className="sched-section-hd">Route</div>
-              <div className="sched-section-body">
-                <div className="sched-form-row">
-                  <label>
-                    Outbound route (round trip)
-                    {bankForwardRouteId && !routeInRange(bankForwardRouteId) && (
-                      <span className="sched-range-warn"> ⚠ Exceeds aircraft range</span>
-                    )}
-                  </label>
-                  <select value={bankForwardRouteId} onChange={e => setBankForwardRouteId(e.target.value)}>
-                    <option value="">— select route —</option>
-                    {renderAllRouteGroups('bank-')}
-                  </select>
-                </div>
-                {routeLegend}
-                {bankForwardRouteId && (
-                  <div className="sched-bank-return">
-                    {bankReturnRouteId
-                      ? <>Return leg: <strong>{bankForwardRoute?.arrival_airport} → {bankForwardRoute?.departure_airport}</strong> · Hub: <strong>{bankHubCode}</strong></>
-                      : <span className="sched-range-warn">⚠ No return route found for this pairing. Create the reverse route first.</span>}
-                  </div>
-                )}
-              </div>
-
-              <div className="sched-section-hd">
-                Banks at {bankHubCode || 'the hub'}
-                <button className="sched-bank-add" onClick={() => openBankModal(null)}>+ New Bank</button>
-              </div>
-              <div className="sched-section-body">
-                {!bankHubCode && <div className="sched-bank-hint">Select an outbound route to see the banks at its hub.</div>}
-                {bankHubCode && visibleBanks.length === 0 && (
-                  <div className="sched-bank-hint">No banks defined at {bankHubCode} yet. Create one with “+ New Bank”.</div>
-                )}
-                {bankHubCode && visibleBanks.map(b => (
-                  <div key={b.id} className={`sched-bank-item ${selectedBankIds.includes(b.id) ? 'selected' : ''}`}>
-                    <label className="sched-bank-check">
-                      <input type="checkbox" checked={selectedBankIds.includes(b.id)} onChange={() => toggleBankSelected(b.id)} />
-                      <span className="sched-bank-name">{b.name}</span>
-                    </label>
-                    <span className="sched-bank-item-actions">
-                      <button onClick={() => openBankModal(b)} title="Edit bank">✎</button>
-                      <button onClick={() => deleteBank(b.id)} title="Delete bank">×</button>
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="sched-section-hd">Pricing</div>
-              <div className="sched-section-body">
-                <div className="sched-3col">
-                  <div className="sched-form-row">
-                    <label>Economy</label>
-                    <input type="number" min="1" placeholder="$" value={bankEcoPrice} onChange={e => setBankEcoPrice(e.target.value)} />
-                  </div>
-                  <div className={`sched-form-row ${!hasBusiness ? 'price-disabled' : ''}`}>
-                    <label>Business</label>
-                    <input type="number" min="1" placeholder={hasBusiness ? '$' : 'N/A'} value={bankBizPrice}
-                      onChange={e => setBankBizPrice(e.target.value)} disabled={!hasBusiness} />
-                  </div>
-                  <div className={`sched-form-row ${!hasFirst ? 'price-disabled' : ''}`}>
-                    <label>First</label>
-                    <input type="number" min="1" placeholder={hasFirst ? '$' : 'N/A'} value={bankFirstPrice}
-                      onChange={e => setBankFirstPrice(e.target.value)} disabled={!hasFirst} />
-                  </div>
-                </div>
-              </div>
-
-              <div className="sched-section-hd">Service</div>
-              <div className="sched-section-body">
-                <div className="sched-form-row">
-                  <label>Service Profile</label>
-                  <select value={bankServiceProfileId} onChange={e => setBankServiceProfileId(e.target.value)}>
-                    <option value="">— None —</option>
-                    {serviceProfiles.map(p => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} (E${p.economy_cost}{p.business_cost ? ` / B$${p.business_cost}` : ''}{p.first_cost ? ` / F$${p.first_cost}` : ''}/pax)
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="sched-form-actions">
-                <button className="sched-btn-submit" onClick={computeBankPlan}
-                  disabled={bankComputing || !bankForwardRouteId || !bankReturnRouteId || selectedBankIds.length === 0 || !routeInRange(bankForwardRouteId)}>
-                  {bankComputing ? 'Calculating…' : 'Calculate Plan'}
                 </button>
               </div>
             </div>
@@ -4291,64 +3800,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         </div>
       )}
 
-      {showBankModal && (
-        <div className="sched-modal-overlay" onClick={() => setShowBankModal(false)}>
-          <div className="sched-modal" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
-            <div className="sched-modal-header" style={{ background: '#2C2C2C', borderBottom: 'none' }}>
-              <h2 style={{ color: 'white', fontSize: '1rem' }}>{editingBankId ? 'Edit Bank' : 'New Bank'}</h2>
-              <button className="sched-modal-close" style={{ color: 'rgba(255,255,255,0.6)' }} onClick={() => setShowBankModal(false)}>×</button>
-            </div>
-            <div className="sched-modal-body">
-              <div className="sched-form-row" style={{ marginBottom: '0.9rem' }}>
-                <label className="bank-modal-label">Bank Name</label>
-                <input type="text" className="bank-modal-inp" value={bankName} placeholder="e.g. Morning bank" onChange={e => setBankName(e.target.value)} />
-              </div>
-              <div className="sched-form-row" style={{ marginBottom: '1rem' }}>
-                <label className="bank-modal-label">Hub Airport</label>
-                <select className="bank-modal-inp" value={bankHub} onChange={e => setBankHub(e.target.value)}>
-                  <option value="">— select hub —</option>
-                  {airports.map(ap => (
-                    <option key={ap.iata_code} value={ap.iata_code}>{ap.iata_code} – {ap.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="bank-modal-window">
-                <div className="bank-modal-window-hd">
-                  Arrival Window
-                  {parseHM(bankLateArr) < parseHM(bankEarlyArr) && <span className="bank-modal-nextday">latest is next day</span>}
-                </div>
-                <div className="bank-modal-times">
-                  <input type="time" className="bank-modal-inp" value={bankEarlyArr} onChange={e => setBankEarlyArr(e.target.value)} />
-                  <span className="bank-modal-dash">–</span>
-                  <input type="time" className="bank-modal-inp" value={bankLateArr} onChange={e => setBankLateArr(e.target.value)} />
-                </div>
-              </div>
-              <div className="bank-modal-window">
-                <div className="bank-modal-window-hd">
-                  Departure Window
-                  {parseHM(bankLateDep) < parseHM(bankEarlyDep) && <span className="bank-modal-nextday">latest is next day</span>}
-                </div>
-                <div className="bank-modal-times">
-                  <input type="time" className="bank-modal-inp" value={bankEarlyDep} onChange={e => setBankEarlyDep(e.target.value)} />
-                  <span className="bank-modal-dash">–</span>
-                  <input type="time" className="bank-modal-inp" value={bankLateDep} onChange={e => setBankLateDep(e.target.value)} />
-                </div>
-              </div>
-
-              <div style={{ fontSize: '0.76rem', color: '#888', marginTop: '0.9rem', lineHeight: 1.5 }}>
-                Times are in the hub’s local time — the wall-clock at {bankHub || 'the hub'}, matching the grid’s local-time view.
-              </div>
-            </div>
-            <div className="sched-modal-footer">
-              <button className="sched-btn-cancel" onClick={() => setShowBankModal(false)}>Cancel</button>
-              <button className="sched-btn-submit" disabled={bankSaving} onClick={saveBank}>
-                {bankSaving ? 'Saving…' : editingBankId ? 'Save Changes' : 'Create Bank'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── Expansion capacity exceeded modal ── */}
       {activateWarning && (
@@ -5024,44 +4475,21 @@ const styles = `
   .ad-grid-del:hover { background: rgba(239,68,68,0.5); border-color: rgba(239,68,68,0.7); }
   .ad-grid-del--maint { color: rgba(255,255,255,0.9); }
   .ad-grid-flight.conflict { outline: 2px solid #FF4444; outline-offset: -2px; }
-  /* Bank plan ghost preview bars — anthracite, dashed, clearly "not yet written" */
+  /* Edit mode draft bars — anthracite, dashed, clearly "not yet written" */
   .ad-grid-ghost { position: absolute; left: 2px; right: 2px; border-radius: 3px; padding: 2px 4px; overflow: hidden; z-index: 5; display: flex; flex-direction: column; gap: 1px; pointer-events: none; background: #2C2C2C; opacity: 0.5; border: 1.5px dashed #2C2C2C; box-sizing: border-box; }
   .ad-grid-ghost--drag { pointer-events: auto; cursor: ns-resize; touch-action: none; }
   .ad-grid-ghost--drag:hover { opacity: 0.68; }
   .ad-grid-ghost--maint { background: #6b7280; border-color: #4b5563; }
   .ad-grid-ghost .ad-grid-fn, .ad-grid-ghost .ad-grid-rt, .ad-grid-ghost .ad-grid-tm { color: #fff; }
-  /* Edit mode: same ghost language, but free movement in both axes */
+  /* Free movement in both axes */
   .ad-grid-ghost--move { cursor: move; }
   .ad-grid-ghost--conflict { outline: 2px solid #FF4444; outline-offset: -2px; opacity: 0.72; }
-  /* Bank plan confirm overlay — floats over the grid, dark toolbar language */
+  /* Edit mode confirm overlay — floats over the grid, dark toolbar language */
   .ad-bank-overlay { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 12px; background: #2C2C2C; padding: 8px 10px; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.28); max-width: calc(100% - 16px); box-sizing: border-box; }
   .ad-bank-overlay-label { color: white; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
   .ad-bank-confirm-btn { background: white; color: #2C2C2C; border: none; padding: 0.4rem 1.05rem; border-radius: 5px; font-weight: 700; font-size: 0.82rem; cursor: pointer; transition: background 0.15s; }
   .ad-bank-confirm-btn:hover { background: #EDEDED; }
   .ad-bank-confirm-btn:disabled { opacity: 0.55; cursor: not-allowed; }
-  /* Banks tab list */
-  .sched-bank-add { float: right; margin-top: -4px; background: transparent; border: 1px solid #CCCCCC; color: #555555; padding: 0.18rem 0.6rem; border-radius: 4px; font-size: 0.68rem; font-weight: 600; cursor: pointer; letter-spacing: 0.03em; text-transform: none; transition: all 0.15s; }
-  .sched-bank-add:hover { background: #2C2C2C; border-color: #2C2C2C; color: #fff; }
-  .sched-bank-hint { font-size: 0.8rem; color: #888; padding: 4px 0; }
-  .sched-bank-return { font-size: 0.8rem; color: #555; margin-top: 6px; }
-  .sched-bank-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid #E0E0E0; border-radius: 6px; margin-bottom: 6px; }
-  .sched-bank-item.selected { border-color: #2C2C2C; background: #F5F5F5; }
-  .sched-bank-check { display: flex; align-items: center; gap: 8px; cursor: pointer; flex: 1; min-width: 0; }
-  .sched-bank-check input { accent-color: #2C2C2C; }
-  .sched-bank-name { font-weight: 600; font-size: 0.86rem; color: #2C2C2C; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .sched-bank-item-actions { display: flex; gap: 4px; flex-shrink: 0; }
-  .sched-bank-item-actions button { background: none; border: 1px solid #E0E0E0; border-radius: 4px; width: 22px; height: 22px; cursor: pointer; color: #666; line-height: 1; }
-  .sched-bank-item-actions button:hover { background: #F5F5F5; border-color: #CCCCCC; }
-  /* Bank modal fields (match game modal language) */
-  .bank-modal-label { display: block; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #666; margin-bottom: 6px; }
-  .bank-modal-inp { width: 100%; padding: 0.5rem 0.6rem; border: 1px solid #E0E0E0; border-radius: 6px; font-size: 0.88rem; color: #2C2C2C; background: white; box-sizing: border-box; }
-  .bank-modal-inp:focus { outline: none; border-color: #2C2C2C; }
-  .bank-modal-window { background: #F5F5F5; border: 1px solid #E0E0E0; border-radius: 6px; padding: 10px 12px; margin-bottom: 0.75rem; }
-  .bank-modal-window-hd { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #888; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
-  .bank-modal-nextday { font-size: 0.62rem; font-weight: 700; color: #a16207; background: rgba(234,179,8,0.15); border: 1px solid rgba(234,179,8,0.35); padding: 1px 6px; border-radius: 3px; letter-spacing: 0.02em; text-transform: none; }
-  .bank-modal-times { display: flex; align-items: center; gap: 10px; }
-  .bank-modal-times .bank-modal-inp { flex: 1; }
-  .bank-modal-dash { color: #999; font-weight: 600; }
   .ad-grid-fn { font-size: 9px; font-weight: 700; color: white; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
   .ad-grid-rt { font-size: 8px; color: rgba(255,255,255,0.85); white-space: nowrap; overflow: hidden; line-height: 1.2; }
   .ad-grid-tm { font-size: 8px; color: rgba(255,255,255,0.7); white-space: nowrap; overflow: hidden; font-family: monospace; line-height: 1.2; }

@@ -2087,6 +2087,41 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     } catch (err) { setError(err.message); }
   };
 
+  // Problems that would make flights cancel as wrong_location once the aircraft
+  // flies this week: a leg that doesn't depart where the previous one landed
+  // (e.g. ZRH-JFK followed by ZRH-JFK), and the aircraft not standing where its
+  // next departure leaves from. Schedule times are Berlin game time, day 0 = Mon.
+  const scheduleChainIssues = useMemo(() => {
+    const legs = schedule
+      .map(e => ({ ...e, pos: e.day_of_week * 1440 + (parseHM(e.departure_time) ?? 0) }))
+      .sort((a, b) => a.pos - b.pos);
+    if (legs.length === 0) return [];
+    const issues = [];
+    const at = l => `${DAY_SHORT[l.day_of_week]} ${String(l.departure_time).slice(0, 5)}`;
+    const name = l => l.flight_number || (l.is_transfer ? 'Transfer' : 'Flight');
+    for (let i = 0; i < legs.length; i++) {
+      const cur = legs[i], next = legs[(i + 1) % legs.length];
+      if (cur.arrival_airport !== next.departure_airport) {
+        issues.push(`${name(cur)} ${cur.departure_airport}→${cur.arrival_airport} (${at(cur)}) lands in ${cur.arrival_airport}, `
+          + `but the next leg ${name(next)} ${next.departure_airport}→${next.arrival_airport} (${at(next)}) departs from ${next.departure_airport}.`);
+      }
+    }
+    if (currentLocation) {
+      const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Europe/Berlin', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+      }).formatToParts(new Date()).map(p => [p.type, p.value]));
+      const dayIdx = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(parts.weekday);
+      const nowPos = dayIdx * 1440 + parseInt(parts.hour) * 60 + parseInt(parts.minute);
+      const first = legs.find(l => l.pos >= nowPos) || legs[0];
+      if (dayIdx >= 0 && first.departure_airport !== currentLocation) {
+        issues.push(`The aircraft is at ${currentLocation}, but its next leg ${name(first)} `
+          + `${first.departure_airport}→${first.arrival_airport} (${at(first)}) departs from ${first.departure_airport}.`);
+      }
+    }
+    return issues;
+  }, [schedule, currentLocation]);
+  const [activateWarning, setActivateWarning] = useState(null);   // null | string[]
+
   const handleToggleActive = async () => {
     setError('');
     try {
@@ -2549,6 +2584,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                       if (!selectedCabinProfileId) { setError('No cabin profile assigned'); return; }
                       if (!crewAssigned)           { setError('No crew assigned'); return; }
                       if (schedule.length === 0)   { setError('No flights scheduled'); return; }
+                      if (scheduleChainIssues.length) { setActivateWarning(scheduleChainIssues); return; }
                       handleToggleActive();
                     }}>
                     Activate
@@ -4319,6 +4355,33 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       )}
 
       {/* ── Expansion capacity exceeded modal ── */}
+      {activateWarning && (
+        <div className="decomm-modal-overlay" onClick={() => setActivateWarning(null)}>
+          <div className="decomm-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
+            <div className="decomm-modal-head">
+              <h3>Schedule doesn't connect</h3>
+              <button className="decomm-modal-close" onClick={() => setActivateWarning(null)}>&times;</button>
+            </div>
+            <div className="decomm-modal-body">
+              <p style={{ fontSize: '0.9rem', color: '#444', marginBottom: '0.75rem' }}>
+                These flights will be cancelled as "Wrong Location" because the aircraft won't be at the departure airport:
+              </p>
+              {activateWarning.map((w, i) => (
+                <div key={i} style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 6, padding: '0.6rem 1rem', marginBottom: '0.5rem', fontSize: '0.85rem', color: '#78350f' }}>
+                  {w}
+                </div>
+              ))}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: '1rem' }}>
+                <button className="sched-btn-cancel" onClick={() => setActivateWarning(null)}>Cancel</button>
+                <button className="sched-btn-submit" onClick={() => { setActivateWarning(null); handleToggleActive(); }}>
+                  Activate anyway
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {slotViolations && (
         <div className="decomm-modal-overlay" onClick={() => setSlotViolations(null)}>
           <div className="decomm-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>

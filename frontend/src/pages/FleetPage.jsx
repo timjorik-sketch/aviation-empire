@@ -109,41 +109,29 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
   const fetchOverview = async () => {
     const token = localStorage.getItem('token');
     try {
-      // Use existing proven endpoints — merge in JS
-      const [fleetRes, flightsRes] = await Promise.all([
-        fetch(`${API_URL}/api/aircraft/fleet`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }),
-        fetch(`${API_URL}/api/flights`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
-      ]);
-
+      const fleetRes = await fetch(`${API_URL}/api/aircraft/fleet`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       const fleetData = await fleetRes.json();
-      const flightsData = await flightsRes.json();
-
       const fleet = fleetData.fleet || [];
-      const flights = flightsData.flights || [];
 
-      // Build lookup: aircraft_registration → active flight
-      // Treats scheduled/boarding flights whose dep time has passed (DB lag) as in-flight
-      const activeByReg = {};
+      // Active flight per aircraft comes with the fleet rows (the flight list is
+      // paged, so long flights that departed hours ago could be missing from it).
+      // Treats scheduled/boarding flights whose dep time has passed (DB lag) as in-flight.
       const nowMs = Date.now();
-      for (const f of flights) {
+      const asActive = (f) => {
+        if (!f) return null;
         const depMs = f.departure_time ? new Date(f.departure_time).getTime() : null;
         const arrMs = f.arrival_time   ? new Date(f.arrival_time).getTime()   : null;
         const inWindow = depMs != null && arrMs != null && depMs <= nowMs && nowMs < arrMs;
-        if (f.status === 'in-flight') {
-          activeByReg[f.aircraft_registration] = f;
-        } else if (f.status === 'boarding') {
-          activeByReg[f.aircraft_registration] = inWindow ? { ...f, status: 'in-flight' } : f;
-        } else if (f.status === 'scheduled' && inWindow) {
-          activeByReg[f.aircraft_registration] = { ...f, status: 'in-flight' };
-        }
-      }
+        if (f.status === 'in-flight') return f;
+        if (f.status === 'boarding') return inWindow ? { ...f, status: 'in-flight' } : f;
+        if (f.status === 'scheduled' && inWindow) return { ...f, status: 'in-flight' };
+        return null;
+      };
 
       const overview = fleet.map(ac => {
-        const af = activeByReg[ac.registration] || null;
+        const af = asActive(ac.active_flight);
         // Fall back to in-progress transfer flight when no regular flight is active.
         const tf = !af && ac.active_transfer ? ac.active_transfer : null;
         return {

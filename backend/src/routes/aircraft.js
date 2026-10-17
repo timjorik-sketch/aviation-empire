@@ -401,7 +401,13 @@ router.get('/fleet', authMiddleware, async (req, res) => {
              tf.departure_airport AS transfer_dep,
              tf.arrival_airport   AS transfer_arr,
              tf.departure_time    AS transfer_dep_time,
-             tf.arrival_time      AS transfer_arr_time
+             tf.arrival_time      AS transfer_arr_time,
+             af.flight_number     AS af_flight_number,
+             af.status            AS af_status,
+             af.dep_code          AS af_dep,
+             af.arr_code          AS af_arr,
+             af.departure_time    AS af_dep_time,
+             af.arrival_time      AS af_arr_time
       FROM aircraft a
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
       LEFT JOIN airline_cabin_profiles acp ON a.airline_cabin_profile_id = acp.id
@@ -415,6 +421,21 @@ router.get('/fleet', authMiddleware, async (req, res) => {
         ORDER BY departure_time DESC
         LIMIT 1
       ) tf ON true
+      -- The aircraft's current flight, looked up per aircraft so the fleet list
+      -- doesn't depend on a paged flight list (long flights fell off its end).
+      LEFT JOIN LATERAL (
+        SELECT f.flight_number, f.status, f.departure_time, f.arrival_time,
+               COALESCE(r.departure_airport, ws.departure_airport) AS dep_code,
+               COALESCE(r.arrival_airport,   ws.arrival_airport)   AS arr_code
+        FROM flights f
+        LEFT JOIN routes r           ON f.route_id = r.id
+        LEFT JOIN weekly_schedule ws ON f.weekly_schedule_id = ws.id
+        WHERE f.aircraft_id = a.id
+          AND (f.status IN ('in-flight', 'boarding')
+               OR (f.status = 'scheduled' AND f.departure_time <= NOW() AND f.arrival_time > NOW()))
+        ORDER BY (f.status = 'in-flight') DESC, f.departure_time DESC
+        LIMIT 1
+      ) af ON true
       LEFT JOIN (
         SELECT
           aircraft_id,
@@ -470,6 +491,14 @@ router.get('/fleet', authMiddleware, async (req, res) => {
         arrival_airport: row.transfer_arr,
         departure_time: row.transfer_dep_time,
         arrival_time: row.transfer_arr_time,
+      } : null,
+      active_flight: row.af_status ? {
+        flight_number: row.af_flight_number,
+        status: row.af_status,
+        departure_airport: row.af_dep,
+        arrival_airport: row.af_arr,
+        departure_time: row.af_dep_time,
+        arrival_time: row.af_arr_time,
       } : null,
     }));
 

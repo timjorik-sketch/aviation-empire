@@ -2106,18 +2106,13 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
           + `but the next leg ${name(next)} ${next.departure_airport}→${next.arrival_airport} (${at(next)}) departs from ${next.departure_airport}.`);
       }
     }
+    // Only warn when the aircraft could never join the rotation: no leg departs
+    // from where it stands. Merely starting mid-rotation sorts itself out.
     const locCode = currentLocation?.code;   // { code, name } from the detail endpoint
-    if (locCode) {
-      const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
-        timeZone: 'Europe/Berlin', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-      }).formatToParts(new Date()).map(p => [p.type, p.value]));
-      const dayIdx = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(parts.weekday);
-      const nowPos = dayIdx * 1440 + parseInt(parts.hour) * 60 + parseInt(parts.minute);
-      const first = legs.find(l => l.pos >= nowPos) || legs[0];
-      if (dayIdx >= 0 && first.departure_airport !== locCode) {
-        issues.location = (`The aircraft is at ${locCode}, but its next leg ${name(first)} `
-          + `${first.departure_airport}→${first.arrival_airport} (${at(first)}) departs from ${first.departure_airport}.`);
-      }
+    if (locCode && !legs.some(l => l.departure_airport === locCode)) {
+      const deps = [...new Set(legs.map(l => l.departure_airport))].join(', ');
+      issues.location = `The aircraft is at ${locCode}, but no leg in this schedule departs from ${locCode} `
+        + `(departures: ${deps}).`;
     }
     return issues;
   }, [schedule, currentLocation]);
@@ -4386,8 +4381,8 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                   </div>
                   <p style={{ fontSize: '0.85rem', color: '#444', marginBottom: '0.6rem' }}>
                     {activateWarning.chain.length
-                      ? 'In addition, the aircraft is not where its first flight departs:'
-                      : 'The schedule itself is fine. Only the start is affected: the first flights are cancelled as "Wrong Location" until the rotation reaches the aircraft\'s airport, after that it runs normally.'}
+                      ? 'In addition, the aircraft can never start this schedule:'
+                      : 'The schedule itself is fine, but the aircraft can never start it. Every flight will be cancelled as "Wrong Location" until the aircraft is moved, e.g. with a transfer flight.'}
                   </p>
                   <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 6, padding: '0.6rem 1rem', fontSize: '0.85rem', color: '#78350f' }}>
                     {activateWarning.location}

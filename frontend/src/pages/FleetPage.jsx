@@ -130,8 +130,24 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
         return null;
       };
 
+      // Fallback for a backend that doesn't send active_flight yet (frontend and
+      // backend deploy separately): match from the flight list like before.
+      const fromList = {};
+      if (fleet.length && !('active_flight' in fleet[0])) {
+        const flightsRes = await fetch(`${API_URL}/api/flights?limit=1000`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const flights = (await flightsRes.json()).flights || [];
+        for (const f of flights) {
+          if (!['in-flight', 'boarding', 'scheduled'].includes(f.status)) continue;
+          if (f.status === 'scheduled' && !asActive(f)) continue;   // only past-departure lag rows
+          const prev = fromList[f.aircraft_registration];
+          if (!prev || (prev.status !== 'in-flight' && f.status === 'in-flight')) fromList[f.aircraft_registration] = f;
+        }
+      }
+
       const overview = fleet.map(ac => {
-        const af = asActive(ac.active_flight);
+        const af = asActive('active_flight' in ac ? ac.active_flight : fromList[ac.registration]);
         // Fall back to in-progress transfer flight when no regular flight is active.
         const tf = !af && ac.active_transfer ? ac.active_transfer : null;
         return {

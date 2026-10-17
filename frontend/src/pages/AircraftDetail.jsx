@@ -2095,14 +2095,14 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     const legs = schedule
       .map(e => ({ ...e, pos: e.day_of_week * 1440 + (parseHM(e.departure_time) ?? 0) }))
       .sort((a, b) => a.pos - b.pos);
-    if (legs.length === 0) return [];
-    const issues = [];
+    const issues = { chain: [], location: null };
+    if (legs.length === 0) return issues;
     const at = l => `${DAY_SHORT[l.day_of_week]} ${String(l.departure_time).slice(0, 5)}`;
     const name = l => l.flight_number || (l.is_transfer ? 'Transfer' : 'Flight');
     for (let i = 0; i < legs.length; i++) {
       const cur = legs[i], next = legs[(i + 1) % legs.length];
       if (cur.arrival_airport !== next.departure_airport) {
-        issues.push(`${name(cur)} ${cur.departure_airport}→${cur.arrival_airport} (${at(cur)}) lands in ${cur.arrival_airport}, `
+        issues.chain.push(`${name(cur)} ${cur.departure_airport}→${cur.arrival_airport} (${at(cur)}) lands in ${cur.arrival_airport}, `
           + `but the next leg ${name(next)} ${next.departure_airport}→${next.arrival_airport} (${at(next)}) departs from ${next.departure_airport}.`);
       }
     }
@@ -2115,13 +2115,13 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       const nowPos = dayIdx * 1440 + parseInt(parts.hour) * 60 + parseInt(parts.minute);
       const first = legs.find(l => l.pos >= nowPos) || legs[0];
       if (dayIdx >= 0 && first.departure_airport !== locCode) {
-        issues.push(`The aircraft is at ${locCode}, but its next leg ${name(first)} `
+        issues.location = (`The aircraft is at ${locCode}, but its next leg ${name(first)} `
           + `${first.departure_airport}→${first.arrival_airport} (${at(first)}) departs from ${first.departure_airport}.`);
       }
     }
     return issues;
   }, [schedule, currentLocation]);
-  const [activateWarning, setActivateWarning] = useState(null);   // null | string[]
+  const [activateWarning, setActivateWarning] = useState(null);   // null | { chain, location }
 
   const handleToggleActive = async () => {
     setError('');
@@ -2585,7 +2585,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                       if (!selectedCabinProfileId) { setError('No cabin profile assigned'); return; }
                       if (!crewAssigned)           { setError('No crew assigned'); return; }
                       if (schedule.length === 0)   { setError('No flights scheduled'); return; }
-                      if (scheduleChainIssues.length) { setActivateWarning(scheduleChainIssues); return; }
+                      if (scheduleChainIssues.chain.length || scheduleChainIssues.location) { setActivateWarning(scheduleChainIssues); return; }
                       handleToggleActive();
                     }}>
                     Activate
@@ -4360,18 +4360,40 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         <div className="decomm-modal-overlay" onClick={() => setActivateWarning(null)}>
           <div className="decomm-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
             <div className="decomm-modal-head">
-              <h3>Schedule doesn't connect</h3>
+              <h3>{activateWarning.chain.length ? 'Schedule error' : 'Aircraft not at start airport'}</h3>
               <button className="decomm-modal-close" onClick={() => setActivateWarning(null)}>&times;</button>
             </div>
             <div className="decomm-modal-body">
-              <p style={{ fontSize: '0.9rem', color: '#444', marginBottom: '0.75rem' }}>
-                These flights will be cancelled as "Wrong Location" because the aircraft won't be at the departure airport:
-              </p>
-              {activateWarning.map((w, i) => (
-                <div key={i} style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 6, padding: '0.6rem 1rem', marginBottom: '0.5rem', fontSize: '0.85rem', color: '#78350f' }}>
-                  {w}
+              {activateWarning.chain.length > 0 && (
+                <>
+                  <div style={{ fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#b91c1c', marginBottom: 4 }}>
+                    Error in the schedule
+                  </div>
+                  <p style={{ fontSize: '0.85rem', color: '#444', marginBottom: '0.6rem' }}>
+                    The rotation doesn't connect. These legs will be cancelled as "Wrong Location" every week until the schedule is fixed:
+                  </p>
+                  {activateWarning.chain.map((w, i) => (
+                    <div key={i} style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 6, padding: '0.6rem 1rem', marginBottom: '0.5rem', fontSize: '0.85rem', color: '#7f1d1d' }}>
+                      {w}
+                    </div>
+                  ))}
+                </>
+              )}
+              {activateWarning.location && (
+                <div style={{ marginTop: activateWarning.chain.length ? '0.9rem' : 0 }}>
+                  <div style={{ fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#92400e', marginBottom: 4 }}>
+                    Wrong start location
+                  </div>
+                  <p style={{ fontSize: '0.85rem', color: '#444', marginBottom: '0.6rem' }}>
+                    {activateWarning.chain.length
+                      ? 'In addition, the aircraft is not where its first flight departs:'
+                      : 'The schedule itself is fine. Only the start is affected: the first flights are cancelled as "Wrong Location" until the rotation reaches the aircraft\'s airport, after that it runs normally.'}
+                  </p>
+                  <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 6, padding: '0.6rem 1rem', fontSize: '0.85rem', color: '#78350f' }}>
+                    {activateWarning.location}
+                  </div>
                 </div>
-              ))}
+              )}
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: '1rem' }}>
                 <button className="sched-btn-cancel" onClick={() => setActivateWarning(null)}>Cancel</button>
                 <button className="sched-btn-submit" onClick={() => { setActivateWarning(null); handleToggleActive(); }}>

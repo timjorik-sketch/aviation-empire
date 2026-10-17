@@ -141,7 +141,7 @@ router.get('/', authMiddleware, async (req, res) => {
     if (!airlineId) return res.status(400).json({ error: 'No active airline' });
 
     const rawLimit = parseInt(req.query.limit, 10);
-    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 1000) : 200;
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 2000) : 200;
 
     const result = await pool.query(`
       SELECT

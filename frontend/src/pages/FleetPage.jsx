@@ -134,7 +134,7 @@ function FleetPage({ airline, onBack, onSelectAircraft, onOpenMarketplace, onNav
       // backend deploy separately): match from the flight list like before.
       const fromList = {};
       if (fleet.length && !('active_flight' in fleet[0])) {
-        const flightsRes = await fetch(`${API_URL}/api/flights?limit=1000`, {
+        const flightsRes = await fetch(`${API_URL}/api/flights?limit=2000`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         const flights = (await flightsRes.json()).flights || [];

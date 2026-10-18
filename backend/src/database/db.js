@@ -1231,23 +1231,17 @@ async function initDatabase() {
     await safeQuery('INSERT INTO fuel_prices (price_per_liter) VALUES ($1)', [0.72], 'fuel seed');
   }
 
-  // ── RETAG: 'wrong_location' cancels that were really knock-ons ─────────────
-  // A leg whose previous leg (same aircraft) was planned to land at its
-  // departure airport but got cancelled is a cascade, not a planning error.
-  // Same rule as the boarding hook in processFlights. Idempotent.
-  await safeQuery(`
-    UPDATE flights f
-    SET delay_reason = 'cascade'
-    WHERE f.delay_reason = 'wrong_location'
-      AND f.status = 'cancelled'
-      AND (
-        SELECT p.status = 'cancelled'
-           AND COALESCE(pr.arrival_airport, pws.arrival_airport)
-             = (SELECT COALESCE(r.departure_airport, ws.departure_airport)
-                FROM flights x
-                LEFT JOIN routes r           ON x.route_id           = r.id
-                LEFT JOIN weekly_schedule ws ON x.weekly_schedule_id = ws.id
-                WHERE x.id = f.id)
+  // ── RETAG: cascade vs wrong_location for cancelled legs ─────────────────────
+  // Same rule as the boarding hook in processFlights: a cancelled leg whose
+  // previous leg (same aircraft) was planned to land at its departure airport
+  // and was cancelled by a disruption is a 'cascade'; if that previous leg was
+  // a wrong_location cancel (or grounded, no reason) the chain stays
+  // 'wrong_location'. Applied leg by leg along each chain, so it repeats until
+  // nothing changes. Only rows the boarding hook could have written are
+  // touched: 'cascade' rows from Tech Air windows follow a non-cancelled or
+  // cascade leg and are left alone. Idempotent.
+  const prevLegSql = (cond) => `(
+        SELECT ${cond}
         FROM flights p
         LEFT JOIN routes pr           ON p.route_id           = pr.id
         LEFT JOIN weekly_schedule pws ON p.weekly_schedule_id = pws.id
@@ -1255,17 +1249,39 @@ async function initDatabase() {
           AND p.departure_time < f.departure_time
         ORDER BY p.departure_time DESC
         LIMIT 1
-      ) IS TRUE
-  `, null, 'wrong_location→cascade retag (flights)');
-
+      )`;
+  const chains = `p.status = 'cancelled'
+           AND COALESCE(pr.arrival_airport, pws.arrival_airport)
+             = (SELECT COALESCE(r.departure_airport, ws.departure_airport)
+                FROM flights x
+                LEFT JOIN routes r           ON x.route_id           = r.id
+                LEFT JOIN weekly_schedule ws ON x.weekly_schedule_id = ws.id
+                WHERE x.id = f.id)`;
+  for (let pass = 0; pass < 50; pass++) {
+    const back = await safeQuery(`
+      UPDATE flights f SET delay_reason = 'wrong_location'
+      WHERE f.status = 'cancelled' AND f.delay_reason = 'cascade'
+        AND ${prevLegSql(`${chains} AND (p.delay_reason IS NULL OR p.delay_reason = 'wrong_location')`)} IS TRUE
+    `, null, 'cascade→wrong_location retag (flights)');
+    if (!back?.rowCount) break;
+  }
+  for (let pass = 0; pass < 50; pass++) {
+    const fwd = await safeQuery(`
+      UPDATE flights f SET delay_reason = 'cascade'
+      WHERE f.status = 'cancelled' AND f.delay_reason = 'wrong_location'
+        AND ${prevLegSql(`${chains} AND p.delay_reason IS NOT NULL AND p.delay_reason <> 'wrong_location'`)} IS TRUE
+    `, null, 'wrong_location→cascade retag (flights)');
+    if (!fwd?.rowCount) break;
+  }
   await safeQuery(`
-    UPDATE flight_delay_events fde
-    SET event_type = 'cascade'
+    UPDATE flight_delay_events fde SET event_type = f.delay_reason
     FROM flights f
     WHERE fde.flight_id = f.id
-      AND fde.event_type = 'wrong_location'
-      AND f.delay_reason = 'cascade'
-  `, null, 'wrong_location→cascade retag (events)');
+      AND fde.outcome = 'cancelled'
+      AND fde.event_type IN ('cascade', 'wrong_location')
+      AND f.delay_reason IN ('cascade', 'wrong_location')
+      AND fde.event_type <> f.delay_reason
+  `, null, 'cascade/wrong_location retag (events)');
 
   // ── CLEANUP: drop legacy/unused tables ───────────────────────────────────────
   await safeQuery(`ALTER TABLE flights DROP CONSTRAINT IF EXISTS flights_service_profile_id_fkey`, null, 'drop sp fkey');

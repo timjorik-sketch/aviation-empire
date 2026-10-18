@@ -1723,6 +1723,8 @@ async function processFlights() {
           SELECT p.status = 'cancelled'
              AND COALESCE(pr.arrival_airport, pws.arrival_airport)
                = COALESCE(r.departure_airport, ws.departure_airport)
+             AND p.delay_reason IS NOT NULL
+             AND p.delay_reason <> 'wrong_location'
           FROM flights p
           LEFT JOIN routes pr           ON p.route_id           = pr.id
           LEFT JOIN weekly_schedule pws ON p.weekly_schedule_id = pws.id
@@ -1786,10 +1788,13 @@ async function processFlights() {
 
       // ── Aircraft can't operate this flight: wrong location OR in repair ──
       // If the schedule itself chains here (the previous leg was planned to
-      // land at this departure airport) but that leg got cancelled, the
-      // aircraft is only out of position because of the earlier disruption:
-      // tag it 'cascade'. Otherwise the rotation doesn't connect (or the
-      // aircraft is in repair) and it stays 'wrong_location'.
+      // land at this departure airport) but that leg was cancelled by a
+      // disruption (Tech Air, medical, a cascade of those), the aircraft is
+      // only out of position because of it: tag it 'cascade'. If the previous
+      // leg was itself a wrong_location cancel, or was dropped by grounding
+      // the aircraft (no reason), the root cause is still the aircraft's
+      // position, so the whole chain stays 'wrong_location'. Same for a
+      // rotation that doesn't connect and for an aircraft in repair.
       const inRepair      = f.unavailable_until && new Date(f.unavailable_until) > now;
       const wrongLocation = f.current_location !== null && f.current_location !== f.dep_airport;
       if (wrongLocation || inRepair) {

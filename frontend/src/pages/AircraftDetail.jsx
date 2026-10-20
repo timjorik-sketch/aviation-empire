@@ -325,6 +325,22 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [editLegs, setEditLegs]       = useState([]);   // [{ src, wkDep, dur }]
   const [editMaints, setEditMaints]   = useState([]);   // [{ src, wkStart, dur }]
   const [editSaving, setEditSaving]   = useState(false);
+  // Offset of the floating edit-mode bar, moved by its grip so it can be
+  // pushed off whatever block needs editing underneath.
+  const [editBarPos, setEditBarPos]   = useState({ x: 0, y: 0 });
+  const onEditBarGripDown = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const start = { x: e.clientX, y: e.clientY, pos: editBarPos };
+    const move = ev => setEditBarPos({ x: start.pos.x + ev.clientX - start.x, y: start.pos.y + ev.clientY - start.y });
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  };
   // Show the weekly grid in the aircraft's home-base local time (vs raw game time).
   const [viewLocal, setViewLocal] = useState(true);
   const [showBanks, setShowBanks] = useState(false);
@@ -2495,7 +2511,9 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
             <button className="ad-btn-clear-sched" onClick={handleClearSchedule} disabled={editMode}>Clear All</button>
           </div>
           {editMode && (
-            <div className="ad-bank-overlay">
+            <div className="ad-bank-overlay"
+              style={{ transform: `translate(calc(-50% + ${editBarPos.x}px), ${editBarPos.y}px)` }}>
+              <span className="ad-bar-grip" onPointerDown={onEditBarGripDown} title="Drag to move">⠿</span>
               {editConflicts.size > 0 && <span className="ad-bank-overlay-label ad-edit-warn">Overlaps</span>}
               <button className="ad-btn-clear-sched" onClick={cancelEditMode} disabled={editSaving}>Cancel</button>
               <button className="ad-bank-confirm-btn" disabled={editSaving || editConflicts.size > 0} onClick={confirmEditMode}>
@@ -4486,6 +4504,8 @@ const styles = `
   .ad-grid-ghost--conflict { outline: 2px solid #FF4444; outline-offset: -2px; opacity: 0.72; }
   /* Edit mode confirm overlay — floats over the grid, dark toolbar language */
   .ad-bank-overlay { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 12px; background: #2C2C2C; padding: 8px 10px; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.28); max-width: calc(100% - 16px); box-sizing: border-box; }
+  .ad-bar-grip { color: rgba(255,255,255,0.55); font-size: 1.1rem; line-height: 1; padding: 4px 2px; cursor: grab; touch-action: none; user-select: none; }
+  .ad-bar-grip:active { cursor: grabbing; color: white; }
   .ad-bank-overlay-label { color: white; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
   .ad-bank-confirm-btn { background: white; color: #2C2C2C; border: none; padding: 0.4rem 1.05rem; border-radius: 5px; font-weight: 700; font-size: 0.82rem; cursor: pointer; transition: background 0.15s; }
   .ad-bank-confirm-btn:hover { background: #EDEDED; }

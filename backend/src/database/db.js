@@ -1235,7 +1235,7 @@ async function initDatabase() {
   // Airline names aren't unique, so each rename only applies when exactly one
   // airline carries the old name; otherwise it is skipped and logged.
   await runOnce('rename:airlines-horizon-go-continental', async () => {
-    for (const [from, to] of [['Horizon Connect', 'Horizon Go'], ['Discover', 'Continental']]) {
+    for (const [from, to] of [['Horizon Connect', 'Horizon Go'], ['Horizon Discover', 'Horizon Continental']]) {
       const { rows } = await safeQuery('SELECT id FROM airlines WHERE name = $1', [from], `rename ${from}`);
       if (rows.length !== 1) {
         console.warn(`[rename] "${from}" → "${to}" skipped: ${rows.length} airline(s) with that name`);

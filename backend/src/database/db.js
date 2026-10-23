@@ -1231,6 +1231,21 @@ async function initDatabase() {
     await safeQuery('INSERT INTO fuel_prices (price_per_liter) VALUES ($1)', [0.72], 'fuel seed');
   }
 
+  // ── ONE-TIME: rename two airlines on the owner's request ──────────────────────
+  // Airline names aren't unique, so each rename only applies when exactly one
+  // airline carries the old name; otherwise it is skipped and logged.
+  await runOnce('rename:airlines-horizon-go-continental', async () => {
+    for (const [from, to] of [['Horizon Connect', 'Horizon Go'], ['Discover', 'Continental']]) {
+      const { rows } = await safeQuery('SELECT id FROM airlines WHERE name = $1', [from], `rename ${from}`);
+      if (rows.length !== 1) {
+        console.warn(`[rename] "${from}" → "${to}" skipped: ${rows.length} airline(s) with that name`);
+        continue;
+      }
+      await safeQuery('UPDATE airlines SET name = $1 WHERE id = $2', [to, rows[0].id], `rename ${from}`);
+      console.log(`[rename] airline ${rows[0].id}: "${from}" → "${to}"`);
+    }
+  });
+
   // ── RETAG: cascade vs wrong_location for cancelled legs ─────────────────────
   // Same rule as the boarding hook in processFlights: a cancelled leg whose
   // previous leg (same aircraft) was planned to land at its departure airport

@@ -1291,6 +1291,43 @@ async function initDatabase() {
     }
   });
 
+  // ── ONE-TIME: retry HD → HC for Horizon Continental ───────────────────────────
+  // The first attempt left the code at HD. Match on the current code plus the
+  // name (case/whitespace-insensitive) and log exactly why if it still can't.
+  await runOnce('recode:continental-hd-hc-retry', async () => {
+    const { rows } = await safeQuery(
+      `SELECT id, name, airline_code FROM airlines
+       WHERE airline_code = 'HD' AND lower(trim(name)) LIKE '%continental%'`, null, 'recode HC retry');
+    if (rows.length !== 1) {
+      const all = await safeQuery(`SELECT id, name, airline_code FROM airlines WHERE lower(name) LIKE '%continental%' OR airline_code IN ('HD','HC')`, null, 'recode HC diag');
+      console.warn(`[rename] HD → HC retry skipped: ${rows.length} match(es); candidates: ${JSON.stringify(all.rows)}`);
+      return;
+    }
+    const { id } = rows[0];
+    const taken = await safeQuery('SELECT id, name FROM airlines WHERE airline_code = $1 AND id <> $2', ['HC', id], 'recode HC taken');
+    if (taken.rows.length) {
+      console.warn(`[rename] HD → HC retry skipped: HC belongs to airline ${taken.rows[0].id} "${taken.rows[0].name}"`);
+      return;
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`UPDATE airlines SET airline_code = 'HC' WHERE id = $1`, [id]);
+      const prefixed = `flight_number = 'HC' || substring(flight_number from 3)`;
+      await client.query(`UPDATE routes  SET ${prefixed} WHERE airline_id = $1 AND starts_with(flight_number, 'HD')`, [id]);
+      await client.query(`UPDATE flights SET ${prefixed} WHERE airline_id = $1 AND starts_with(flight_number, 'HD')`, [id]);
+      await client.query(`UPDATE weekly_schedule SET ${prefixed}
+        WHERE aircraft_id IN (SELECT id FROM aircraft WHERE airline_id = $1) AND starts_with(flight_number, 'HD')`, [id]);
+      await client.query('COMMIT');
+      console.log(`[rename] airline ${id} "${rows[0].name}": HD → HC`);
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      console.warn(`[rename] HD → HC retry failed: ${(e.message || '').substring(0, 200)}`);
+    } finally {
+      client.release();
+    }
+  });
+
   // ── RETAG: cascade vs wrong_location for cancelled legs ─────────────────────
   // Same rule as the boarding hook in processFlights: a cancelled leg whose
   // previous leg (same aircraft) was planned to land at its departure airport

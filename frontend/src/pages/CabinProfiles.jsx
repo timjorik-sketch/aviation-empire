@@ -16,10 +16,13 @@ const SEAT_TYPES = [
 const CLASS_LABELS = { economy: 'Economy Cabin', business: 'Business Cabin', first: 'First Cabin' };
 const CLASS_COLORS = { economy: '#3b82f6', business: '#f59e0b', first: '#8b5cf6' };
 
+// Ratios come from SEAT_TYPES so a new profile counts seats the same way as
+// picking the seat type by hand (they used to be 2.2 / 4.0 here).
+const ratioOf = key => SEAT_TYPES.find(s => s.key === key).ratio;
 const DEFAULT_CLASSES = [
-  { class_type: 'economy',  seat_type: 'economy',  seat_ratio: 1.0, percentage: 80 },
-  { class_type: 'business', seat_type: 'business', seat_ratio: 2.2, percentage: 15 },
-  { class_type: 'first',    seat_type: 'first',    seat_ratio: 4.0, percentage: 5 },
+  { class_type: 'economy',  seat_type: 'economy',  seat_ratio: ratioOf('economy'),  percentage: 80 },
+  { class_type: 'business', seat_type: 'business', seat_ratio: ratioOf('business'), percentage: 15 },
+  { class_type: 'first',    seat_type: 'first',    seat_ratio: ratioOf('first'),    percentage: 5 },
 ];
 
 function calcCapacity(maxPax, pct, ratio) {

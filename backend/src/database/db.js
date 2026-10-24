@@ -1246,6 +1246,51 @@ async function initDatabase() {
     }
   });
 
+  // ── ONE-TIME: airline codes HC / HL and Horizon Go → Horizon Citylink ────────
+  // Flight numbers are airline_code + suffix, so the prefix moves with the code
+  // on routes, the weekly schedule and the airline's flights. Each change only
+  // applies when exactly one airline matches and the new code is free;
+  // otherwise it is skipped and logged.
+  await runOnce('rename:airlines-hc-hl-citylink', async () => {
+    const changes = [
+      { names: ['Horizon Continental', 'Horizon Discover'], name: 'Horizon Continental', code: 'HC' },
+      { names: ['Horizon Go', 'Horizon Connect'],           name: 'Horizon Citylink',    code: 'HL' },
+    ];
+    for (const c of changes) {
+      const { rows } = await safeQuery('SELECT id, airline_code FROM airlines WHERE name = ANY($1)', [c.names], `recode ${c.name}`);
+      if (rows.length !== 1) {
+        console.warn(`[rename] ${c.name} / ${c.code} skipped: ${rows.length} airline(s) named ${c.names.join(' or ')}`);
+        continue;
+      }
+      const { id, airline_code: oldCode } = rows[0];
+      const taken = await safeQuery('SELECT id FROM airlines WHERE airline_code = $1 AND id <> $2', [c.code, id], `recode ${c.code}`);
+      if (taken.rows.length) {
+        console.warn(`[rename] ${c.name} / ${c.code} skipped: code ${c.code} is used by airline ${taken.rows[0].id}`);
+        continue;
+      }
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('UPDATE airlines SET name = $1, airline_code = $2 WHERE id = $3', [c.name, c.code, id]);
+        if (oldCode && oldCode !== c.code) {
+          const prefixed = `flight_number = $1 || substring(flight_number from char_length($2) + 1)`;
+          const starts = `starts_with(flight_number, $2)`;
+          await client.query(`UPDATE routes SET ${prefixed} WHERE airline_id = $3 AND ${starts}`, [c.code, oldCode, id]);
+          await client.query(`UPDATE flights SET ${prefixed} WHERE airline_id = $3 AND ${starts}`, [c.code, oldCode, id]);
+          await client.query(`UPDATE weekly_schedule SET ${prefixed}
+            WHERE aircraft_id IN (SELECT id FROM aircraft WHERE airline_id = $3) AND ${starts}`, [c.code, oldCode, id]);
+        }
+        await client.query('COMMIT');
+        console.log(`[rename] airline ${id}: ${oldCode} → ${c.code}, name "${c.name}"`);
+      } catch (e) {
+        await client.query('ROLLBACK').catch(() => {});
+        console.warn(`[rename] ${c.name} / ${c.code} failed: ${(e.message || '').substring(0, 150)}`);
+      } finally {
+        client.release();
+      }
+    }
+  });
+
   // ── RETAG: cascade vs wrong_location for cancelled legs ─────────────────────
   // Same rule as the boarding hook in processFlights: a cancelled leg whose
   // previous leg (same aircraft) was planned to land at its departure airport

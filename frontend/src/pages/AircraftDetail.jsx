@@ -421,8 +421,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   const [xferHour, setXferHour]               = useState('08');
   const [xferMinute, setXferMinute]           = useState('00');
 
-  // Transfer flight modal
-  const [showTransferModal, setShowTransferModal] = useState(false);
+  // Transfer flight (one-off move, "Transfer Flight" in the flight type list)
   const [transferCountry, setTransferCountry]     = useState('');
   const [transferAirport, setTransferAirport]     = useState('');
   const [transferDay, setTransferDay]             = useState('0');
@@ -1529,7 +1528,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       if (!res.ok) throw new Error(data.error);
       setSuccess(data.message);
       if (data.new_balance != null) airline && (airline.balance = data.new_balance);
-      setShowTransferModal(false);
       setTransferAirport('');
       fetchScheduledFlights();
     } catch (err) { setError(err.message); }
@@ -1756,6 +1754,22 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     } catch (err) { setError(err.message); }
   };
 
+  // Longest one-way leg that still allows a daily round trip from the base:
+  // 2 × block time + 2 × turnaround + one maintenance block ≤ 24 h. Block time
+  // mirrors the backend's calculateFlightDuration (850 km/h + 30 min taxi);
+  // maintenance mirrors maintenance.js (by the type's max seats).
+  const dailyRange = useMemo(() => {
+    if (!aircraft) return null;
+    const seats = aircraft.max_passengers || 0;
+    const maint = seats <= 100 ? 90 : seats <= 250 ? 150 : 240;
+    const turnaround = groundMin;
+    const blockMax = (1440 - maint - 2 * turnaround) / 2;
+    const raw = Math.max(0, Math.floor((blockMax - 30) * 850 / 60));
+    const range = aircraft.range_km || null;
+    const km = range ? Math.min(raw, range) : raw;
+    return { km, maint, turnaround, range, rangeLimited: !!range && range < raw };
+  }, [aircraft, groundMin]);
+
   // Problems that would make flights cancel as wrong_location once the aircraft
   // flies this week: a leg that doesn't depart where the previous one landed
   // (e.g. ZRH-JFK followed by ZRH-JFK), and the aircraft not standing where its
@@ -1767,7 +1781,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     const issues = { chain: [], location: null };
     if (legs.length === 0) return issues;
     const at = l => `${DAY_SHORT[l.day_of_week]} ${String(l.departure_time).slice(0, 5)}`;
-    const name = l => l.flight_number || (l.is_transfer ? 'Transfer' : 'Flight');
+    const name = l => l.flight_number || (l.is_transfer ? 'Ferry' : 'Flight');
     for (let i = 0; i < legs.length; i++) {
       const cur = legs[i], next = legs[(i + 1) % legs.length];
       if (cur.arrival_airport !== next.departure_airport) {
@@ -2774,12 +2788,17 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         <div className="ad-form-card">
           <div className="ad-sidebar-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>Schedule Flight</span>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {dailyRange && (
+                <span className="ad-daily-range"
+                  title={`Longest one-way leg that still fits a daily round trip from the base: `
+                    + `2 × block time + 2 × ${dailyRange.turnaround} min turnaround + ${dailyRange.maint} min maintenance ≤ 24 h`
+                    + (dailyRange.rangeLimited ? `\nLimited by aircraft range (${dailyRange.range.toLocaleString()} km)` : '')}>
+                  Daily max <strong>{dailyRange.km.toLocaleString()} km</strong>
+                </span>
+              )}
               <button className="ad-btn-clear-sched" onClick={openCopyModal}>
                 Copy Schedule
-              </button>
-              <button className="ad-btn-clear-sched" onClick={() => { setShowTransferModal(true); setError(''); setSuccess(''); }}>
-                Transfer Flight
               </button>
             </div>
           </div>
@@ -2789,13 +2808,14 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
               onChange={e => { setScheduleTab(e.target.value); setError(''); setSuccess(''); }}>
               <option value="single">Single Flight</option>
               <option value="series">Series Flight</option>
-              <option value="transfer">Transfer</option>
+              <option value="transfer">Ferry Flight</option>
+              <option value="transfer_now">Transfer Flight</option>
               <option value="maintenance">Maintenance</option>
             </select>
           </div>
 
           {/* No cabin profile warning — blocks single & series scheduling (not maintenance/transfer) */}
-          {!selectedCabinProfileId && scheduleTab !== 'maintenance' && scheduleTab !== 'transfer' && (
+          {!selectedCabinProfileId && scheduleTab !== 'maintenance' && scheduleTab !== 'transfer' && scheduleTab !== 'transfer_now' && (
             <div className="sched-no-cabin-warning">
               <div className="sched-no-cabin-icon">✈</div>
               <div className="sched-no-cabin-text">
@@ -3072,7 +3092,85 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
             </div>
           )}
 
-          {/* Transfer (ferry) leg — no passengers, any airport → any, no hub restriction */}
+          {/* Transfer Flight — one-off move of the aircraft to any airport ($500k) */}
+          {scheduleTab === 'transfer_now' && (() => {
+            const currentLoc = aircraft?.current_location || aircraft?.home_airport || '?';
+            return (
+              <div className="sched-form-body">
+                <div className="sched-section-body">
+                <div style={{ background: '#F5F5F5', border: '1px solid #E0E0E0', borderRadius: 6, padding: '10px 14px', marginBottom: '1rem', fontSize: '0.82rem', color: '#444' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span style={{ color: '#888', fontWeight: 600, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Current Location</span>
+                    <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.95rem', color: '#2C2C2C' }}>{currentLoc}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#888', fontWeight: 600, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Cost</span>
+                    <span style={{ fontWeight: 700, color: '#2C2C2C' }}>$500,000</span>
+                  </div>
+                </div>
+                <div className="sched-form-row" style={{ marginBottom: '0.6rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#666', marginBottom: 6 }}>Country</label>
+                  <select
+                    value={transferCountry}
+                    onChange={e => { setTransferCountry(e.target.value); setTransferAirport(''); }}
+                    style={{ width: '100%', padding: '0.5rem 0.6rem', border: '1px solid #E0E0E0', borderRadius: 6, fontSize: '0.88rem', color: '#2C2C2C', background: 'white' }}
+                  >
+                    <option value="">— select country —</option>
+                    {[...new Set(allAirports.filter(ap => ap.iata_code !== currentLoc).map(a => a.country))].sort().map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="sched-form-row" style={{ marginBottom: '1rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#666', marginBottom: 6 }}>Destination Airport</label>
+                  <select
+                    value={transferAirport}
+                    onChange={e => setTransferAirport(e.target.value)}
+                    disabled={!transferCountry}
+                    style={{ width: '100%', padding: '0.5rem 0.6rem', border: '1px solid #E0E0E0', borderRadius: 6, fontSize: '0.88rem', color: '#2C2C2C', background: 'white' }}
+                  >
+                    <option value="">{transferCountry ? '— select airport —' : '— select a country first —'}</option>
+                    {allAirports.filter(ap => ap.iata_code !== currentLoc && ap.country === transferCountry).map(ap => (
+                      <option key={ap.iata_code} value={ap.iata_code}>{ap.iata_code} – {ap.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="sched-form-row">
+                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#666', marginBottom: 6 }}>Departure Day &amp; Time</label>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <select value={transferDay} onChange={e => setTransferDay(e.target.value)}
+                      style={{ flex: 1, padding: '0.48rem 0.5rem', border: '1px solid #E0E0E0', borderRadius: 6, fontSize: '0.88rem', color: '#2C2C2C', background: 'white' }}>
+                      {DAY_FULL.map((label, i) => <option key={i} value={String(i)}>{label}</option>)}
+                    </select>
+                    <input type="number" className="sched-time-inp" min="0" max="23" placeholder="HH"
+                      value={transferTimeH}
+                      onChange={e => setTransferTimeH(e.target.value)}
+                      onBlur={e => setTransferTimeH(clampHour(e.target.value))} />
+                    <span className="sched-time-sep">:</span>
+                    <input type="number" className="sched-time-inp" min="0" max="59" placeholder="MM"
+                      value={transferTimeM}
+                      onChange={e => setTransferTimeM(e.target.value)}
+                      onBlur={e => setTransferTimeM(clampMinute(e.target.value))} />
+                  </div>
+                </div>
+                <div style={{ fontSize: '0.76rem', color: '#888', marginTop: '1rem', lineHeight: 1.5 }}>
+                  The transfer repositions the aircraft. It does not carry passengers and cannot be operated on the same schedule as regular flights. Duration is based on actual flight time.
+                </div>
+                </div>
+                <div className="sched-form-actions">
+                  <button
+                    className="sched-btn-submit"
+                    onClick={handleTransferSubmit}
+                    disabled={transferSubmitting || !transferAirport}
+                  >
+                    {transferSubmitting ? 'Scheduling…' : 'Schedule Transfer'}
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Ferry leg (weekly positioning flight) — no passengers, any airport → any, no hub restriction */}
           {scheduleTab === 'transfer' && (
             <div className="sched-form-body">
               <div className="sched-section-hd">Route</div>
@@ -3118,7 +3216,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
               <div className="sched-form-actions">
                 <button className="sched-btn-submit" onClick={handleTransferLegSubmit}
                   disabled={submitting || !xferFrom || !xferTo || xferFrom === xferTo}>
-                  {submitting ? 'Scheduling...' : 'Schedule Transfer'}
+                  {submitting ? 'Scheduling...' : 'Schedule Ferry Flight'}
                 </button>
               </div>
             </div>
@@ -3703,7 +3801,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
                 {editEntry.is_transfer && (
                   <div style={{ margin: '0.75rem 0 0.25rem', padding: '0.6rem 0.8rem', background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: 6, fontSize: '0.82rem', color: '#374151' }}>
-                    Transfer flight — repositions the aircraft, carries no passengers. No hub/expansion limits.
+                    Ferry flight — repositions the aircraft, carries no passengers. No hub/expansion limits.
                   </div>
                 )}
 
@@ -4073,91 +4171,6 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
         </div>
       )}
 
-      {/* ── Transfer Flight Modal ── */}
-      {showTransferModal && (() => {
-        const currentLoc = aircraft?.current_location || aircraft?.home_airport || '?';
-        const today = new Date().toISOString().split('T')[0];
-        return (
-          <div className="sched-modal-overlay" onClick={() => setShowTransferModal(false)}>
-            <div className="sched-modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
-              <div className="sched-modal-header" style={{ background: '#2C2C2C', borderBottom: 'none' }}>
-                <h2 style={{ color: 'white', fontSize: '1rem' }}>Transfer Flight</h2>
-                <button className="sched-modal-close" style={{ color: 'rgba(255,255,255,0.6)' }} onClick={() => setShowTransferModal(false)}>×</button>
-              </div>
-              <div className="sched-modal-body">
-                <div style={{ background: '#F5F5F5', border: '1px solid #E0E0E0', borderRadius: 6, padding: '10px 14px', marginBottom: '1rem', fontSize: '0.82rem', color: '#444' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span style={{ color: '#888', fontWeight: 600, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Current Location</span>
-                    <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '0.95rem', color: '#2C2C2C' }}>{currentLoc}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#888', fontWeight: 600, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Cost</span>
-                    <span style={{ fontWeight: 700, color: '#2C2C2C' }}>$500,000</span>
-                  </div>
-                </div>
-                <div className="sched-form-row" style={{ marginBottom: '0.6rem' }}>
-                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#666', marginBottom: 6 }}>Country</label>
-                  <select
-                    value={transferCountry}
-                    onChange={e => { setTransferCountry(e.target.value); setTransferAirport(''); }}
-                    style={{ width: '100%', padding: '0.5rem 0.6rem', border: '1px solid #E0E0E0', borderRadius: 6, fontSize: '0.88rem', color: '#2C2C2C', background: 'white' }}
-                  >
-                    <option value="">— select country —</option>
-                    {[...new Set(allAirports.filter(ap => ap.iata_code !== currentLoc).map(a => a.country))].sort().map(c => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="sched-form-row" style={{ marginBottom: '1rem' }}>
-                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#666', marginBottom: 6 }}>Destination Airport</label>
-                  <select
-                    value={transferAirport}
-                    onChange={e => setTransferAirport(e.target.value)}
-                    disabled={!transferCountry}
-                    style={{ width: '100%', padding: '0.5rem 0.6rem', border: '1px solid #E0E0E0', borderRadius: 6, fontSize: '0.88rem', color: '#2C2C2C', background: 'white' }}
-                  >
-                    <option value="">{transferCountry ? '— select airport —' : '— select a country first —'}</option>
-                    {allAirports.filter(ap => ap.iata_code !== currentLoc && ap.country === transferCountry).map(ap => (
-                      <option key={ap.iata_code} value={ap.iata_code}>{ap.iata_code} – {ap.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="sched-form-row">
-                  <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#666', marginBottom: 6 }}>Departure Day &amp; Time</label>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <select value={transferDay} onChange={e => setTransferDay(e.target.value)}
-                      style={{ flex: 1, padding: '0.48rem 0.5rem', border: '1px solid #E0E0E0', borderRadius: 6, fontSize: '0.88rem', color: '#2C2C2C', background: 'white' }}>
-                      {DAY_FULL.map((label, i) => <option key={i} value={String(i)}>{label}</option>)}
-                    </select>
-                    <input type="number" className="sched-time-inp" min="0" max="23" placeholder="HH"
-                      value={transferTimeH}
-                      onChange={e => setTransferTimeH(e.target.value)}
-                      onBlur={e => setTransferTimeH(clampHour(e.target.value))} />
-                    <span className="sched-time-sep">:</span>
-                    <input type="number" className="sched-time-inp" min="0" max="59" placeholder="MM"
-                      value={transferTimeM}
-                      onChange={e => setTransferTimeM(e.target.value)}
-                      onBlur={e => setTransferTimeM(clampMinute(e.target.value))} />
-                  </div>
-                </div>
-                <div style={{ fontSize: '0.76rem', color: '#888', marginTop: '1rem', lineHeight: 1.5 }}>
-                  The transfer repositions the aircraft. It does not carry passengers and cannot be operated on the same schedule as regular flights. Duration is based on actual flight time.
-                </div>
-              </div>
-              <div className="sched-modal-footer">
-                <button className="sched-btn-cancel" onClick={() => setShowTransferModal(false)}>Cancel</button>
-                <button
-                  className="sched-btn-submit"
-                  onClick={handleTransferSubmit}
-                  disabled={transferSubmitting || !transferAirport}
-                >
-                  {transferSubmitting ? 'Scheduling…' : 'Schedule Transfer'}
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
 
       <style>{styles}</style>
     </div>
@@ -4560,6 +4573,8 @@ const styles = `
   .ad-sf-badge--cancelled  { background: #FEF2F2; color: #b91c1c; }
 
   /* Tabs */
+  .ad-daily-range { font-size: 0.72rem; color: rgba(255,255,255,0.7); white-space: nowrap; cursor: help; }
+  .ad-daily-range strong { color: white; }
   .sched-typebar { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; border-bottom: 1px solid #E0E0E0; background: #FAFAFA; }
   .sched-typebar-label { flex: 0 0 auto; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #888; }
   .sched-typebar-select { flex: 1 1 auto; min-width: 0; padding: 0.5rem 2rem 0.5rem 0.7rem; border: 1px solid #E0E0E0; border-radius: 6px; background: #FFFFFF; font-size: 0.9rem; font-weight: 600; color: #2C2C2C; cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23666' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 0.7rem center; }

@@ -1,7 +1,7 @@
 import express from 'express';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
-import { calculateFlightDuration } from './flights.js';
+import { calculateFlightDuration, resolveLegDuration } from './flights.js';
 import { validatePriceClamp } from '../utils/marketPricing.js';
 import { planGroup } from '../utils/groupPlanner.js';
 import {
@@ -60,7 +60,7 @@ async function loadContext(airlineId, body) {
   const acResult = await pool.query(`
     SELECT a.id, a.registration, a.name, a.is_active, a.airline_cabin_profile_id, a.home_airport,
            t.wake_turbulence_category, t.range_km, t.full_name, t.max_passengers,
-           t.min_runway_takeoff_m, t.min_runway_landing_m
+           t.min_runway_takeoff_m, t.min_runway_landing_m, t.cruise_speed_kmh
     FROM aircraft a JOIN aircraft_types t ON a.aircraft_type_id = t.id
     WHERE a.id = ANY($1) AND a.airline_id = $2
   `, [ids, airlineId]);
@@ -97,9 +97,10 @@ async function loadContext(airlineId, body) {
 
   return {
     fwd, ret, aircraft, lon,
-    oneWay: calculateFlightDuration(fwd.distance_km),
-    // The whole group shares one timetable, so the strictest turnaround and the
-    // longest maintenance block have to govern the plan.
+    // The whole group shares one timetable, so the slowest aircraft's block
+    // time, the strictest turnaround and the longest maintenance block have to
+    // govern the plan.
+    oneWay: Math.max(...aircraft.map(a => calculateFlightDuration(fwd.distance_km, a.cruise_speed_kmh))),
     turnaround: Math.max(...aircraft.map(a => BANK_TURNAROUND[a.wake_turbulence_category] || 40)),
     maintDuration: Math.max(...aircraft.map(a => bankMaintenanceDuration(a.max_passengers))),
   };
@@ -323,7 +324,7 @@ router.post('/commit', authMiddleware, async (req, res) => {
         if (!(dow >= 0 && dow <= 6) || depMin == null) {
           return res.status(400).json({ error: `Invalid day or departure time on ${ac.registration}` });
         }
-        const dur = calculateFlightDuration(r.distance_km);
+        const dur = oneWay;   // the group's block time, same as the preview
         legs.push({
           route_id: r.id, flight_number: r.flight_number,
           departure_airport: r.departure_airport, arrival_airport: r.arrival_airport,
@@ -530,7 +531,7 @@ async function buildCopy(airlineId, body) {
     SELECT a.id, a.registration, a.name, a.is_active, a.home_airport,
            a.airline_cabin_profile_id, a.crew_assigned,
            t.wake_turbulence_category, t.range_km, t.full_name, t.max_passengers,
-           t.min_runway_takeoff_m, t.min_runway_landing_m
+           t.min_runway_takeoff_m, t.min_runway_landing_m, t.cruise_speed_kmh
     FROM aircraft a JOIN aircraft_types t ON a.aircraft_type_id = t.id
     WHERE a.id = ANY($1) AND a.airline_id = $2
   `, [[srcId, ...wanted.map(w => w.id)], airlineId]);
@@ -586,9 +587,10 @@ async function buildCopy(airlineId, body) {
       route_id: r.route_id, service_profile_id: r.service_profile_id,
       is_transfer: !!r.is_transfer,
       distance_km: dist,
-      // Block time is a property of the distance, not of the row it was written
-      // from — recomputed so a copy can never inherit a stale arrival time.
-      duration: calculateFlightDuration(dist),
+      // The source row's stored block time. Each target keeps it when it is
+      // valid for that target's type (legacy 850 km/h or its own speed), see
+      // resolveLegDuration; otherwise the target's own block time is used.
+      stored_duration: (((parseHHMM(r.arrival_time) ?? 0) - depMin) + DAY) % DAY || null,
       dep_longitude: lon.get(r.departure_airport) ?? null,
       arr_longitude: lon.get(r.arrival_airport) ?? null,
     };
@@ -635,12 +637,14 @@ async function buildCopy(airlineId, body) {
     const legs = srcLegs.map(l => {
       const s = shiftWeek(l.day_of_week, l.dep_minutes, shift);
       const depWk = s.day * DAY + s.minuteOfDay;
+      const duration = resolveLegDuration(l.distance_km, ac.cruise_speed_kmh, l.stored_duration);
       return {
         ...l,
+        duration,
         day_of_week: s.day,
         departure_time: toHHMM(s.minuteOfDay),
-        arrival_time: toHHMM(s.minuteOfDay + l.duration),
-        dep_wk: depWk, arr_wk: depWk + l.duration,
+        arrival_time: toHHMM(s.minuteOfDay + duration),
+        dep_wk: depWk, arr_wk: depWk + duration,
       };
     });
 

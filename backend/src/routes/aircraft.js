@@ -3,7 +3,7 @@ import { body, validationResult } from 'express-validator';
 import pool from '../database/postgres.js';
 import authMiddleware from '../middleware/auth.js';
 import adminMiddleware from '../middleware/admin.js';
-import { calculateFlightDuration } from './flights.js';
+import { calculateFlightDuration, resolveLegDuration } from './flights.js';
 import { validatePriceClamp } from '../utils/marketPricing.js';
 import { getAirports } from '../utils/airportCache.js';
 import { diversionGeoFraction } from '../utils/delaySystem.js';
@@ -752,7 +752,7 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
              a.current_location, a.crew_assigned,
              t.new_price_usd, t.depreciation_age, t.depreciation_fh,
              a.total_flight_hours, a.purchased_at, t.wake_turbulence_category,
-             a.delivery_at
+             a.delivery_at, t.cruise_speed_kmh
       FROM aircraft a
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
       WHERE a.id = $1 AND a.airline_id = $2
@@ -772,6 +772,7 @@ router.get('/:id/detail', authMiddleware, async (req, res) => {
       airline_cabin_profile_id: row.airline_cabin_profile_id ?? null,
       current_location: row.current_location ?? null,
       crew_assigned: row.crew_assigned ?? 0,
+      cruise_speed_kmh: row.cruise_speed_kmh ?? null,
       new_price_usd: row.new_price_usd ?? 0,
       depreciation_age: row.depreciation_age ?? 0.055,
       depreciation_fh: row.depreciation_fh ?? 0.000010,
@@ -1249,7 +1250,7 @@ router.get('/:id/schedule', authMiddleware, async (req, res) => {
              t.manufacturer, t.model, t.full_name, t.max_passengers, t.range_km, t.id as type_id,
              a.is_active, t.image_filename,
              a.airline_cabin_profile_id, t.wake_turbulence_category,
-             t.min_runway_takeoff_m, t.min_runway_landing_m
+             t.min_runway_takeoff_m, t.min_runway_landing_m, t.cruise_speed_kmh
       FROM aircraft a
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
       WHERE a.id = $1 AND a.airline_id = $2
@@ -1267,6 +1268,7 @@ router.get('/:id/schedule', authMiddleware, async (req, res) => {
       wake_turbulence_category: acRow.wake_turbulence_category ?? 'M',
       min_runway_takeoff_m: acRow.min_runway_takeoff_m ?? 0,
       min_runway_landing_m: acRow.min_runway_landing_m ?? 0,
+      cruise_speed_kmh: acRow.cruise_speed_kmh ?? null,
     };
     const routesResult = await pool.query(`
       SELECT r.id, r.flight_number, r.departure_airport, r.arrival_airport, r.distance_km,
@@ -1292,7 +1294,7 @@ router.get('/:id/schedule', authMiddleware, async (req, res) => {
       economy_price: row.economy_price, business_price: row.business_price, first_price: row.first_price,
       service_profile_id: row.service_profile_id,
       created_at: row.created_at,
-      estimated_duration: calculateFlightDuration(row.distance_km),
+      estimated_duration: calculateFlightDuration(row.distance_km, acRow.cruise_speed_kmh),
       dep_runway_m: row.dep_runway_m ?? null,
       arr_runway_m: row.arr_runway_m ?? null,
       // Fleet-wide weekly legs already scheduled on this route (all aircraft).
@@ -1593,7 +1595,7 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
 
     const acResult = await pool.query(`
       SELECT a.id, t.wake_turbulence_category, t.range_km, t.full_name, a.is_active,
-             t.min_runway_takeoff_m, t.min_runway_landing_m
+             t.min_runway_takeoff_m, t.min_runway_landing_m, t.cruise_speed_kmh
       FROM aircraft a
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
       WHERE a.id = $1 AND a.airline_id = $2
@@ -1604,6 +1606,7 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
       range_km: aircraftRange,
       full_name: aircraftName,
       is_active: isActive,
+      cruise_speed_kmh: cruiseSpeed,
       min_runway_takeoff_m: acTakeoffM,
       min_runway_landing_m: acLandingM,
     } = acResult.rows[0];
@@ -1685,7 +1688,7 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
     const newBatch = [];
 
     for (const flightData of flightsToSchedule) {
-      const { route_id, day_of_week, departure_time, economy_price, business_price, first_price, service_profile_id } = flightData;
+      const { route_id, day_of_week, departure_time, economy_price, business_price, first_price, service_profile_id, duration_minutes } = flightData;
       const dow = parseInt(day_of_week);
 
       const route = routeCache.get(route_id);
@@ -1727,7 +1730,7 @@ router.post('/:id/schedule', authMiddleware, async (req, res) => {
 
       const [depH, depM] = departure_time.split(':').map(Number);
       const depMin = depH * 60 + depM;
-      const durationMin = calculateFlightDuration(route.distance_km);
+      const durationMin = resolveLegDuration(route.distance_km, cruiseSpeed, duration_minutes);
       const arrMin = depMin + durationMin;
       const arrH = Math.floor(arrMin % 1440 / 60);
       const arrMM = arrMin % 60;
@@ -1832,7 +1835,7 @@ router.post('/:id/schedule-transfer', authMiddleware, async (req, res) => {
 
     const acResult = await pool.query(`
       SELECT a.id, t.wake_turbulence_category, t.range_km, t.full_name, a.is_active,
-             t.min_runway_takeoff_m, t.min_runway_landing_m
+             t.min_runway_takeoff_m, t.min_runway_landing_m, t.cruise_speed_kmh
       FROM aircraft a
       JOIN aircraft_types t ON a.aircraft_type_id = t.id
       WHERE a.id = $1 AND a.airline_id = $2
@@ -1843,6 +1846,7 @@ router.post('/:id/schedule-transfer', authMiddleware, async (req, res) => {
       range_km: aircraftRange,
       full_name: aircraftName,
       is_active: isActive,
+      cruise_speed_kmh: cruiseSpeed,
       min_runway_takeoff_m: acTakeoffM,
       min_runway_landing_m: acLandingM,
     } = acResult.rows[0];
@@ -1937,7 +1941,7 @@ router.post('/:id/schedule-transfer', authMiddleware, async (req, res) => {
       const dow = parseInt(t.day_of_week);
       const [depH, depM] = t.departure_time.split(':').map(Number);
       const depMin = depH * 60 + depM;
-      const durationMin = calculateFlightDuration(distanceKm);
+      const durationMin = resolveLegDuration(distanceKm, cruiseSpeed, t.duration_minutes);
       const arrMin = depMin + durationMin;
       const arrH = Math.floor(arrMin % 1440 / 60);
       const arrMM = arrMin % 60;
@@ -2088,7 +2092,11 @@ router.patch('/:id/schedule/:entryId', authMiddleware, async (req, res) => {
       } else if (isTransferEntry) {
         distKm = existing.distance_km || 0;
       }
-      const durationMin = distKm ? calculateFlightDuration(distKm) : 0;
+      // Moving an entry keeps its stored length (legacy 850 km/h or per-type).
+      const [exDH, exDM] = String(existing.departure_time).split(':').map(Number);
+      const [exAH, exAM] = String(existing.arrival_time).split(':').map(Number);
+      const storedMin = (((exAH * 60 + exAM) - (exDH * 60 + exDM)) + 1440) % 1440;
+      const durationMin = storedMin || (distKm ? calculateFlightDuration(distKm) : 0);
       const [depH, depM] = departure_time.split(':').map(Number);
       newDepMin = depH * 60 + depM;
       newArrMin = newDepMin + durationMin;

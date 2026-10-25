@@ -97,6 +97,13 @@ function parseHM(hm) {
   return h * 60 + m;
 }
 
+// Stored block time of a weekly entry. Sent back when a leg is only moved or
+// re-posted, so existing plans keep their length (the server accepts it when it
+// matches the legacy 850 km/h or the type's own block time).
+function storedDuration(e) {
+  return ((parseHM(e.arrival_time) - parseHM(e.departure_time)) + 1440) % 1440 || undefined;
+}
+
 // Total minutes since midnight → "HH:MM"
 function minsToHM(mins) {
   const total = ((mins % 1440) + 1440) % 1440;
@@ -1415,6 +1422,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
             route_id: e.route_id,
             day_of_week: s.day,
             departure_time: minutesToHHMM(s.minuteOfDay),
+            duration_minutes: storedDuration(e),
             economy_price: e.economy_price,
             business_price: e.business_price,
             first_price: e.first_price,
@@ -1428,6 +1436,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
             arrival_airport: e.arrival_airport,
             day_of_week: s.day,
             departure_time: minutesToHHMM(s.minuteOfDay),
+            duration_minutes: storedDuration(e),
           };
         }),
         maints: srcMaint.map(mt => {
@@ -1478,6 +1487,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
             route_id: l.src.route_id,
             day_of_week: s.day,
             departure_time: s.time,
+            duration_minutes: storedDuration(l.src),
             economy_price: l.src.economy_price,
             business_price: l.src.business_price,
             first_price: l.src.first_price,
@@ -1491,6 +1501,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
             arrival_airport: l.src.arrival_airport,
             day_of_week: s.day,
             departure_time: s.time,
+            duration_minutes: storedDuration(l.src),
           };
         }),
         maints: srcMaints.map(m => {
@@ -1680,6 +1691,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
           route_id: routeId,
           day_of_week: s.day,
           departure_time: minutesToHHMM(s.minuteOfDay),
+          duration_minutes: storedDuration(e),
           economy_price: e.economy_price,
           business_price: e.business_price,
           first_price: e.first_price,
@@ -1703,6 +1715,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
           arrival_airport:   copyReverse ? e.departure_airport : e.arrival_airport,
           day_of_week: s.day,
           departure_time: minutesToHHMM(s.minuteOfDay),
+          duration_minutes: storedDuration(e),
         };
       });
       if (transfers.length) {
@@ -1756,15 +1769,18 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
   // Longest one-way leg that still allows a daily round trip from the base:
   // 2 × block time + 2 × turnaround + one maintenance block ≤ 24 h. Block time
-  // mirrors the backend's calculateFlightDuration (850 km/h + 30 min taxi);
-  // maintenance mirrors maintenance.js (by the type's max seats).
+  // mirrors the backend's calculateFlightDuration (850 km/h for jets, own cruise
+  // speed below 800 km/h, + 30 min taxi); maintenance mirrors maintenance.js
+  // (by the type's max seats).
   const dailyRange = useMemo(() => {
     if (!aircraft) return null;
     const seats = aircraft.max_passengers || 0;
     const maint = seats <= 100 ? 90 : seats <= 250 ? 150 : 240;
     const turnaround = groundMin;
     const blockMax = (1440 - maint - 2 * turnaround) / 2;
-    const raw = Math.max(0, Math.floor((blockMax - 30) * 850 / 60));
+    const cruise = aircraft.cruise_speed_kmh || 850;
+    const speed = cruise >= 800 ? 850 : cruise;
+    const raw = Math.max(0, Math.floor((blockMax - 30) * speed / 60));
     const range = aircraft.range_km || null;
     const km = range ? Math.min(raw, range) : raw;
     return { km, maint, turnaround, range, rangeLimited: !!range && range < raw };

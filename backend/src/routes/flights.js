@@ -58,12 +58,39 @@ async function checkLevelUp(airlineId) {
 }
 
 // Calculate flight duration based on distance (assuming 850 km/h cruise speed)
-function calculateFlightDuration(distanceKm) {
-  const cruiseSpeedKmh = 850;
+// Block time = distance at the type's block speed + 30 min taxi/takeoff/landing.
+// Jets (cruise ≥ 800 km/h) use a flat 850 km/h: they never hold max cruise for
+// the whole flight, so 850 stands for the climb/cruise/descent average. Slower
+// types (turboprops, older regional jets) use their own cruise speed, where a
+// flat 850 would make them far too fast. Weekly entries written before this
+// rule keep their stored arrival times (see resolveLegDuration).
+const LEGACY_CRUISE_KMH = 850;
+const JET_THRESHOLD_KMH = 800;
+function blockSpeedKmh(cruiseSpeedKmh) {
+  if (!(cruiseSpeedKmh > 0) || cruiseSpeedKmh >= JET_THRESHOLD_KMH) return LEGACY_CRUISE_KMH;
+  return cruiseSpeedKmh;
+}
+function calculateFlightDuration(distanceKm, cruiseSpeedKmh = LEGACY_CRUISE_KMH) {
+  const speed = blockSpeedKmh(cruiseSpeedKmh);
   const taxiTimeMinutes = 30; // taxi, takeoff, landing
-  const flightHours = distanceKm / cruiseSpeedKmh;
+  const flightHours = distanceKm / speed;
   const totalMinutes = Math.round(flightHours * 60) + taxiTimeMinutes;
   return totalMinutes;
+}
+
+// Duration for a weekly leg being (re)written. A leg that is only moved or
+// re-posted (edit mode, ±1D, copy) passes its stored duration so existing plans
+// don't change length; it is accepted only if it equals the legacy 850 km/h
+// or this type's block time, so a client can't invent shorter flights.
+// Anything else gets the type's block time.
+function resolveLegDuration(distanceKm, cruiseSpeedKmh, requested) {
+  const typed = calculateFlightDuration(distanceKm, cruiseSpeedKmh);
+  const req = Number.isFinite(Number(requested)) ? Math.round(Number(requested)) : null;
+  if (req != null) {
+    const legacy = calculateFlightDuration(distanceKm, LEGACY_CRUISE_KMH);
+    if (Math.abs(req - legacy) <= 1 || Math.abs(req - typed) <= 1) return req;
+  }
+  return typed;
 }
 
 // ── Hidden market price calculation (NEVER exposed to user) ─────────────────
@@ -482,7 +509,9 @@ router.patch('/:id', authMiddleware, async (req, res) => {
 
     if (departure_time) {
       const depTime = new Date(departure_time);
-      const durationMin = calculateFlightDuration(flight.distance_km);
+      // Moving a flight keeps its block time (it was set when it was generated).
+      const storedMin = Math.round((new Date(flight.arrival_time) - new Date(flight.departure_time)) / 60000);
+      const durationMin = storedMin > 0 ? storedMin : calculateFlightDuration(flight.distance_km);
       const arrTime = new Date(depTime.getTime() + durationMin * 60 * 1000);
       newDepTime = depTime.toISOString();
       newArrTime = arrTime.toISOString();
@@ -2377,4 +2406,4 @@ router.get('/weekly-schedule', authMiddleware, async (req, res) => {
 });
 
 export default router;
-export { startFlightProcessor, stopFlightProcessor, processFlights, generateFlights, generateFuelPrice, calculateFlightDuration, processBookings, checkLevelUp, XP_THRESHOLDS, calcBaseDemandPerHour, calcPriceAttractiveness };
+export { startFlightProcessor, stopFlightProcessor, processFlights, generateFlights, generateFuelPrice, calculateFlightDuration, resolveLegDuration, blockSpeedKmh, processBookings, checkLevelUp, XP_THRESHOLDS, calcBaseDemandPerHour, calcPriceAttractiveness };

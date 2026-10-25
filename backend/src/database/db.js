@@ -1328,6 +1328,42 @@ async function initDatabase() {
     }
   });
 
+  // ── ONE-TIME: block times for slow types (cruise < 800 km/h) ─────────────────
+  // Jets keep the flat 850 km/h; slower types now fly at their own cruise speed
+  // (see calculateFlightDuration in routes/flights.js). Recompute the stored
+  // arrival of their weekly entries and of their not-yet-departed flights.
+  await runOnce('recalc:block-time-slow-types', async () => {
+    const km = `COALESCE(ws.distance_km, (SELECT r.distance_km FROM routes r WHERE r.id = ws.route_id))`;
+    const ws = await safeQuery(`
+      UPDATE weekly_schedule ws
+      SET arrival_time = to_char(
+            make_time(0, 0, 0) + make_interval(mins =>
+              (split_part(ws.departure_time, ':', 1)::int * 60 + split_part(ws.departure_time, ':', 2)::int
+               + round(${km} / t.cruise_speed_kmh::numeric * 60)::int + 30) % 1440),
+            'HH24:MI')
+      FROM aircraft a
+      JOIN aircraft_types t ON t.id = a.aircraft_type_id
+      WHERE ws.aircraft_id = a.id
+        AND t.cruise_speed_kmh > 0 AND t.cruise_speed_kmh < 800
+        AND ${km} > 0
+    `, null, 'recalc weekly_schedule');
+    const fl = await safeQuery(`
+      UPDATE flights f
+      SET arrival_time = f.departure_time + make_interval(mins =>
+            round(COALESCE(r.distance_km, ws.distance_km) / t.cruise_speed_kmh::numeric * 60)::int + 30)
+      FROM aircraft a
+      JOIN aircraft_types t ON t.id = a.aircraft_type_id,
+      flights f2
+      LEFT JOIN routes r ON r.id = f2.route_id
+      LEFT JOIN weekly_schedule ws ON ws.id = f2.weekly_schedule_id
+      WHERE f2.id = f.id AND f.aircraft_id = a.id
+        AND f.status = 'scheduled'
+        AND t.cruise_speed_kmh > 0 AND t.cruise_speed_kmh < 800
+        AND COALESCE(r.distance_km, ws.distance_km) > 0
+    `, null, 'recalc flights');
+    console.log(`[recalc] slow-type block times: ${ws?.rowCount ?? 0} weekly entries, ${fl?.rowCount ?? 0} scheduled flights`);
+  });
+
   // ── RETAG: cascade vs wrong_location for cancelled legs ─────────────────────
   // Same rule as the boarding hook in processFlights: a cancelled leg whose
   // previous leg (same aircraft) was planned to land at its departure airport

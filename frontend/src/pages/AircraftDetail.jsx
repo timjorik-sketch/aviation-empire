@@ -2802,21 +2802,19 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
 
         {/* ── Scheduling forms ── */}
         <div className="ad-form-card">
-          <div className="ad-sidebar-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="ad-sidebar-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', rowGap: 4 }}>
             <span>Schedule Flight</span>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              {dailyRange && (
-                <span className="ad-daily-range"
-                  title={`Longest one-way leg that still fits a daily round trip from the base: `
-                    + `2 × block time + 2 × ${dailyRange.turnaround} min turnaround + ${dailyRange.maint} min maintenance ≤ 24 h`
-                    + (dailyRange.rangeLimited ? `\nLimited by aircraft range (${dailyRange.range.toLocaleString()} km)` : '')}>
-                  Daily max <strong>{dailyRange.km.toLocaleString()} km</strong>
-                </span>
-              )}
-              <button className="ad-btn-clear-sched" onClick={openCopyModal}>
-                Copy Schedule
-              </button>
-            </div>
+            <button className="ad-btn-clear-sched" onClick={openCopyModal}>
+              Copy Schedule
+            </button>
+            {dailyRange && (
+              <span className="ad-daily-range"
+                title={`Longest one-way leg that still fits a daily round trip from the base: `
+                  + `2 × block time + 2 × ${dailyRange.turnaround} min turnaround + ${dailyRange.maint} min maintenance ≤ 24 h`
+                  + (dailyRange.rangeLimited ? `\nLimited by aircraft range (${dailyRange.range.toLocaleString()} km)` : '')}>
+                Daily max <strong>{dailyRange.km.toLocaleString()} km</strong>
+              </span>
+            )}
           </div>
           <div className="sched-typebar">
             <label className="sched-typebar-label">Flight type</label>
@@ -4589,7 +4587,7 @@ const styles = `
   .ad-sf-badge--cancelled  { background: #FEF2F2; color: #b91c1c; }
 
   /* Tabs */
-  .ad-daily-range { font-size: 0.72rem; color: rgba(255,255,255,0.7); white-space: nowrap; cursor: help; }
+  .ad-daily-range { flex-basis: 100%; font-size: 0.6rem; letter-spacing: 0.08em; color: rgba(255,255,255,0.6); white-space: nowrap; cursor: help; }
   .ad-daily-range strong { color: white; }
   .sched-typebar { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; border-bottom: 1px solid #E0E0E0; background: #FAFAFA; }
   .sched-typebar-label { flex: 0 0 auto; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #888; }

@@ -1980,6 +1980,9 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                   style={{ background: 'transparent', border: 'none', color: 'white', fontSize: '1.4rem', cursor: 'pointer', lineHeight: 1 }}>×</button>
               </div>
 
+              {/* Everything between header and footer scrolls together, so the
+                  footer (Apply) stays reachable however long the hub list gets. */}
+              <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
               {/* Mode switch */}
               <div style={{ display: 'flex', gap: 6, padding: '14px 22px 0' }}>
                 {[['scheme', 'By scheme'], ['match', 'Match a hub']].map(([value, label]) => (
@@ -2102,7 +2105,7 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
               </div>
 
               {/* Preview */}
-              <div style={{ overflowY: 'auto', flex: 1 }}>
+              <div>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                   <thead>
                     <tr>
@@ -2133,8 +2136,10 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
                 </table>
               </div>
 
+              </div>
+
               {/* Footer */}
-              <div style={{ padding: '14px 22px', borderTop: '1px solid #F0F0F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+              <div style={{ flexShrink: 0, padding: '14px 22px', borderTop: '1px solid #F0F0F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
                 <div style={{ fontSize: '0.78rem', color: activePlan.hasConflict ? '#dc2626' : '#888' }}>
                   {activePlan.hasConflict
                     ? (renumberMode === 'match'

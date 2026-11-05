@@ -1321,6 +1321,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   }, [onDragMove]);
   // Drag an existing (draft) flight or maintenance block anywhere in the week.
   const onEditMouseDown = useCallback((e, target, idx) => {
+    if (e.pointerType === 'touch') return;   // touch goes through the native touch listeners below
     e.preventDefault(); e.stopPropagation();
     const colWidth = e.currentTarget?.parentElement?.getBoundingClientRect().width || 0;
     const startVal = target === 'maint'
@@ -1332,6 +1333,51 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     window.addEventListener('pointerup', onDragUp);
     window.addEventListener('pointercancel', onDragUp);
   }, [editLegs, editMaints, onDragMove, onDragUp]);
+
+  // Touch drag for edit mode, on native touch events. Pointer events plus
+  // touch-action were not reliable on every phone browser (the page scrolled
+  // or the drag never started), so touch uses non-passive listeners that block
+  // scrolling while a block is being dragged.
+  const gridScrollRef = useRef(null);
+  const editLegsRef = useRef(editLegs);
+  const editMaintsRef = useRef(editMaints);
+  useEffect(() => { editLegsRef.current = editLegs; }, [editLegs]);
+  useEffect(() => { editMaintsRef.current = editMaints; }, [editMaints]);
+  useEffect(() => {
+    const el = gridScrollRef.current;
+    if (!editMode || !el) return;
+    const onStart = (e) => {
+      if (e.touches.length !== 1) return;
+      const ghost = e.target.closest?.('[data-edit-kind]');
+      if (!ghost) return;
+      e.preventDefault();
+      const target = ghost.getAttribute('data-edit-kind');
+      const idx = parseInt(ghost.getAttribute('data-edit-idx'), 10);
+      const t = e.touches[0];
+      const colWidth = ghost.parentElement?.getBoundingClientRect().width || 0;
+      const startVal = target === 'maint'
+        ? (editMaintsRef.current[idx]?.wkStart ?? 0)
+        : (editLegsRef.current[idx]?.wkDep ?? 0);
+      dragRef.current = { kind: 'edit', target, idx, touch: true, startY: t.clientY, startX: t.clientX, colWidth, startVal };
+    };
+    const onMove = (e) => {
+      if (!dragRef.current) return;
+      e.preventDefault();
+      const t = e.touches[0];
+      if (t) onDragMove({ clientX: t.clientX, clientY: t.clientY, shiftKey: false });
+    };
+    const onEnd = () => { dragRef.current = null; };
+    el.addEventListener('touchstart', onStart, { passive: false });
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd);
+    el.addEventListener('touchcancel', onEnd);
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+      el.removeEventListener('touchcancel', onEnd);
+    };
+  }, [editMode, onDragMove]);
 
   const handleMaintenanceSubmit = async () => {
     setSubmitting(true); setError(''); setSuccess('');
@@ -2561,7 +2607,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
             <div className="ad-grid-gutter-hd" />
             {DAY_SHORT.map((d, i) => <div key={i} className="ad-grid-day-hd">{d}</div>)}
           </div>
-          <div className="ad-grid-scroll">
+          <div className="ad-grid-scroll" ref={gridScrollRef}>
             {scheduleLoading && <div className="ad-grid-overlay"><Loader size={48} /></div>}
             <div className="ad-grid-inner">
               <div className="ad-grid-gutter">
@@ -2753,6 +2799,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                       <div key={b.key}
                         className={`ad-grid-ghost ad-grid-ghost--drag ad-grid-ghost--move${editConflicts.has(`f-${b.legIndex}`) ? ' ad-grid-ghost--conflict' : ''}`}
                         style={{ top: b.top, height: b.height }}
+                        data-edit-kind="flight" data-edit-idx={b.legIndex}
                         onPointerDown={(e) => onEditMouseDown(e, 'flight', b.legIndex)}
                         title={`${b.flight_number}: ${b.departure_airport}→${b.arrival_airport}\nDrag across days and times · Shift = 5-min steps\nDep ${b.departure_time}\nArr ${b.arrival_time}`}>
                         <span className="ad-grid-fn">{b.flight_number}</span>
@@ -2765,6 +2812,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                       <div key={`${b.key}-ov`}
                         className={`ad-grid-ghost ad-grid-ghost--drag ad-grid-ghost--move${editConflicts.has(`f-${b.legIndex}`) ? ' ad-grid-ghost--conflict' : ''}`}
                         style={{ top: 0, height: b.overflowHeight, borderTop: '2px dashed #2C2C2C' }}
+                        data-edit-kind="flight" data-edit-idx={b.legIndex}
                         onPointerDown={(e) => onEditMouseDown(e, 'flight', b.legIndex)}
                         title={`${b.flight_number}: ${b.departure_airport}→${b.arrival_airport} (cont.)`}>
                         <span className="ad-grid-fn">{b.flight_number}</span>
@@ -2775,6 +2823,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                       <div key={m.key}
                         className={`ad-grid-ghost ad-grid-ghost--maint ad-grid-ghost--drag ad-grid-ghost--move${editConflicts.has(`m-${m.maintIndex}`) ? ' ad-grid-ghost--conflict' : ''}`}
                         style={{ top: m.top, height: m.height }}
+                        data-edit-kind="maint" data-edit-idx={m.maintIndex}
                         onPointerDown={(e) => onEditMouseDown(e, 'maint', m.maintIndex)}
                         title={'Maintenance (A-Check)\nDrag across days and times · Shift = 5-min steps'}>
                         <span className="ad-grid-fn">A-Check</span>
@@ -2785,6 +2834,7 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
                       <div key={`${m.key}-ov`}
                         className={`ad-grid-ghost ad-grid-ghost--maint ad-grid-ghost--drag ad-grid-ghost--move${editConflicts.has(`m-${m.maintIndex}`) ? ' ad-grid-ghost--conflict' : ''}`}
                         style={{ top: 0, height: m.overflowHeight, borderTop: '2px dashed #6b7280' }}
+                        data-edit-kind="maint" data-edit-idx={m.maintIndex}
                         onPointerDown={(e) => onEditMouseDown(e, 'maint', m.maintIndex)}
                         title="Maintenance (A-Check, cont.)">
                         <span className="ad-grid-fn">A-Check</span>

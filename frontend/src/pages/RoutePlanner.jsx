@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import AirportLink from '../components/AirportLink.jsx';
 import { groupAirportsForDropdown } from '../utils/airportSort.js';
 import { buildMatchPlan, suggestPrefix, suggestOffset } from '../utils/flightNumberMatch.js';
@@ -68,7 +68,10 @@ function RatingDot({ rating }) {
   );
 }
 
-function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNavigateToAirport, onNavigateToAircraft }) {
+function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNavigateToAirport, onNavigateToAircraft, savedState }) {
+  // View state kept by App while the player visits an airport, so "back" lands
+  // on the same sort, filters and scroll position.
+  const [saved] = useState(() => savedState?.current || null);   // read once, at mount
   const isAdmin = !!user?.is_admin;
   const [routes, setRoutes] = useState([]);
   const [airports, setAirports] = useState([]);
@@ -95,16 +98,16 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
   const [weekStart, setWeekStart] = useState('');
   const [selectedRouteForAnalysis, setSelectedRouteForAnalysis] = useState('');
   const [requestingAnalysis, setRequestingAnalysis] = useState(false);
-  const [analysesExpanded, setAnalysesExpanded] = useState(true);
+  const [analysesExpanded, setAnalysesExpanded] = useState(saved?.analysesExpanded ?? true);
 
   // Sort state
-  const [sortCol, setSortCol] = useState('flight_number');
-  const [sortDir, setSortDir] = useState('asc');
+  const [sortCol, setSortCol] = useState(saved?.sortCol || 'flight_number');
+  const [sortDir, setSortDir] = useState(saved?.sortDir || 'asc');
 
   // Filter state (by destination continent / country, and by hub)
-  const [filterContinent, setFilterContinent] = useState('');
-  const [filterCountry, setFilterCountry] = useState('');
-  const [filterHub, setFilterHub] = useState('');
+  const [filterContinent, setFilterContinent] = useState(saved?.filterContinent || '');
+  const [filterCountry, setFilterCountry] = useState(saved?.filterCountry || '');
+  const [filterHub, setFilterHub] = useState(saved?.filterHub || '');
 
   // Bulk-renumber modal state
   const [showRenumber, setShowRenumber] = useState(false);
@@ -396,6 +399,30 @@ function RoutePlanner({ airline, user, onBack, backLabel = 'Dashboard', onNaviga
   const [expandedId, setExpandedId] = useState(null);
   const [routeAircraft, setRouteAircraft] = useState({}); // { [routeId]: aircraft[] }
   const [loadingAircraft, setLoadingAircraft] = useState({});
+
+  // Save the view on unmount; restore the scroll position once the list has
+  // loaded (it renders empty until the first fetch is done).
+  // Layout-effect cleanup runs before React removes this page's DOM, so
+  // window.scrollY is still the list's position (a passive cleanup would see the
+  // next page's 0).
+  const viewRef = useRef(null);
+  viewRef.current = { sortCol, sortDir, filterContinent, filterCountry, filterHub, analysesExpanded };
+  useLayoutEffect(() => () => {
+    if (savedState) savedState.current = { ...viewRef.current, scrollY: window.scrollY };
+  }, []);
+  const scrollRestored = useRef(false);
+  useEffect(() => {
+    if (loading || scrollRestored.current) return;
+    scrollRestored.current = true;
+    if (!saved?.scrollY) return;
+    // Parts of the page settle a moment after the list (the browser's scroll
+    // anchoring then shifts the view), so set the position again shortly after.
+    const y = saved.scrollY;
+    requestAnimationFrame(() => window.scrollTo(0, y));
+    const t1 = setTimeout(() => window.scrollTo(0, y), 150);
+    const t2 = setTimeout(() => window.scrollTo(0, y), 450);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [loading]);
 
   const toggleExpand = async (routeId) => {
     if (expandedId === routeId) { setExpandedId(null); return; }

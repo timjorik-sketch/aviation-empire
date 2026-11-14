@@ -196,6 +196,9 @@ function App() {
   const [selectedAirportCode, setSelectedAirportCode] = useState(null);
   const [airportReturnPage, setAirportReturnPage] = useState('routes');
   const airportOverviewState = useRef(null);
+  // Route list view (sort, filters, scroll) — kept only for "back" from an
+  // airport; opening Routes from anywhere else starts fresh.
+  const routesViewState = useRef(null);
   const [hubsBackPage, setHubsBackPage] = useState('dashboard');
   const [loading, setLoading] = useState(true);
   const [airlineStats, setAirlineStats] = useState({ destinations_count: 0, hubs: [], home_airport: null, weekly_revenue: 0, avg_satisfaction: null, daily_passengers: 0, total_passengers: 0 });
@@ -467,6 +470,7 @@ function App() {
 
   const navigate = (page) => {
     if (page === 'hubs') setHubsBackPage(currentPage);
+    if (page === 'routes') routesViewState.current = null;
     setPreviousPage(currentPage);
     setCurrentPage(page);
   };
@@ -551,6 +555,7 @@ function App() {
         backLabel={PAGE_LABELS[previousPage] || 'Dashboard'}
         onNavigateToAirport={(code) => navigateToAirport(code, 'routes')}
         onNavigateToAircraft={(id) => { setPreviousPage('routes'); setSelectedAircraftId(id); setCurrentPage('aircraft-detail'); }}
+        savedState={routesViewState}
       />
     );
   }

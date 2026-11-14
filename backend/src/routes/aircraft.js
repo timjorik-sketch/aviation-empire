@@ -2697,56 +2697,105 @@ class UsedBuyError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 
-// Buys one used-market listing inside an open transaction. batchRegs holds
-// registrations already generated in the same transaction (not yet visible
-// to the pool-level uniqueness check in genRegForPrefix).
-async function buyUsedListingTx(client, airlineId, listingId, { deliveryAirport, cabinProfileId }, batchRegs = new Set()) {
-  const lResult = await client.query('SELECT u.*, t.new_price_usd, t.depreciation_age, t.depreciation_fh FROM used_aircraft_market u JOIN aircraft_types t ON u.aircraft_type_id = t.id WHERE u.id = $1 FOR UPDATE', [listingId]);
-  if (!lResult.rows[0]) throw new UsedBuyError(404, 'Listing not found');
-  const l = lResult.rows[0];
-  const { aircraft_type_id: typeId, manufactured_year: manufacturedYear, total_flight_hours: totalFh,
-          current_value: currentValue, seller_aircraft_id: sellerAircraftId, seller_airline_id: sellerAirlineId } = l;
-
-  const balResult = await client.query('SELECT balance, home_airport_code FROM airlines WHERE id = $1 FOR UPDATE', [airlineId]);
-  const balance = balResult.rows[0].balance;
-  if (balance < currentValue) throw new UsedBuyError(400, 'Insufficient funds');
-
-  let registration = await genRegForLocation(balResult.rows[0].home_airport_code);
-  for (let i = 0; i < 20 && batchRegs.has(registration); i++) {
-    registration = await genRegForLocation(balResult.rows[0].home_airport_code);
+// Generates `count` registrations for a prefix that are free in aircraft and
+// used_aircraft_market, checking all candidates with one query per round.
+async function genRegsBatch(client, prefix, count) {
+  const build = AIRPORT_PREFIX_FORMAT[prefix] || (() => prefix + '-' + randUMLetters(3));
+  const result = [];
+  const taken = new Set();
+  for (let round = 0; round < 10 && result.length < count; round++) {
+    const fallback = round >= 5;
+    const candidates = new Set();
+    const need = count - result.length;
+    for (let i = 0; candidates.size < need * 2 && i < need * 20; i++) {
+      const reg = fallback ? prefix + '-' + randUMLetters(3) + randUMDigits(2) : build();
+      if (!taken.has(reg)) candidates.add(reg);
+    }
+    const list = [...candidates];
+    const r = await client.query(
+      `SELECT registration FROM aircraft WHERE registration = ANY($1::text[])
+       UNION SELECT registration FROM used_aircraft_market WHERE registration = ANY($1::text[])`,
+      [list]
+    );
+    for (const row of r.rows) taken.add(row.registration);
+    for (const reg of list) {
+      if (result.length >= count) break;
+      if (!taken.has(reg)) { result.push(reg); taken.add(reg); }
+    }
   }
-  batchRegs.add(registration);
+  if (result.length < count) throw new Error('Could not generate registrations');
+  return result;
+}
 
-  const purchasedAt = `${manufacturedYear}-07-01 00:00:00`;
+// Buys one or more used-market listings inside an open transaction.
+// The number of DB round trips does not grow with the number of listings.
+async function buyUsedListingsTx(client, airlineId, listingIds, { deliveryAirport, cabinProfileId }) {
+  const lResult = await client.query(
+    `SELECT id, aircraft_type_id, manufactured_year, total_flight_hours, current_value,
+            seller_aircraft_id, seller_airline_id
+     FROM used_aircraft_market WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE`,
+    [listingIds]
+  );
+  if (lResult.rows.length !== listingIds.length) {
+    throw new UsedBuyError(404, listingIds.length === 1 ? 'Listing not found' : 'One or more listings are no longer available');
+  }
+  const listings = lResult.rows;
+  const total = listings.reduce((sum, l) => sum + l.current_value, 0);
+
+  const aResult = await client.query(
+    `SELECT a.balance, ap.registration_prefix
+     FROM airlines a LEFT JOIN airports ap ON ap.iata_code = a.home_airport_code
+     WHERE a.id = $1 FOR UPDATE OF a`,
+    [airlineId]
+  );
+  const balance = aResult.rows[0].balance;
+  if (balance < total) throw new UsedBuyError(400, 'Insufficient funds');
+
+  const regs = await genRegsBatch(client, aResult.rows[0].registration_prefix || 'D', listings.length);
+
   const airport = deliveryAirport || null;
   await client.query(`
     INSERT INTO aircraft (airline_id, aircraft_type_id, registration, home_airport, is_active,
       purchased_at, current_location, total_flight_hours, airline_cabin_profile_id)
-    VALUES ($1, $2, $3, $4, 0, $5, $6, $7, $8)
-  `, [airlineId, typeId, registration, airport, purchasedAt, airport, totalFh, cabinProfileId || null]);
+    SELECT $1::int, x.type_id, x.reg, $2::text, 0, make_timestamptz(x.year, 7, 1, 0, 0, 0), $2::text, x.fh, $3::int
+    FROM unnest($4::int[], $5::text[], $6::int[], $7::real[]) AS x(type_id, reg, year, fh)
+  `, [airlineId, airport, cabinProfileId || null,
+      listings.map(l => l.aircraft_type_id), regs,
+      listings.map(l => l.manufactured_year), listings.map(l => l.total_flight_hours)]);
 
-  await client.query('DELETE FROM used_aircraft_market WHERE id = $1', [listingId]);
+  await client.query('DELETE FROM used_aircraft_market WHERE id = ANY($1::int[])', [listings.map(l => l.id)]);
 
-  if (sellerAircraftId && sellerAirlineId) {
-    await client.query('UPDATE personnel SET aircraft_id = NULL WHERE aircraft_id = $1', [sellerAircraftId]);
-    await client.query('UPDATE flights SET weekly_schedule_id = NULL WHERE aircraft_id = $1', [sellerAircraftId]);
-    await client.query('DELETE FROM aircraft WHERE id = $1', [sellerAircraftId]);
-    const selBalResult = await client.query('SELECT balance FROM airlines WHERE id = $1 FOR UPDATE', [sellerAirlineId]);
-    const sellerBalance = selBalResult.rows[0].balance;
-    await client.query('UPDATE airlines SET balance = $1 WHERE id = $2', [sellerBalance + currentValue, sellerAirlineId]);
-    await client.query(
-      "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'other', $2, $3)",
-      [sellerAirlineId, currentValue, `Aircraft sold on used market: ${registration}`]
-    );
+  // Listings sold by other players: remove their aircraft and pay them
+  const playerSales = listings
+    .map((l, i) => ({ ...l, reg: regs[i] }))
+    .filter(l => l.seller_aircraft_id && l.seller_airline_id);
+  if (playerSales.length > 0) {
+    const sellerAircraftIds = playerSales.map(l => l.seller_aircraft_id);
+    await client.query('UPDATE personnel SET aircraft_id = NULL WHERE aircraft_id = ANY($1::int[])', [sellerAircraftIds]);
+    await client.query('UPDATE flights SET weekly_schedule_id = NULL WHERE aircraft_id = ANY($1::int[])', [sellerAircraftIds]);
+    await client.query('DELETE FROM aircraft WHERE id = ANY($1::int[])', [sellerAircraftIds]);
+    const perSeller = new Map();
+    for (const l of playerSales) perSeller.set(l.seller_airline_id, (perSeller.get(l.seller_airline_id) || 0) + l.current_value);
+    await client.query(`
+      UPDATE airlines a SET balance = a.balance + x.amount
+      FROM unnest($1::int[], $2::real[]) AS x(id, amount) WHERE a.id = x.id
+    `, [[...perSeller.keys()], [...perSeller.values()]]);
+    await client.query(`
+      INSERT INTO transactions (airline_id, type, amount, description)
+      SELECT x.id, 'other', x.amount, 'Aircraft sold on used market: ' || x.reg
+      FROM unnest($1::int[], $2::real[], $3::text[]) AS x(id, amount, reg)
+    `, [playerSales.map(l => l.seller_airline_id), playerSales.map(l => l.current_value), playerSales.map(l => l.reg)]);
   }
 
-  const newBalance = balance - currentValue;
-  await client.query('UPDATE airlines SET balance = $1 WHERE id = $2', [newBalance, airlineId]);
-  await client.query(
-    "INSERT INTO transactions (airline_id, type, amount, description) VALUES ($1, 'aircraft_purchase', $2, $3)",
-    [airlineId, -currentValue, `Used aircraft purchase: ${registration}`]
-  );
-  return { registration, newBalance };
+  const newBalance = balance - total;
+  await client.query('UPDATE airlines SET balance = balance - $1::real WHERE id = $2', [total, airlineId]);
+  await client.query(`
+    INSERT INTO transactions (airline_id, type, amount, description)
+    SELECT $1::int, 'aircraft_purchase', -x.amount, 'Used aircraft purchase: ' || x.reg
+    FROM unnest($2::real[], $3::text[]) AS x(amount, reg)
+  `, [airlineId, listings.map(l => l.current_value), regs]);
+
+  return { registrations: regs, boughtIds: listings.map(l => l.id), newBalance };
 }
 
 // POST /api/aircraft/market/used/:id/buy — buy from used market
@@ -2757,10 +2806,10 @@ router.post('/market/used/:id/buy', authMiddleware, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const { registration, newBalance } = await buyUsedListingTx(client, req.airlineId, listingId,
+    const { registrations, newBalance } = await buyUsedListingsTx(client, req.airlineId, [listingId],
       { deliveryAirport, cabinProfileId: cabin_profile_id });
     await client.query('COMMIT');
-    res.json({ message: `${registration} added to fleet`, new_balance: newBalance });
+    res.json({ message: `${registrations[0]} added to fleet`, new_balance: newBalance });
   } catch(e) {
     await client.query('ROLLBACK').catch(() => {});
     if (e instanceof UsedBuyError) return res.status(e.status).json({ error: e.message });
@@ -2784,30 +2833,12 @@ router.post('/market/used/buy-bulk', authMiddleware, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const totalResult = await client.query('SELECT COALESCE(SUM(current_value), 0) AS total, COUNT(*) AS cnt FROM used_aircraft_market WHERE id = ANY($1::int[])', [ids]);
-    if (parseInt(totalResult.rows[0].cnt) !== ids.length) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'One or more listings are no longer available' });
-    }
-    const balResult = await client.query('SELECT balance FROM airlines WHERE id = $1', [req.airlineId]);
-    if (balResult.rows[0].balance < Number(totalResult.rows[0].total)) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Insufficient funds' });
-    }
-
-    const batchRegs = new Set();
-    const registrations = [];
-    let newBalance = balResult.rows[0].balance;
-    for (const id of ids) {
-      const r = await buyUsedListingTx(client, req.airlineId, id,
-        { deliveryAirport, cabinProfileId: cabin_profile_id }, batchRegs);
-      registrations.push(r.registration);
-      newBalance = r.newBalance;
-    }
+    const { registrations, boughtIds, newBalance } = await buyUsedListingsTx(client, req.airlineId, ids,
+      { deliveryAirport, cabinProfileId: cabin_profile_id });
     await client.query('COMMIT');
     res.json({
       message: `${registrations.length} aircraft added to fleet: ${registrations.join(', ')}`,
-      registrations, bought_ids: ids, new_balance: newBalance
+      registrations, bought_ids: boughtIds, new_balance: newBalance
     });
   } catch(e) {
     await client.query('ROLLBACK').catch(() => {});

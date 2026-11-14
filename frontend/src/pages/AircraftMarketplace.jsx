@@ -73,7 +73,7 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
   // Modal
   const [modal, setModal]                     = useState(null); // aircraft type object
   const [modalTab, setModalTab]               = useState('new'); // 'new' | 'used'
-  const [selectedUsedListing, setSelectedUsedListing] = useState(null);
+  const [selectedUsedIds, setSelectedUsedIds] = useState([]); // multi-select via Shift/Ctrl/Cmd+click
   const [quantity, setQuantity]               = useState(1);
   const [deliveryAirport, setDeliveryAirport] = useState('');
   const [cabinProfiles, setCabinProfiles]     = useState([]);
@@ -156,7 +156,7 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
   const openModal = useCallback(async (aircraft) => {
     setModal(aircraft);
     setModalTab('new');
-    setSelectedUsedListing(null);
+    setSelectedUsedIds([]);
     setQuantity(1);
     setDeliveryAirport(airline.home_airport_code || '');
     setSelectedCabinProfileId('');
@@ -171,13 +171,28 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
     } catch { setCabinProfiles([]); }
   }, [airline]);
 
-  const closeModal = () => { setModal(null); setSelectedUsedListing(null); setError(''); setSuccess(''); };
+  const closeModal = () => { setModal(null); setSelectedUsedIds([]); setError(''); setSuccess(''); };
 
   // Used listings for the aircraft type currently in the modal
   const modalUsedListings = useMemo(() => {
     if (!modal) return [];
     return usedListings.filter(l => l.type_id === modal.id);
   }, [modal, usedListings]);
+
+  const selectedUsedListings = useMemo(
+    () => modalUsedListings.filter(l => selectedUsedIds.includes(l.id)),
+    [modalUsedListings, selectedUsedIds]
+  );
+
+  // Plain click: select only this listing (or clear it). Shift/Ctrl/Cmd+click: add/remove it.
+  const handleUsedListingClick = (e, l) => {
+    const multi = e.shiftKey || e.ctrlKey || e.metaKey;
+    setSelectedUsedIds(prev => {
+      const has = prev.includes(l.id);
+      if (multi) return has ? prev.filter(id => id !== l.id) : [...prev, l.id];
+      return has && prev.length === 1 ? [] : [l.id];
+    });
+  };
 
   const handlePurchaseNew = async () => {
     if (!modal) return;
@@ -205,28 +220,34 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
   };
 
   const handlePurchaseUsed = async () => {
-    if (!selectedUsedListing) return;
-    if (airline.balance < selectedUsedListing.current_value) { setError('Insufficient funds'); return; }
+    if (selectedUsedListings.length === 0) return;
+    const total = selectedUsedListings.reduce((sum, l) => sum + l.current_value, 0);
+    if (airline.balance < total) { setError('Insufficient funds'); return; }
     setSuccess('');
     setPurchasing(true);
     const token = localStorage.getItem('token');
+    const ids = selectedUsedListings.map(l => l.id);
+    const cabin_profile_id = selectedCabinProfileId ? parseInt(selectedCabinProfileId) : undefined;
     try {
-      const res = await fetch(`${API_URL}/api/aircraft/market/used/${selectedUsedListing.id}/buy`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          deliveryAirport,
-          cabin_profile_id: selectedCabinProfileId ? parseInt(selectedCabinProfileId) : undefined
-        })
-      });
+      const res = ids.length === 1
+        ? await fetch(`${API_URL}/api/aircraft/market/used/${ids[0]}/buy`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ deliveryAirport, cabin_profile_id })
+          })
+        : await fetch(`${API_URL}/api/aircraft/market/used/buy-bulk`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ listing_ids: ids, deliveryAirport, cabin_profile_id })
+          });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Purchase failed');
       setSuccess(data.message);
       setError('');
       onBalanceUpdate(data.new_balance);
-      // Remove bought listing
-      setUsedListings(prev => prev.filter(l => l.id !== selectedUsedListing.id));
-      setSelectedUsedListing(null);
+      // Remove bought listings
+      setUsedListings(prev => prev.filter(l => !ids.includes(l.id)));
+      setSelectedUsedIds([]);
     } catch(e) { setError(e.message); }
     finally { setPurchasing(false); }
   };
@@ -234,11 +255,11 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
   // Modal cost + affordability
   const modalCost = modalTab === 'new'
     ? (modal?.new_price_usd || 0) * quantity
-    : (selectedUsedListing?.current_value || 0);
+    : selectedUsedListings.reduce((sum, l) => sum + l.current_value, 0);
   const canAfford = airline.balance >= modalCost;
   const canConfirm = modalTab === 'new'
     ? canAfford
-    : (canAfford && selectedUsedListing != null);
+    : (canAfford && selectedUsedListings.length > 0);
 
   if (loading) return (
     <div className="am-page">
@@ -447,7 +468,7 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
             <div className="am-modal-tabs">
               <button
                 className={`am-modal-tab${modalTab === 'new' ? ' am-modal-tab--active' : ''}`}
-                onClick={() => { setModalTab('new'); setSelectedUsedListing(null); setError(''); }}
+                onClick={() => { setModalTab('new'); setSelectedUsedIds([]); setError(''); }}
               >
                 New Aircraft
               </button>
@@ -530,7 +551,9 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
                     </div>
                   ) : (
                     <>
-                      <div className="am-used-list-label">Select a listing:</div>
+                      <div className="am-used-list-label">
+                        Select a listing <span className="am-used-list-hint">(Shift+click to select several)</span>
+                      </div>
                       <div className="am-used-list">
                         <div className="am-ul-header">
                           <span>Registration</span>
@@ -540,12 +563,13 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
                           <span style={{textAlign:'right'}}>Price</span>
                         </div>
                         {modalUsedListings.map(l => {
-                          const isSelected = selectedUsedListing?.id === l.id;
+                          const isSelected = selectedUsedIds.includes(l.id);
                           return (
                             <button
                               key={l.id}
                               className={`am-used-listing${isSelected ? ' am-used-listing--selected' : ''}`}
-                              onClick={() => setSelectedUsedListing(isSelected ? null : l)}
+                              onMouseDown={e => { if (e.shiftKey) e.preventDefault(); }}
+                              onClick={e => handleUsedListingClick(e, l)}
                             >
                               <span className="am-ul-reg">{l.registration}</span>
                               <span>{fmtAge(l.manufactured_year)}</span>
@@ -563,7 +587,7 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
                     </>
                   )}
 
-                  {selectedUsedListing && (
+                  {selectedUsedListings.length > 0 && (
                     <>
                       <div className="am-form-row">
                         <label>Delivery Airport</label>
@@ -594,10 +618,17 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
                         </div>
                       )}
                       <div className="am-price-summary">
-                        <div className="am-price-row">
-                          <span>New price</span>
-                          <span style={{ color:'#999', textDecoration:'line-through' }}>{fmt(selectedUsedListing.new_price_usd)}</span>
-                        </div>
+                        {selectedUsedListings.length === 1 ? (
+                          <div className="am-price-row">
+                            <span>New price</span>
+                            <span style={{ color:'#999', textDecoration:'line-through' }}>{fmt(selectedUsedListings[0].new_price_usd)}</span>
+                          </div>
+                        ) : (
+                          <div className="am-price-row">
+                            <span>Aircraft selected</span>
+                            <span>{selectedUsedListings.length}</span>
+                          </div>
+                        )}
                         <div className="am-price-row am-price-row--total">
                           <span>Total</span>
                           <span className={canAfford ? 'am-price--ok' : 'am-price--no'}>{fmt(modalCost)}</span>
@@ -620,7 +651,7 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
                 disabled={!canConfirm || purchasing}
                 onClick={modalTab === 'new' ? handlePurchaseNew : handlePurchaseUsed}
               >
-                {purchasing ? 'Purchasing…' : 'Confirm Purchase'}
+                {purchasing ? 'Purchasing…' : (modalTab === 'used' && selectedUsedListings.length > 1 ? `Buy ${selectedUsedListings.length} Aircraft` : 'Confirm Purchase')}
               </button>
             </div>
           </div>
@@ -853,6 +884,7 @@ export default function AircraftMarketplace({ airline, onBack, onBalanceUpdate }
         }
         .am-used-empty-icon { font-size: 2rem; margin-bottom: 0.5rem; opacity: 0.4; }
         .am-used-list-label { font-size: 0.78rem; font-weight: 600; color: #666; text-transform: uppercase; letter-spacing: 0.05em; }
+        .am-used-list-hint { font-weight: 400; text-transform: none; letter-spacing: 0; color: #999; }
         .am-used-list { display: flex; flex-direction: column; gap: 2px; }
         .am-ul-header {
           display: grid; grid-template-columns: 1fr 0.8fr 0.8fr 1.2fr 0.8fr;

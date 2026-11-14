@@ -191,15 +191,12 @@ function App() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showChangeModal, setShowChangeModal] = useState(false);
   const [currentPage, setCurrentPage] = useState('dashboard');
-  const [previousPage, setPreviousPage] = useState('dashboard');
   const [selectedAircraftId, setSelectedAircraftId] = useState(null);
   const [selectedAirportCode, setSelectedAirportCode] = useState(null);
-  const [airportReturnPage, setAirportReturnPage] = useState('routes');
   const airportOverviewState = useRef(null);
-  // Route list view (sort, filters, scroll) — kept only for "back" from an
-  // airport; opening Routes from anywhere else starts fresh.
+  // Route list view (sort, filters, scroll) — kept only for going back to it;
+  // opening Routes anew starts fresh.
   const routesViewState = useRef(null);
-  const [hubsBackPage, setHubsBackPage] = useState('dashboard');
   const [loading, setLoading] = useState(true);
   const [airlineStats, setAirlineStats] = useState({ destinations_count: 0, hubs: [], home_airport: null, weekly_revenue: 0, avg_satisfaction: null, daily_passengers: 0, total_passengers: 0 });
   const [opsStats, setOpsStats] = useState(null);
@@ -260,6 +257,7 @@ function App() {
         setFleetSummary([]);
         setActiveRoutes([]);
         setAirlineStats({ destinations_count: 0, hubs: [], home_airport: null, weekly_revenue: 0, avg_satisfaction: null, daily_passengers: 0, total_passengers: 0 });
+        resetNav();
         setCurrentPage('dashboard');
         await fetchAllAirlines();
       }
@@ -291,6 +289,7 @@ function App() {
     setUser(null);
     setAirlines([]);
     setActiveAirline(null);
+    resetNav();
     setCurrentPage('dashboard');
   };
 
@@ -386,6 +385,66 @@ function App() {
     }).catch(() => {});
   }, [activeAirline?.id]);
 
+  // ── Navigation history ──────────────────────────────────────────────────────
+  // Every page change pushes where the player was (page, selected aircraft or
+  // airport, scroll position) onto a stack, and mirrors it into the browser
+  // history so the phone's / browser's back button works too. Back pops the
+  // stack and restores the scroll position.
+  const navStack = useRef([]);
+  const pendingScroll = useRef(null);
+  const here = () => ({ page: currentPage, aircraftId: selectedAircraftId, airportCode: selectedAirportCode, scrollY: window.scrollY });
+  const showEntry = (e) => {
+    setSelectedAircraftId(e.aircraftId ?? null);
+    setSelectedAirportCode(e.airportCode ?? null);
+    setCurrentPage(e.page);
+  };
+  const goTo = (page, { aircraftId = null, airportCode = null } = {}) => {
+    if (page === currentPage && aircraftId === selectedAircraftId && airportCode === selectedAirportCode) return;
+    navStack.current.push(here());
+    if (page === 'routes') routesViewState.current = null;   // a fresh visit starts unsorted at the top
+    pendingScroll.current = 0;
+    showEntry({ page, aircraftId, airportCode });
+    try { window.history.pushState({ apNav: navStack.current.length }, ''); } catch { /* ignore */ }
+  };
+  const popEntry = (fallback) => {
+    const prev = navStack.current.pop();
+    if (prev) { pendingScroll.current = prev.scrollY || 0; showEntry(prev); }
+    else { pendingScroll.current = 0; showEntry({ page: fallback || 'dashboard' }); }
+  };
+  // Back button inside a page: go through the browser history when we pushed
+  // an entry for it, so both stay in step; otherwise fall back directly.
+  const goBack = (fallback = 'dashboard') => {
+    if (navStack.current.length > 0 && window.history.state?.apNav) window.history.back();
+    else popEntry(fallback);
+  };
+  const resetNav = () => { navStack.current = []; pendingScroll.current = 0; };
+  const popEntryRef = useRef(popEntry);
+  popEntryRef.current = popEntry;
+  useEffect(() => {
+    // Only react to steps back (a forward step would push again, which the
+    // stack can't replay, so it is ignored).
+    const onPop = (e) => {
+      const depth = e.state?.apNav || 0;
+      if (depth < navStack.current.length) popEntryRef.current('dashboard');
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+  // Scroll: top for a new page, the saved position when going back. Pages that
+  // load their content first settle a moment later, so set it again shortly after.
+  useEffect(() => {
+    const y = pendingScroll.current;
+    if (y == null) return;
+    pendingScroll.current = null;
+    window.scrollTo(0, y);
+    if (!y) return;
+    const t1 = setTimeout(() => window.scrollTo(0, y), 150);
+    const t2 = setTimeout(() => window.scrollTo(0, y), 450);
+    const t3 = setTimeout(() => window.scrollTo(0, y), 900);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+  }, [currentPage, selectedAircraftId, selectedAirportCode]);
+  const prevPage = navStack.current.length ? navStack.current[navStack.current.length - 1].page : 'dashboard';
+
   // Email verification link — works whether the user is logged in or not.
   if (verifyToken) {
     return (
@@ -468,18 +527,10 @@ function App() {
     leaderboards: 'Leaderboards',
   };
 
-  const navigate = (page) => {
-    if (page === 'hubs') setHubsBackPage(currentPage);
-    if (page === 'routes') routesViewState.current = null;
-    setPreviousPage(currentPage);
-    setCurrentPage(page);
-  };
-
-  const navigateToAirport = (code, fromPage = 'routes') => {
-    setSelectedAirportCode(code);
-    setAirportReturnPage(fromPage);
-    setCurrentPage('airport');
-  };
+  const navigate = (page) => goTo(page);
+  const navigateToAirport = (code) => goTo('airport', { airportCode: code });
+  const openAircraft = (id) => goTo('aircraft-detail', { aircraftId: id });
+  const backLabel = PAGE_LABELS[prevPage] || (prevPage === 'airport' ? 'Airport' : prevPage === 'aircraft-detail' ? 'Aircraft' : 'Dashboard');
 
   const navContextValue = {
     currentPage,
@@ -496,8 +547,8 @@ function App() {
     return wrap(
       <AirportPage
         code={selectedAirportCode}
-        onBack={() => setCurrentPage(airportReturnPage)}
-        onNavigateToAirport={(code) => navigateToAirport(code, airportReturnPage)}
+        onBack={() => goBack('dashboard')}
+        onNavigateToAirport={navigateToAirport}
         airline={activeAirline}
         onBalanceUpdate={handleBalanceUpdate}
       />
@@ -509,8 +560,8 @@ function App() {
         <AircraftDetail
           aircraftId={selectedAircraftId}
           airline={activeAirline}
-          onBack={() => { setSelectedAircraftId(null); setCurrentPage('fleet'); }}
-          onNavigateToAirport={(code) => navigateToAirport(code, 'fleet')}
+          onBack={() => goBack('fleet')}
+          onNavigateToAirport={navigateToAirport}
         />
       </ErrorBoundary>
     );
@@ -519,10 +570,10 @@ function App() {
     return wrap(
       <FleetPage
         airline={activeAirline}
-        onBack={() => setCurrentPage('dashboard')}
-        onSelectAircraft={(id) => { setSelectedAircraftId(id); setCurrentPage('aircraft-detail'); }}
-        onOpenMarketplace={() => setCurrentPage('marketplace')}
-        onNavigateToAirport={(code) => navigateToAirport(code, 'fleet')}
+        onBack={() => goBack('dashboard')}
+        onSelectAircraft={openAircraft}
+        onOpenMarketplace={() => goTo('marketplace')}
+        onNavigateToAirport={navigateToAirport}
         onNavigate={(page) => navigate(page)}
       />
     );
@@ -532,7 +583,7 @@ function App() {
       <ErrorBoundary>
         <AircraftGroups
           airline={activeAirline}
-          onBack={() => setCurrentPage('fleet')}
+          onBack={() => goBack('fleet')}
         />
       </ErrorBoundary>
     );
@@ -542,7 +593,7 @@ function App() {
       <AircraftMarketplace
         airline={activeAirline}
         onBalanceUpdate={handleBalanceUpdate}
-        onBack={() => setCurrentPage('fleet')}
+        onBack={() => goBack('fleet')}
       />
     );
   }
@@ -551,10 +602,10 @@ function App() {
       <RoutePlanner
         airline={activeAirline}
         user={user}
-        onBack={() => setCurrentPage(previousPage)}
-        backLabel={PAGE_LABELS[previousPage] || 'Dashboard'}
-        onNavigateToAirport={(code) => navigateToAirport(code, 'routes')}
-        onNavigateToAircraft={(id) => { setPreviousPage('routes'); setSelectedAircraftId(id); setCurrentPage('aircraft-detail'); }}
+        onBack={() => goBack('dashboard')}
+        backLabel={backLabel}
+        onNavigateToAirport={navigateToAirport}
+        onNavigateToAircraft={openAircraft}
         savedState={routesViewState}
       />
     );
@@ -563,50 +614,50 @@ function App() {
     return wrap(
       <FlightSchedule
         airline={activeAirline}
-        onBack={() => setCurrentPage(previousPage || 'dashboard')}
-        onNavigateToAirport={(code) => navigateToAirport(code, 'flight-schedule')}
-        onNavigateToAircraft={(id) => { setSelectedAircraftId(id); setCurrentPage('aircraft-detail'); }}
+        onBack={() => goBack('dashboard')}
+        onNavigateToAirport={navigateToAirport}
+        onNavigateToAircraft={openAircraft}
       />
     );
   }
   if (currentPage === 'finances') {
-    return wrap(<Finances airline={activeAirline} onBack={() => setCurrentPage('dashboard')} onNavigateToAirport={(code) => navigateToAirport(code, 'finances')} onNavigateToAircraft={(id) => { setPreviousPage('finances'); setSelectedAircraftId(id); setCurrentPage('aircraft-detail'); }} />);
+    return wrap(<Finances airline={activeAirline} onBack={() => goBack('dashboard')} onNavigateToAirport={navigateToAirport} onNavigateToAircraft={openAircraft} />);
   }
   if (currentPage === 'service-profiles') {
-    return wrap(<ServiceProfiles airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Dashboard'} />);
+    return wrap(<ServiceProfiles airline={activeAirline} onBack={() => goBack('dashboard')} backLabel={backLabel} />);
   }
   if (currentPage === 'cabin-profiles') {
-    return wrap(<CabinProfiles airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Dashboard'} />);
+    return wrap(<CabinProfiles airline={activeAirline} onBack={() => goBack('dashboard')} backLabel={backLabel} />);
   }
   if (currentPage === 'ops-control') {
     return wrap(
       <OperationsControlCenter
         airline={activeAirline}
         onBalanceUpdate={handleBalanceUpdate}
-        onBack={() => setCurrentPage(previousPage)}
-        backLabel={PAGE_LABELS[previousPage] || 'Dashboard'}
-        onNavigateToAirport={(code) => navigateToAirport(code, 'ops-control')}
-        onNavigateToAircraft={(id) => { setPreviousPage('ops-control'); setSelectedAircraftId(id); setCurrentPage('aircraft-detail'); }}
+        onBack={() => goBack('dashboard')}
+        backLabel={backLabel}
+        onNavigateToAirport={navigateToAirport}
+        onNavigateToAircraft={openAircraft}
       />
     );
   }
   if (currentPage === 'hubs') {
-    return wrap(<HubsDestinations airline={activeAirline} onBack={() => setCurrentPage(hubsBackPage)} backLabel={PAGE_LABELS[hubsBackPage] || 'Dashboard'} onNavigateToAirport={(code) => navigateToAirport(code, 'hubs')} onBalanceUpdate={handleBalanceUpdate} onNavigate={(page) => navigate(page)} />);
+    return wrap(<HubsDestinations airline={activeAirline} onBack={() => goBack('dashboard')} backLabel={backLabel} onNavigateToAirport={navigateToAirport} onBalanceUpdate={handleBalanceUpdate} onNavigate={(page) => navigate(page)} />);
   }
   if (currentPage === 'banks') {
-    return wrap(<Banks airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Dashboard'} onNavigateToAirport={(code) => navigateToAirport(code, 'banks')} />);
+    return wrap(<Banks airline={activeAirline} onBack={() => goBack('dashboard')} backLabel={backLabel} onNavigateToAirport={navigateToAirport} />);
   }
   if (currentPage === 'airport-overview') {
-    return wrap(<AirportOverview airline={activeAirline} onBack={() => setCurrentPage(previousPage)} backLabel={PAGE_LABELS[previousPage] || 'Dashboard'} onNavigateToAirport={(code) => navigateToAirport(code, 'airport-overview')} onBalanceUpdate={handleBalanceUpdate} savedState={airportOverviewState} />);
+    return wrap(<AirportOverview airline={activeAirline} onBack={() => goBack('dashboard')} backLabel={backLabel} onNavigateToAirport={navigateToAirport} onBalanceUpdate={handleBalanceUpdate} savedState={airportOverviewState} />);
   }
   if (currentPage === 'personnel') {
-    return wrap(<Personnel airline={activeAirline} onBack={() => setCurrentPage('dashboard')} />);
+    return wrap(<Personnel airline={activeAirline} onBack={() => goBack('dashboard')} />);
   }
   if (currentPage === 'edit-profile') {
     return wrap(
       <EditProfile
         user={user}
-        onBack={() => setCurrentPage('dashboard')}
+        onBack={() => goBack('dashboard')}
         onLogout={handleLogout}
         onAirlinesChanged={fetchAllAirlines}
       />
@@ -616,21 +667,21 @@ function App() {
     return wrap(
       <RouteMap
         airline={activeAirline}
-        onBack={() => setCurrentPage('dashboard')}
+        onBack={() => goBack('dashboard')}
       />
     );
   }
   if (currentPage === 'leaderboards') {
-    return wrap(<Leaderboards airline={activeAirline} onBack={() => setCurrentPage('dashboard')} />);
+    return wrap(<Leaderboards airline={activeAirline} onBack={() => goBack('dashboard')} />);
   }
   if (currentPage === 'admin') {
-    return wrap(<AdminPanel airline={activeAirline} onBack={() => setCurrentPage('dashboard')} onNavigate={setCurrentPage} />);
+    return wrap(<AdminPanel airline={activeAirline} onBack={() => goBack('dashboard')} onNavigate={goTo} />);
   }
   if (currentPage === 'admin-players') {
-    return wrap(<AdminPlayers airline={activeAirline} onBack={() => setCurrentPage('admin')} />);
+    return wrap(<AdminPlayers airline={activeAirline} onBack={() => goBack('admin')} />);
   }
   if (currentPage === 'admin-invites') {
-    return wrap(<AdminInvites airline={activeAirline} onBack={() => setCurrentPage('admin')} />);
+    return wrap(<AdminInvites airline={activeAirline} onBack={() => goBack('admin')} />);
   }
 
   const closeChangeModal = () => { setShowChangeModal(false); setShowCreateForm(false); };
@@ -906,9 +957,9 @@ function App() {
             <button className="hp-btn-change" onClick={() => setShowChangeModal(true)}>
               {airlines.length === 0 ? '+ Create Airline' : 'Change Airline'}
             </button>
-            <button className="hp-btn-logout-strip" onClick={() => setCurrentPage('edit-profile')}>Edit Profile</button>
+            <button className="hp-btn-logout-strip" onClick={() => goTo('edit-profile')}>Edit Profile</button>
             {user?.is_admin && (
-              <button className="hp-btn-logout-strip" onClick={() => setCurrentPage('admin')}>Admin</button>
+              <button className="hp-btn-logout-strip" onClick={() => goTo('admin')}>Admin</button>
             )}
             <button className="hp-btn-logout-strip" onClick={handleLogout}>Logout</button>
           </div>
@@ -930,7 +981,7 @@ function App() {
                   <div className="hp-sidebar-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span>Airline Information</span>
                     <button
-                      onClick={() => setCurrentPage('flight-schedule')}
+                      onClick={() => goTo('flight-schedule')}
                       style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.3)', color: 'rgba(255,255,255,0.7)', padding: '0.22rem 0.65rem', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', letterSpacing: '0.03em' }}
                     >
                       Flightplan

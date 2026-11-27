@@ -820,11 +820,13 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   // ─── Edit mode draft bars ─────────────────────────────────────────────────
 
   // Convert an absolute game week-minute into a view-shifted bar {day, minuteOfDay}.
+  const wkToViewRef = useRef(null);   // for the touch-drag label (see the touch drag effect)
   const wkToView = (wk) => {
     const dow = Math.floor(wk / 1440) % 7;
     const mod = ((wk % 1440) + 1440) % 1440;
     return shiftWeekSlot(dow, mod, viewShiftMin, 'roll');
   };
+  wkToViewRef.current = wkToView;
 
   // Draft flights, laid out exactly like flightBars but sourced from the dragged
   // week-minute drafts (turnaround band included, so a bar that visually fits a
@@ -1334,10 +1336,13 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
     window.addEventListener('pointercancel', onDragUp);
   }, [editLegs, editMaints, onDragMove, onDragUp]);
 
-  // Touch drag for edit mode, on native touch events. Pointer events plus
-  // touch-action were not reliable on every phone browser (the page scrolled
-  // or the drag never started), so touch uses non-passive listeners that block
-  // scrolling while a block is being dragged.
+  // Touch drag for edit mode, on native touch events (non-passive, so the page
+  // doesn't scroll while a block is held). While the finger moves, only the
+  // dragged block is moved, with a CSS transform: re-rendering this whole page
+  // on every touchmove lagged badly on phones. The new position is written to
+  // state once, on release. The drag locks to one axis after a short dead zone
+  // (up/down = time in 5-min steps, sideways = day), because the day columns
+  // are narrow on a phone and a slight sideways wobble used to change the day.
   const gridScrollRef = useRef(null);
   const editLegsRef = useRef(editLegs);
   const editMaintsRef = useRef(editMaints);
@@ -1346,6 +1351,25 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
   useEffect(() => {
     const el = gridScrollRef.current;
     if (!editMode || !el) return;
+    const WK = 7 * 1440;
+    let drag = null, raf = 0, label = null;
+    const showLabel = (x, y, text) => {
+      if (!label) {
+        label = document.createElement('div');
+        label.className = 'ad-drag-label';
+        document.body.appendChild(label);
+      }
+      label.textContent = text;
+      label.style.left = `${x}px`;
+      label.style.top = `${y - 56}px`;
+    };
+    const clear = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+      if (drag) drag.els.forEach(g => { g.style.transform = ''; g.style.zIndex = ''; });
+      if (label) { label.remove(); label = null; }
+      drag = null;
+    };
     const onStart = (e) => {
       if (e.touches.length !== 1) return;
       const ghost = e.target.closest?.('[data-edit-kind]');
@@ -1354,30 +1378,63 @@ function AircraftDetail({ aircraftId, airline, onBack, onNavigateToAirport }) {
       const target = ghost.getAttribute('data-edit-kind');
       const idx = parseInt(ghost.getAttribute('data-edit-idx'), 10);
       const t = e.touches[0];
-      const colWidth = ghost.parentElement?.getBoundingClientRect().width || 0;
-      const startVal = target === 'maint'
-        ? (editMaintsRef.current[idx]?.wkStart ?? 0)
-        : (editLegsRef.current[idx]?.wkDep ?? 0);
-      dragRef.current = { kind: 'edit', target, idx, touch: true, startY: t.clientY, startX: t.clientX, colWidth, startVal };
+      drag = {
+        target, idx,
+        els: [...el.querySelectorAll(`[data-edit-kind="${target}"][data-edit-idx="${idx}"]`)],
+        startX: t.clientX, startY: t.clientY,
+        colWidth: ghost.parentElement?.getBoundingClientRect().width || 0,
+        startVal: target === 'maint' ? (editMaintsRef.current[idx]?.wkStart ?? 0) : (editLegsRef.current[idx]?.wkDep ?? 0),
+        axis: null, dayDelta: 0, minDelta: 0,
+      };
+      drag.els.forEach(g => { g.style.zIndex = '8'; });
     };
     const onMove = (e) => {
-      if (!dragRef.current) return;
+      if (!drag) return;
       e.preventDefault();
       const t = e.touches[0];
-      if (t) onDragMove({ clientX: t.clientX, clientY: t.clientY, shiftKey: false });
+      if (!t) return;
+      const dx = t.clientX - drag.startX, dy = t.clientY - drag.startY;
+      if (!drag.axis) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) < 10) return;   // dead zone
+        drag.axis = Math.abs(dy) >= Math.abs(dx) ? 'y' : 'x';
+      }
+      if (drag.axis === 'y') { drag.minDelta = Math.round(dy / PX_PER_MIN / 5) * 5; drag.dayDelta = 0; }
+      else { drag.dayDelta = drag.colWidth ? Math.round(dx / drag.colWidth) : 0; drag.minDelta = 0; }
+      const x = t.clientX, y = t.clientY;
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        if (!drag) return;
+        const tx = drag.dayDelta * drag.colWidth, ty = drag.minDelta * PX_PER_MIN;
+        drag.els.forEach(g => { g.style.transform = `translate(${tx}px, ${ty}px)`; });
+        const val = ((Math.round((drag.startVal + drag.dayDelta * 1440 + drag.minDelta) / 5) * 5 % WK) + WK) % WK;
+        const v = wkToViewRef.current ? wkToViewRef.current(val) : { day: Math.floor(val / 1440), minuteOfDay: val % 1440 };
+        showLabel(x, y, `${DAY_SHORT[v.day]} ${minutesToHHMM(v.minuteOfDay)}`);
+      });
     };
-    const onEnd = () => { dragRef.current = null; };
+    const onEnd = () => {
+      if (!drag) return;
+      const { target, idx, startVal, dayDelta, minDelta } = drag;
+      clear();
+      if (!dayDelta && !minDelta) return;
+      let val = startVal + dayDelta * 1440 + minDelta;
+      val = Math.round(val / 5) * 5;
+      val = ((val % WK) + WK) % WK;
+      if (target === 'maint') setEditMaints(prev => prev.map((m, i) => i === idx ? { ...m, wkStart: val } : m));
+      else                    setEditLegs(prev => prev.map((l, i) => i === idx ? { ...l, wkDep: val } : l));
+    };
     el.addEventListener('touchstart', onStart, { passive: false });
     el.addEventListener('touchmove', onMove, { passive: false });
     el.addEventListener('touchend', onEnd);
-    el.addEventListener('touchcancel', onEnd);
+    el.addEventListener('touchcancel', clear);
     return () => {
+      clear();
       el.removeEventListener('touchstart', onStart);
       el.removeEventListener('touchmove', onMove);
       el.removeEventListener('touchend', onEnd);
-      el.removeEventListener('touchcancel', onEnd);
+      el.removeEventListener('touchcancel', clear);
     };
-  }, [editMode, onDragMove]);
+  }, [editMode]);
 
   const handleMaintenanceSubmit = async () => {
     setSubmitting(true); setError(''); setSuccess('');
@@ -4581,6 +4638,7 @@ const styles = `
   .ad-grid-ghost--conflict { outline: 2px solid #FF4444; outline-offset: -2px; opacity: 0.72; }
   /* Edit mode confirm overlay — floats over the grid, dark toolbar language */
   .ad-bank-overlay { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 12px; background: #2C2C2C; padding: 8px 10px; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.28); max-width: calc(100% - 16px); box-sizing: border-box; }
+  .ad-drag-label { position: fixed; transform: translateX(-50%); z-index: 1000; pointer-events: none; background: #2C2C2C; color: white; font-size: 0.8rem; font-weight: 700; padding: 4px 9px; border-radius: 6px; box-shadow: 0 3px 10px rgba(0,0,0,0.25); white-space: nowrap; }
   .ad-bar-grip { color: rgba(255,255,255,0.55); font-size: 1.1rem; line-height: 1; padding: 4px 2px; cursor: grab; touch-action: none; user-select: none; }
   .ad-bar-grip:active { cursor: grabbing; color: white; }
   .ad-bank-overlay-label { color: white; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
